@@ -1,0 +1,340 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Page
+    x:Class="DevDriveManager.Views.CreateDevDrivePage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ctl="using:DevDriveManager.Controls"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:local="using:DevDriveManager.Views"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel
+            MaxWidth="1040"
+            Padding="36,20,36,36"
+            HorizontalAlignment="Stretch"
+            Spacing="16">
+
+            <!--  Header with back navigation  -->
+            <StackPanel Orientation="Horizontal" Spacing="12">
+                <Button
+                    AutomationProperties.AutomationId="BackButton"
+                    AutomationProperties.Name="Back"
+                    Click="OnBackClick"
+                    ToolTipService.ToolTip="Back">
+                    <FontIcon FontSize="16" Glyph="&#xE72B;" />
+                </Button>
+                <TextBlock
+                    VerticalAlignment="Center"
+                    Style="{StaticResource TitleTextBlockStyle}"
+                    Text="Create a Dev Drive" />
+            </StackPanel>
+
+            <!--  ===== FORM (hidden once the operation completes) =====  -->
+            <StackPanel
+                x:Name="FormPanel"
+                Spacing="14"
+                Visibility="{x:Bind local:CreateDevDrivePage.InvertBoolToVisibility(ViewModel.IsComplete), Mode=OneWay}">
+
+                <InfoBar
+                    AutomationProperties.AutomationId="GuardrailsInfoBar"
+                    IsClosable="False"
+                    IsOpen="True"
+                    Message="Nothing changes until you confirm. Creating a VHDX is real; resizing a volume is preview-only."
+                    Severity="Informational"
+                    Title="Guarded preview" />
+
+                <InfoBar
+                    AutomationProperties.AutomationId="ErrorInfoBar"
+                    IsClosable="True"
+                    IsOpen="{x:Bind ViewModel.HasError, Mode=OneWay}"
+                    Message="{x:Bind ViewModel.ErrorMessage, Mode=OneWay}"
+                    Severity="Error"
+                    Title="Something went wrong" />
+
+                <!--  No eligible source warning  -->
+                <InfoBar
+                    AutomationProperties.AutomationId="NoSourceInfoBar"
+                    IsClosable="False"
+                    IsOpen="{x:Bind local:CreateDevDrivePage.Not(ViewModel.HasEligibleSource), Mode=OneWay}"
+                    Message="{x:Bind ViewModel.NoSourceMessage, Mode=OneWay}"
+                    Severity="Warning"
+                    Title="Not enough space here" />
+
+                <!--  ===== Configure: source · size · details in one card =====  -->
+                <Border
+                    Padding="20"
+                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="{StaticResource ControlCornerRadius}">
+                    <StackPanel Spacing="20">
+
+                        <!--  Source  -->
+                        <StackPanel Spacing="8">
+                            <ComboBox
+                                AutomationProperties.AutomationId="SourceComboBox"
+                                AutomationProperties.Name="Dev Drive source"
+                                Header="Source"
+                                HorizontalAlignment="Stretch"
+                                SelectedIndex="{x:Bind ViewModel.SourceIndex, Mode=TwoWay}">
+                                <ComboBoxItem AutomationProperties.AutomationId="VhdxSourceItem" Content="Create a new VHDX  (recommended)" />
+                                <ComboBoxItem AutomationProperties.AutomationId="ResizeSourceItem" Content="Resize an existing volume" />
+                            </ComboBox>
+
+                            <TextBlock
+                                MaxWidth="900"
+                                HorizontalAlignment="Left"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Style="{StaticResource CaptionTextBlockStyle}"
+                                Text="A virtual disk file on a volume you already have — it doesn't repartition anything, is easy to remove later, and grows on demand."
+                                TextWrapping="Wrap"
+                                Visibility="{x:Bind local:CreateDevDrivePage.BoolToVisibility(ViewModel.IsVhdx), Mode=OneWay}" />
+                            <TextBlock
+                                MaxWidth="900"
+                                HorizontalAlignment="Left"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Style="{StaticResource CaptionTextBlockStyle}"
+                                Text="Carves a brand-new ReFS volume from a volume's free space — your existing data stays put. Volumes can't be converted in place, so resizing always creates a separate drive."
+                                TextWrapping="Wrap"
+                                Visibility="{x:Bind local:CreateDevDrivePage.BoolToVisibility(ViewModel.IsResize), Mode=OneWay}" />
+
+                            <!--  Resize-only: pick the volume to shrink  -->
+                            <ComboBox
+                                AutomationProperties.AutomationId="ResizeSourceComboBox"
+                                AutomationProperties.Name="Volume to shrink"
+                                Header="Shrink from"
+                                HorizontalAlignment="Stretch"
+                                ItemsSource="{x:Bind ViewModel.AvailableSourceVolumes, Mode=OneWay}"
+                                SelectedIndex="{x:Bind ViewModel.SelectedSourceVolumeIndex, Mode=TwoWay}"
+                                Visibility="{x:Bind local:CreateDevDrivePage.BoolToVisibility(ViewModel.IsResize), Mode=OneWay}" />
+
+                            <!--  VHDX-only: file location + disk type  -->
+                            <StackPanel Spacing="12" Visibility="{x:Bind local:CreateDevDrivePage.BoolToVisibility(ViewModel.IsVhdx), Mode=OneWay}">
+                                <Grid ColumnSpacing="12" VerticalAlignment="Bottom">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox
+                                        Grid.Column="0"
+                                        AutomationProperties.AutomationId="VhdPathTextBox"
+                                        Header="Virtual disk file"
+                                        PlaceholderText="C:\DevDrives\DevDrive.vhdx"
+                                        Text="{x:Bind ViewModel.VhdFilePath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                    <Button
+                                        Grid.Column="1"
+                                        VerticalAlignment="Bottom"
+                                        AutomationProperties.AutomationId="BrowseVhdButton"
+                                        Command="{x:Bind ViewModel.BrowseVhdPathCommand}"
+                                        Content="Browse&#8230;" />
+                                </Grid>
+                                <ComboBox
+                                    AutomationProperties.AutomationId="VhdTypeComboBox"
+                                    Header="Virtual disk type"
+                                    SelectedIndex="{x:Bind ViewModel.VhdTypeIndex, Mode=TwoWay}">
+                                    <ComboBoxItem Content="Dynamically expanding (uses space as needed)" />
+                                    <ComboBoxItem Content="Fixed size (allocates the full size up front)" />
+                                </ComboBox>
+                            </StackPanel>
+                        </StackPanel>
+
+                        <!--  Size (slider + number + unit — three views of one value)  -->
+                        <StackPanel Spacing="8">
+                            <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Size" />
+                            <Grid ColumnSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <Slider
+                                    Grid.Column="0"
+                                    VerticalAlignment="Center"
+                                    AutomationProperties.AutomationId="SizeSlider"
+                                    AutomationProperties.Name="Dev Drive size in gigabytes"
+                                    Maximum="{x:Bind ViewModel.SliderMaximumGb, Mode=OneWay}"
+                                    Minimum="50"
+                                    StepFrequency="1"
+                                    Value="{x:Bind ViewModel.SliderValueGb, Mode=TwoWay}" />
+                                <NumberBox
+                                    Grid.Column="1"
+                                    Width="148"
+                                    VerticalAlignment="Center"
+                                    AutomationProperties.AutomationId="SizeNumberBox"
+                                    AutomationProperties.Name="Dev Drive size"
+                                    LargeChange="10"
+                                    SmallChange="1"
+                                    SpinButtonPlacementMode="Compact"
+                                    Value="{x:Bind ViewModel.SizeNumberValue, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                <ComboBox
+                                    Grid.Column="2"
+                                    Width="84"
+                                    VerticalAlignment="Center"
+                                    AutomationProperties.AutomationId="SizeUnitComboBox"
+                                    AutomationProperties.Name="Size unit"
+                                    SelectedIndex="{x:Bind ViewModel.SizeUnitIndex, Mode=TwoWay}">
+                                    <ComboBoxItem Content="GB" />
+                                    <ComboBoxItem Content="MB" />
+                                </ComboBox>
+                            </Grid>
+                            <TextBlock
+                                AutomationProperties.AutomationId="SizeErrorText"
+                                Foreground="{ThemeResource SystemFillColorCriticalBrush}"
+                                Style="{StaticResource CaptionTextBlockStyle}"
+                                Text="{x:Bind ViewModel.SizeErrorText, Mode=OneWay}"
+                                Visibility="{x:Bind local:CreateDevDrivePage.BoolToVisibility(ViewModel.HasSizeError), Mode=OneWay}" />
+                        </StackPanel>
+
+                        <!--  Live visual + summary, directly under the size control  -->
+                        <StackPanel Spacing="12">
+                            <ctl:DevDriveDiskBar
+                                AutomationProperties.AutomationId="DevDriveDiskBar"
+                                DevDriveLabel="{x:Bind ViewModel.DevBarLabel, Mode=OneWay}"
+                                MaximumSelectableBytes="{x:Bind ViewModel.MaximumSelectableBytes, Mode=OneWay}"
+                                RemainingLabel="{x:Bind ViewModel.RemainingBarLabel, Mode=OneWay}"
+                                SelectedBytes="{x:Bind ViewModel.SelectedBytes, Mode=TwoWay}"
+                                TotalBytes="{x:Bind ViewModel.TotalBytes, Mode=OneWay}"
+                                UsedBytes="{x:Bind ViewModel.UsedBytes, Mode=OneWay}"
+                                UsedLabel="{x:Bind ViewModel.UsedBarLabel, Mode=OneWay}" />
+                            <StackPanel Spacing="2">
+                                <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="{x:Bind ViewModel.SummaryTitle, Mode=OneWay}" />
+                                <TextBlock
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    Style="{StaticResource BodyTextBlockStyle}"
+                                    Text="{x:Bind ViewModel.SummaryDetail, Mode=OneWay}"
+                                    TextWrapping="Wrap" />
+                            </StackPanel>
+                        </StackPanel>
+
+                        <!--  Drive details: letter, name, file system  -->
+                        <StackPanel Spacing="8">
+                            <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Drive details" />
+                            <Grid ColumnSpacing="16">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <ComboBox
+                                    Grid.Column="0"
+                                    Width="120"
+                                    AutomationProperties.AutomationId="DriveLetterComboBox"
+                                    Header="Drive letter"
+                                    ItemsSource="{x:Bind ViewModel.AvailableDriveLetters, Mode=OneWay}"
+                                    SelectedItem="{x:Bind ViewModel.SelectedDriveLetter, Mode=TwoWay}" />
+                                <TextBox
+                                    Grid.Column="1"
+                                    AutomationProperties.AutomationId="LabelTextBox"
+                                    Header="Name"
+                                    PlaceholderText="DevDrive"
+                                    Text="{x:Bind ViewModel.Label, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                <TextBox
+                                    Grid.Column="2"
+                                    Width="180"
+                                    AutomationProperties.AutomationId="FileSystemReadOnly"
+                                    Header="File system"
+                                    IsReadOnly="True"
+                                    Text="ReFS (required)"
+                                    ToolTipService.ToolTip="A Dev Drive is always ReFS — the format that enables Dev Drive performance and trust." />
+                            </Grid>
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
+                <StackPanel
+                    Margin="0,4,0,0"
+                    HorizontalAlignment="Right"
+                    Orientation="Horizontal"
+                    Spacing="12">
+                    <Button
+                        AutomationProperties.AutomationId="CancelButton"
+                        Command="{x:Bind ViewModel.CancelCommand}"
+                        Content="Cancel" />
+                    <Button
+                        AutomationProperties.AutomationId="CreateButton"
+                        Command="{x:Bind ViewModel.CreateCommand}"
+                        Content="{x:Bind ViewModel.PrimaryActionText, Mode=OneWay}"
+                        IsEnabled="{x:Bind ViewModel.CanCreate, Mode=OneWay}"
+                        Style="{StaticResource AccentButtonStyle}" />
+                </StackPanel>
+            </StackPanel>
+
+            <!--  ===== Post-create onboarding (shown once complete) =====  -->
+            <Border
+                Padding="24"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="{StaticResource ControlCornerRadius}"
+                Visibility="{x:Bind local:CreateDevDrivePage.BoolToVisibility(ViewModel.IsComplete), Mode=OneWay}">
+                <StackPanel Spacing="16">
+                    <StackPanel Spacing="6">
+                        <TextBlock Style="{StaticResource SubtitleTextBlockStyle}" Text="{x:Bind ViewModel.CompletionTitle, Mode=OneWay}" />
+                        <TextBlock
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Style="{StaticResource BodyTextBlockStyle}"
+                            Text="{x:Bind ViewModel.CompletionMessage, Mode=OneWay}"
+                            TextWrapping="Wrap" />
+                    </StackPanel>
+
+                    <!--  Gated destructive action: collapsed by default (CanApplyRealResize is false unless the
+                          default-off ResizeFeatureGate flag is on AND a real preview passed).  -->
+                    <Button
+                        HorizontalAlignment="Stretch"
+                        HorizontalContentAlignment="Left"
+                        AutomationProperties.AutomationId="ApplyRealResizeButton"
+                        Command="{x:Bind ViewModel.ApplyRealResizeCommand}"
+                        Visibility="{x:Bind local:CreateDevDrivePage.BoolToVisibility(ViewModel.CanApplyRealResize), Mode=OneWay}">
+                        <StackPanel Spacing="2">
+                            <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Apply resize (repartition this drive)" />
+                            <TextBlock
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Style="{StaticResource CaptionTextBlockStyle}"
+                                Text="Really shrinks the system drive and creates the Dev Drive. Not trivially reversible."
+                                TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Button>
+
+                    <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Next steps" />
+                    <StackPanel Spacing="8">
+                        <Button
+                            HorizontalAlignment="Stretch"
+                            HorizontalContentAlignment="Left"
+                            AutomationProperties.AutomationId="MovePackageCachesButton"
+                            Command="{x:Bind ViewModel.BackToManagementCommand}">
+                            <StackPanel Spacing="2">
+                                <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Move package caches" />
+                                <TextBlock
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    Style="{StaticResource CaptionTextBlockStyle}"
+                                    Text="Point npm, NuGet, pip and friends at the new drive." />
+                            </StackPanel>
+                        </Button>
+                        <Button
+                            HorizontalAlignment="Stretch"
+                            HorizontalContentAlignment="Left"
+                            AutomationProperties.AutomationId="RunSpeedTestButton"
+                            Command="{x:Bind ViewModel.BackToManagementCommand}">
+                            <StackPanel Spacing="2">
+                                <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Run a speed test" />
+                                <TextBlock
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    Style="{StaticResource CaptionTextBlockStyle}"
+                                    Text="Measure read/write throughput on the new drive." />
+                            </StackPanel>
+                        </Button>
+                    </StackPanel>
+
+                    <Button
+                        HorizontalAlignment="Right"
+                        AutomationProperties.AutomationId="GoToManagementButton"
+                        Command="{x:Bind ViewModel.BackToManagementCommand}"
+                        Content="Go to Dev Drive management"
+                        Style="{StaticResource AccentButtonStyle}" />
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</Page>

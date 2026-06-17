@@ -1,0 +1,135 @@
+# Dev Drive Manager
+
+A Windows desktop app (WinUI 3 / Windows App SDK) that helps developers discover, benchmark, and
+plan a move to a [Dev Drive](https://learn.microsoft.com/windows/dev-drive/) — a ReFS volume tuned
+for developer workloads (package caches, source trees, build output).
+
+> **Safety-first design.** Every operation that *would* change the machine follows the same shape:
+> a read-only **preview** of exactly what will happen → an **explicit confirm** → a **per-user** change
+> (no elevation) → a recorded **reversibility** entry so it can be undone. Detection and benchmarks are
+> read-only. Package-cache moves and VHDX creation are wired and run only after you confirm; the
+> experimental **resize C:** execute path is **off by default** (gated) — see
+> [Capability state](#capability-state).
+
+---
+
+## Documentation
+
+In-depth docs live in [`docs/`](docs/README.md):
+
+| Doc | What it covers |
+|---|---|
+| [docs/README.md](docs/README.md) | Index, architecture, and the safety model. |
+| [docs/Configuration.md](docs/Configuration.md) | Every setting/option and **why** (Defender performance mode, benchmark tunables, the safe-mutation seam, reversible-state storage, the cache catalogue). |
+| [docs/CreatingADevDrive.md](docs/CreatingADevDrive.md) | Creating a Dev Drive — VHDX vs. resize, every option, and what is **real vs. simulated**. |
+| [docs/PackageCacheMoves.md](docs/PackageCacheMoves.md) | Moving package caches and the **documented fallbacks** for every failure path (rollback, idempotency, Move back). |
+| [docs/SpeedTest.md](docs/SpeedTest.md) | The performance tests — what each test measures, why, and how missing tools are flagged. |
+
+---
+
+## Solution layout
+
+| Project | Kind | TFM | Notes |
+|---|---|---|---|
+| `DevDriveManager` | WinUI 3 app (MVVM) | `net10.0-windows10.0.26100.0` | The UI. Composes services via their `CreateDefault()` factories. |
+| `DevDriveCore` | Class library | `net10.0-windows10.0.26100.0` | All logic. **No WinUI types.** Interface-driven so it is fully unit-testable. |
+| `DevDriveCore.Tests` | MSTest unit tests | `net10.0-windows10.0.26100.0` | Mocks/fakes + temp-dir sandboxes. Never mutates the real machine. |
+| `DevDriveManager.UITests` | PowerShell UI test script | — | `ui-tests.ps1` (script-driven, no csproj). |
+
+`DevDriveCore` follows a consistent pattern: each service takes its dependencies as **interfaces**
+(constructor-injected, null-checked) and exposes a static **`CreateDefault()`** factory that wires
+the real platform implementations. Pure decision logic is exposed as `public static` methods so it
+can be unit-tested directly.
+
+---
+
+## Capability state
+
+The codebase has two tiers of capability: **read-only** work, and **guarded, reversible mutations**
+(preview → explicit confirm → per-user/no elevation → recorded for undo). Knowing which tier a feature
+is in tells you exactly how much it touches the machine.
+
+### ✅ REAL — wired into the app and shipping
+
+These run when you use the app. They are read-only or touch only throwaway scratch files.
+
+- **Volume & Dev Drive detection** — `DevDriveService` reads volumes and decodes the Dev Drive /
+  trusted flags. Read-only.
+- **Real-world build benchmarks** — `WorkloadBenchmarkService` times genuine developer workloads
+  (`git clone`, `npm ci`, `dotnet build`, `cargo build`) on C: vs the Dev Drive against real,
+  Microsoft-owned fixtures (e.g. `npm ci` of **microsoft/vscode-eslint**'s committed lockfile). Each run
+  is a cold first build with the package cache, source, and output all on the drive under test —
+  bounded, offline, and self-cleaning. Only those four tools have a workload, so only they ever show a
+  measured number; every other ecosystem is honestly marked "no benchmark yet" — never a fabricated one.
+- **Per-ecosystem package caches** — `PackageCacheService` + the per-ecosystem cards detect known tool
+  caches (14 tools across Node, .NET, Rust, Python, Java, Go, C++, Dart) and show where each lives, then
+  offer a reversible **move** onto the Dev Drive — or **Map path** / **Move &amp; remap** for a tool
+  whose cache wasn't auto-detected. Read-only until you confirm.
+
+### 🔁 GUARDED, REVERSIBLE mutations — wired into the app
+
+Each mutation runs **only after you confirm a preview**; each writes **per-user** (no elevation),
+records a reversibility entry, and offers an undo. Under the UI-test seam `DDM_UITEST_SAFE_MUTATIONS=1`
+the ViewModel drives the *same* Core coordinator over **safe fakes**, so the automated suite exercises
+the full **Move → progress → Move-back** (and create) flow WITHOUT touching a real cache, environment
+variable, or disk. Every engine is interface-driven with a `CreateDefault()` factory, and all
+file/environment/VHD access goes through abstractions so unit tests run against in-memory fakes or
+throwaway temp directories.
+
+| Engine | Interface | What it does | Reversible? |
+|---|---|---|---|
+| `PackageCacheMover` | `IPackageCacheMover` | Creates the target dir, copies + SHA-256-verifies the cache (with progress), repoints the per-user env var (`IEnvironmentWriter`), records reversibility. | ✅ restore env (+ optional move-back) |
+| `VhdProvisioner` | `IVhdProvisioner` | Orchestrates `virtdisk.dll` (`INativeVhdApi`: `CreateVirtualDisk` → `AttachVirtualDisk`) to create + surface a `.vhdx` and report its disk number. | ✅ detach + delete |
+
+Wiring: `PackageCachesViewModel` → `MutationComposition.CreatePackageCacheMoveCoordinator()`;
+`CreateDevDriveViewModel` → `MutationComposition.CreateDevDriveCreationService()`. Supporting
+abstractions: `IFileSystem`, `IEnvironmentWriter`, `IReversibilityStore`, `IPathProbe`, `INativeVhdApi`.
+Reversibility persists via `JsonFileReversibilityStore` (or in-process `InMemoryReversibilityStore`).
+Read-only tool detection (`InstalledToolDetector` / `IInstalledToolDetector`) probes `--version` and
+PATH (`IProcessRunner` / `IPathProbe`).
+
+---
+
+## Build / run / test
+
+Prerequisites: .NET SDK 10, Windows App SDK workload, Developer Mode on. (WinUI apps must target
+**x64** or **ARM64** — never AnyCPU.)
+
+```powershell
+# Build the whole solution (Debug)
+dotnet build DevDriveManager.slnx -c Debug
+
+# Run the app (packaged WinUI app — never launch the raw .exe).
+# In Visual Studio: open DevDriveManager.slnx and press F5.
+# Or with the Windows App SDK CLI (winget install Microsoft.WinAppCLI):
+winapp run DevDriveManager\bin\x64\Debug\net10.0-windows10.0.26100.0\win-x64\AppX
+
+# Run the unit tests (fast; AnyCPU is fine for the library + tests)
+dotnet test DevDriveCore.Tests\DevDriveCore.Tests.csproj -c Debug
+```
+
+The unit-test suite includes `[TestCategory("Integration")]` tests that exercise the real
+`SystemFileSystem` / `DiskBenchmark` against unique temp directories (always cleaned up). They never
+touch user data. To skip them:
+
+```powershell
+dotnet test DevDriveCore.Tests\DevDriveCore.Tests.csproj --filter "TestCategory!=Integration"
+```
+
+---
+
+## Guarantees
+
+- The solution builds clean (Debug): **0 warnings, 0 errors**, with a full unit + WinApp UI test suite.
+- **Every machine-changing action is preview → explicit confirm → per-user (no admin) → reversible.**
+  Detection and benchmarks are read-only / scratch-only.
+- The experimental **resize C:** execute path is **gated off by default** (`ResizeFeatureGate`), behind an
+  explicit confirm + UAC + in-helper safety guards; the default UI never reaches it.
+- **Tests never touch your data:** every test runs against in-memory fakes or unique throwaway temp
+  directories (all VHD tests mock `INativeVhdApi`); the UI suite uses a safe-mutation seam.
+
+---
+
+## License
+
+[MIT](LICENSE) © 2026 Clint Rutkas.

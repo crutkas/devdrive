@@ -1,0 +1,977 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Page
+    x:Class="DevDriveManager.MainPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:CommunityToolkit.WinUI.Controls"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:local="using:DevDriveManager"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:vm="using:DevDriveManager.ViewModels"
+    mc:Ignorable="d">
+
+    <Page.Resources>
+        <ResourceDictionary>
+            <!--  Shared inline-confirm panel: a subtle accent-tinted card that reveals in place when a
+                  gated, explicit action is invoked (replacing the old preview dialog). Hosts supply a body
+                  caption + Cancel + accent Confirm; confirming runs the REAL, reversible change.  -->
+            <Style x:Key="InlineConfirmPanelStyle" TargetType="Border">
+                <Setter Property="Background" Value="{ThemeResource SystemFillColorAttentionBackgroundBrush}" />
+                <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="CornerRadius" Value="{StaticResource ControlCornerRadius}" />
+                <Setter Property="Padding" Value="12,8" />
+            </Style>
+        </ResourceDictionary>
+    </Page.Resources>
+
+    <ScrollViewer AutomationProperties.AutomationId="PageScrollViewer" VerticalScrollBarVisibility="Auto">
+        <StackPanel
+            MaxWidth="1000"
+            Padding="36,20,36,36"
+            HorizontalAlignment="Stretch"
+            Spacing="20">
+
+            <!--  Page header: title + primary actions  -->
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0" Spacing="2">
+                    <TextBlock Style="{StaticResource TitleTextBlockStyle}" Text="Dev Drive" />
+                    <TextBlock
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Text="System  ›  For developers" />
+                </StackPanel>
+                <StackPanel
+                    Grid.Column="1"
+                    Orientation="Horizontal"
+                    VerticalAlignment="Bottom"
+                    Spacing="8">
+                    <Button
+                        AutomationProperties.AutomationId="RefreshButton"
+                        AutomationProperties.Name="Refresh"
+                        Command="{x:Bind ViewModel.LoadCommand}"
+                        ToolTipService.ToolTip="Refresh">
+                        <FontIcon FontSize="16" Glyph="&#xE72C;" />
+                    </Button>
+                    <Button
+                        AutomationProperties.AutomationId="CreateDevDriveButton"
+                        Command="{x:Bind ViewModel.CreateDevDriveCommand}"
+                        Content="Create Dev Drive"
+                        Style="{StaticResource AccentButtonStyle}" />
+                </StackPanel>
+            </Grid>
+
+            <!--  CHANGE 1: status banner reserved for the no-Dev-Drive-yet and error states only. In the
+                  active state the Drive health card already conveys active/healthy, so the (previously
+                  green) banner is redundant and is collapsed here. ReFS / size / trust / perf-mode /
+                  filters live once, in the Drive health card below — never restated here.  -->
+            <InfoBar
+                AutomationProperties.AutomationId="StatusBanner"
+                IsClosable="False"
+                IsOpen="True"
+                Message="{x:Bind ViewModel.StatusMessage, Mode=OneWay}"
+                Severity="{x:Bind ViewModel.StatusSeverity, Mode=OneWay}"
+                Title="{x:Bind ViewModel.StatusTitle, Mode=OneWay}"
+                Visibility="{x:Bind local:MainPage.InvertBoolToVisibility(ViewModel.HasDevDrive), Mode=OneWay}" />
+
+            <!--  UI-test seam indicator: present in the UIA tree ONLY when DDM_UITEST_SAFE_MUTATIONS=1, so the
+                  automated suite can CONFIRM safe-mutation mode before invoking any real Confirm. Collapsed
+                  (and absent from the UIA tree) in production.  -->
+            <TextBlock
+                AutomationProperties.AutomationId="SafeMutationModeIndicator"
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                Style="{StaticResource CaptionTextBlockStyle}"
+                Text="Safe-mutation test mode"
+                Visibility="{x:Bind local:MainPage.BoolToVisibility(ViewModel.IsSafeMutationMode), Mode=OneWay}" />
+
+            <!--  Sections that only apply when a Dev Drive is present (mock order).  -->
+            <StackPanel Spacing="20" Visibility="{x:Bind local:MainPage.BoolToVisibility(ViewModel.HasDevDrive), Mode=OneWay}">
+
+                <!--  ── Drive health ────────────────────────────────────────────  -->
+                <StackPanel Spacing="8">
+                    <TextBlock
+                        Margin="0,4,0,0"
+                        Style="{StaticResource BodyStrongTextBlockStyle}"
+                        Text="Drive health" />
+
+                    <Border
+                        x:Name="DriveHealthCard"
+                        AutomationProperties.AutomationId="DriveHealthCard"
+                        Padding="16"
+                        Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        CornerRadius="{StaticResource ControlCornerRadius}">
+                        <StackPanel Spacing="12">
+                            <!--  Identity row: icon + drive + "ReFS · Trusted" + Healthy pill  -->
+                            <Grid ColumnSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <FontIcon
+                                    Grid.Column="0"
+                                    VerticalAlignment="Center"
+                                    Foreground="{ThemeResource SystemFillColorSuccessBrush}"
+                                    Glyph="&#xE930;" />
+                                <StackPanel Grid.Column="1" Spacing="2">
+                                    <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="{x:Bind ViewModel.DriveHealth.HeaderText, Mode=OneWay}" />
+                                    <TextBlock
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                        Style="{StaticResource CaptionTextBlockStyle}"
+                                        Text="{x:Bind ViewModel.DriveHealth.DescriptionText, Mode=OneWay}" />
+                                    <!--  Honest, specific perf-mode line — derived from the trust/policy
+                                          detail (managed / async / sync), or "Unknown" when unelevated.
+                                          Attached AV filters are NOT used as a scan-mode signal.  -->
+                                    <TextBlock
+                                        AutomationProperties.AutomationId="DriveHealthPerformanceMode"
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                        Style="{StaticResource CaptionTextBlockStyle}"
+                                        Text="{x:Bind ViewModel.DriveHealth.PerformanceModeLineText, Mode=OneWay}"
+                                        TextWrapping="Wrap" />
+                                </StackPanel>
+                                <Border
+                                    Grid.Column="2"
+                                    Padding="10,2,10,3"
+                                    VerticalAlignment="Center"
+                                    Background="{ThemeResource SystemFillColorSuccessBackgroundBrush}"
+                                    BorderBrush="{ThemeResource SystemFillColorSuccessBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="10">
+                                    <TextBlock
+                                        Foreground="{ThemeResource SystemFillColorSuccessBrush}"
+                                        Style="{StaticResource CaptionTextBlockStyle}"
+                                        Text="{x:Bind ViewModel.DriveHealth.HealthPillText, Mode=OneWay}" />
+                                </Border>
+                            </Grid>
+                            <!--  Usage bar — now inside the card  -->
+                            <StackPanel Spacing="6">
+                                <ProgressBar
+                                    AutomationProperties.AutomationId="DriveCapacityBar"
+                                    AutomationProperties.Name="Dev Drive capacity used"
+                                    Maximum="100"
+                                    Value="{x:Bind ViewModel.DriveHealth.CapacityPercent, Mode=OneWay}" />
+                                <TextBlock
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    Style="{StaticResource CaptionTextBlockStyle}"
+                                    Text="{x:Bind ViewModel.DriveHealth.CapacityCaption, Mode=OneWay}" />
+                            </StackPanel>
+                            <!--  Card footer (per-drive actions). "See filter drivers" needs a one-time UAC
+                                  read; on success the Trust & filters section below appears and expands to
+                                  show the drivers. "Manage in Storage" opens Settings ▸ Storage.  -->
+                            <StackPanel Spacing="6">
+                                <StackPanel
+                                    HorizontalAlignment="Right"
+                                    VerticalAlignment="Center"
+                                    Orientation="Horizontal"
+                                    Spacing="8">
+                                    <ProgressRing
+                                        Width="16"
+                                        Height="16"
+                                        VerticalAlignment="Center"
+                                        IsActive="{x:Bind ViewModel.Trust.IsInspecting, Mode=OneWay}"
+                                        Visibility="{x:Bind local:MainPage.BoolToVisibility(ViewModel.Trust.IsInspecting), Mode=OneWay}" />
+                                    <Button
+                                        AutomationProperties.AutomationId="SeeFiltersButton"
+                                        AutomationProperties.Name="See filter drivers (needs admin)"
+                                        Command="{x:Bind ViewModel.Trust.SeeFiltersCommand}"
+                                        IsEnabled="{x:Bind local:MainPage.IsNotBusy(ViewModel.Trust.IsInspecting), Mode=OneWay}"
+                                        ToolTipService.ToolTip="Runs fsutil devdrv query behind a one-time UAC prompt and shows the filter drivers in Trust &amp; filters below — no app restart."
+                                        Visibility="{x:Bind local:MainPage.BoolToVisibility(ViewModel.Trust.ShowSeeFilters), Mode=OneWay}">
+                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                            <FontIcon FontSize="16" Glyph="&#xE72E;" />
+                                            <TextBlock Text="See filter drivers" />
+                                            <TextBlock
+                                                VerticalAlignment="Center"
+                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                Text="(needs admin)" />
+                                        </StackPanel>
+                                    </Button>
+                                    <Button
+                                        AutomationProperties.AutomationId="ManageInStorageButton"
+                                        Command="{x:Bind ViewModel.ManageInStorageCommand}">
+                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                            <FontIcon FontSize="16" Glyph="&#xE8B7;" />
+                                            <TextBlock Text="Manage in Storage" />
+                                        </StackPanel>
+                                    </Button>
+                                </StackPanel>
+                                <!--  Brief note when the elevated read was declined / unavailable / failed.  -->
+                                <StackPanel
+                                    HorizontalAlignment="Right"
+                                    Orientation="Horizontal"
+                                    Spacing="6"
+                                    Visibility="{x:Bind local:MainPage.BoolToVisibility(ViewModel.Trust.CouldNotReadFilters), Mode=OneWay}">
+                                    <FontIcon
+                                        Margin="0,2,0,0"
+                                        VerticalAlignment="Top"
+                                        FontSize="12"
+                                        Foreground="{ThemeResource SystemFillColorCautionBrush}"
+                                        Glyph="&#xE7BA;" />
+                                    <TextBlock
+                                        AutomationProperties.AutomationId="SeeFiltersNote"
+                                        MaxWidth="360"
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                        Style="{StaticResource CaptionTextBlockStyle}"
+                                        Text="{x:Bind ViewModel.Trust.CouldNotReadFiltersNote, Mode=OneWay}"
+                                        TextWrapping="Wrap" />
+                                </StackPanel>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <!--  Existing trust + filters detail (elevated) / elevation hint (unelevated)  -->
+                    <controls:SettingsExpander
+                        AutomationProperties.AutomationId="TrustExpander"
+                        Description="Trust state, Defender performance mode, and filter drivers"
+                        Header="Trust and filters"
+                        IsExpanded="{x:Bind ViewModel.Trust.HasTrustDetail, Mode=OneWay}"
+                        Visibility="{x:Bind local:MainPage.BoolToVisibility(ViewModel.Trust.HasTrustDetail), Mode=OneWay}">
+                        <controls:SettingsExpander.HeaderIcon>
+                            <FontIcon Glyph="&#xE72E;" />
+                        </controls:SettingsExpander.HeaderIcon>
+                        <controls:SettingsExpander.Items>
+                            <controls:SettingsCard Header="Trust state">
+                                <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="{x:Bind ViewModel.Trust.TrustStateText, Mode=OneWay}" />
+                            </controls:SettingsCard>
+                            <controls:SettingsCard Header="Defender performance mode">
+                                <StackPanel HorizontalAlignment="Right" Spacing="4">
+                                    <TextBlock
+                                        HorizontalAlignment="Right"
+                                        Text="{x:Bind ViewModel.Trust.PerformanceModeText, Mode=OneWay}"
+                                        TextAlignment="Right"
+                                        TextWrapping="Wrap" />
+                                    <!--  Honest, one-line Defender Dev Drive protection status (trust state +
+                                          managed/async/sync). Filter presence is NOT used as a scan-mode
+                                          signal. The authoritative per-volume source is Windows Security >
+                                          Dev Drive protection > "See volumes".  -->
+                                    <TextBlock
+                                        AutomationProperties.AutomationId="ProtectionStatusText"
+                                        MaxWidth="420"
+                                        HorizontalAlignment="Right"
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                        Style="{StaticResource CaptionTextBlockStyle}"
+                                        Text="{x:Bind ViewModel.Trust.ProtectionStatusText, Mode=OneWay}"
+                                        TextAlignment="Right"
+                                        TextWrapping="Wrap" />
+                                    <!--  Honest deep link: the local one-click enable only when perf mode is
+                                          off AND not controlled by group policy on this PC.  -->
+                                    <HyperlinkButton
+                                        AutomationProperties.AutomationId="TurnOnPerformanceModeLink"
+                                        Padding="0"
+                                        HorizontalAlignment="Right"
+                                        Command="{x:Bind ViewModel.EnablePerformanceModeCommand}"
+                                        Content="Turn on performance mode"
+                                        Visibility="{x:Bind local:MainPage.BoolToVisibility(ViewModel.Trust.CanTurnOnPerformanceMode), Mode=OneWay}" />
+                                    <!--  Policy-controlled on THIS PC: open Windows Security instead of
+                                          claiming to flip a setting the user cannot change.  -->
+                                    <HyperlinkButton
+                                        AutomationProperties.AutomationId="OpenWindowsSecurityLink"
+                                        Padding="0"
+                                        HorizontalAlignment="Right"
+                                        Command="{x:Bind ViewModel.OpenWindowsSecurityCommand}"
+                                        Content="Open Windows Security"
+                                        Visibility="{x:Bind local:MainPage.BoolToVisibility(ViewModel.Trust.IsPerformanceModePolicyControlled), Mode=OneWay}" />
+                                    <StackPanel
+                                        HorizontalAlignment="Right"
+                                        Orientation="Horizontal"
+                                        Spacing="6"
+                                        Visibility="{x:Bind local:MainPage.BoolToVisibility(ViewModel.Trust.IsPerformanceModePolicyControlled), Mode=OneWay}">
+                                        <FontIcon
+                                            Margin="0,2,0,0"
+                                            VerticalAlignment="Top"
+                                            FontSize="12"
+                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                            Glyph="&#xE72E;" />
+                                        <TextBlock
+                                            AutomationProperties.AutomationId="PerformanceModePolicyNote"
+                                            MaxWidth="360"
+                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                            Style="{StaticResource CaptionTextBlockStyle}"
+                                            Text="{x:Bind ViewModel.Trust.PerformanceModePolicyNote, Mode=OneWay}"
+                                            TextAlignment="Right"
+                                            TextWrapping="Wrap" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </controls:SettingsCard>
+                            <controls:SettingsCard Header="Filters attached">
+                                <TextBlock
+                                    MaxWidth="420"
+                                    HorizontalAlignment="Right"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    Text="{x:Bind ViewModel.Trust.AttachedFiltersText, Mode=OneWay}"
+                                    TextAlignment="Right"
+                                    TextWrapping="Wrap" />
+                            </controls:SettingsCard>
+                            <controls:SettingsCard Header="Filters allowed">
+                                <TextBlock
+                                    MaxWidth="420"
+                                    HorizontalAlignment="Right"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    Text="{x:Bind ViewModel.Trust.AllowedFiltersText, Mode=OneWay}"
+                                    TextAlignment="Right"
+                                    TextWrapping="Wrap" />
+                            </controls:SettingsCard>
+                        </controls:SettingsExpander.Items>
+                    </controls:SettingsExpander>
+                </StackPanel>
+
+                <!--  ── Ecosystems (Concept A: detected tools · cache location · one reversible move · measured speedup) ──  -->
+                <StackPanel Spacing="8">
+                    <TextBlock
+                        Margin="0,4,0,0"
+                        Style="{StaticResource BodyStrongTextBlockStyle}"
+                        Text="Performance &amp; package caches" />
+
+                    <TextBlock
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        Text="One card per ecosystem — the detected tools, where each cache lives (your system drive or Dev Drive), the reversible Move, and the measured speedup where a real benchmark exists."
+                        TextWrapping="Wrap" />
+
+                    <!--  In-app doc link → opens docs/PackageCacheMoves.md in a dialog viewer  -->
+                    <HyperlinkButton
+                        AutomationProperties.AutomationId="LearnWhatThisDoes"
+                        AutomationProperties.Name="Learn what this does"
+                        Click="LearnAboutCacheMoves_Click">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon FontSize="14" Glyph="&#xE897;" />
+                            <TextBlock Text="Learn what this does" />
+                        </StackPanel>
+                    </HyperlinkButton>
+
+                    <!--  Slim, honest hero: a one-line summary + Run all tests + the perf-mode caveat. No salesy hero.  -->
+                    <Border
+                        Padding="16"
+                        Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        CornerRadius="{StaticResource ControlCornerRadius}">
+                        <StackPanel Spacing="10">
+                            <Grid ColumnSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <FontIcon
+                                    Grid.Column="0"
+                                    VerticalAlignment="Center"
+                                    FontSize="20"
+                                    Glyph="{x:Bind ViewModel.Suite.SuiteGlyph, Mode=OneTime}" />
+                                <TextBlock
+                                    Grid.Column="1"
+                                    VerticalAlignment="Center"
+                                    AutomationProperties.AutomationId="EcosystemsSummary"
+                                    Style="{StaticResource BodyStrongTextBlockStyle}"
+                                    Text="{x:Bind ViewModel.Ecosystems.SummaryText, Mode=OneWay}"
+                                    TextWrapping="Wrap" />
+                                <StackPanel
+                                    Grid.Column="2"
+                                    Orientation="Horizontal"
+                                    Spacing="8">
+                                    <Button
+                                        AutomationProperties.AutomationId="CancelTestsButton"
+                                        Command="{x:Bind ViewModel.Suite.CancelCommand}"
+                                        Content="Cancel"
+                                        Visibility="{x:Bind local:MainPage.BoolToVisibility(ViewModel.Suite.IsRunning), Mode=OneWay}" />
+                                    <Button
+                                        AutomationProperties.AutomationId="RunAllTestsButton"
+                                        Command="{x:Bind ViewModel.Suite.RunAllCommand}"
+                                        Style="{StaticResource AccentButtonStyle}">
+                                        <StackPanel Orientation="Horizontal" Spacing="6">
+                                            <FontIcon FontSize="14" Glyph="{x:Bind ViewModel.Suite.RunGlyph, Mode=OneTime}" />
+                                            <TextBlock Text="Run all tests" />
+                                        </StackPanel>
+                                    </Button>
+                                </StackPanel>
+                            </Grid>
+
+                            <!--  Live run progress strip  -->
+                            <StackPanel
+                                Spacing="4"
+                                Visibility="{x:Bind local:MainPage.BoolToVisibility(ViewModel.Suite.IsRunning), Mode=OneWay}">
+                                <ProgressBar
+                                    Maximum="{x:Bind ViewModel.Suite.RunProgressMax, Mode=OneWay}"
+                                    Value="{x:Bind ViewModel.Suite.RunProgressValue, Mode=OneWay}" />
+                                <TextBlock
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    Style="{StaticResource CaptionTextBlockStyle}"
+                                    Text="{x:Bind ViewModel.Suite.RunStatusText, Mode=OneWay}" />
+                            </StackPanel>
+
+                            <!--  Streaming "N× faster on average so far" headline  -->
+                            <StackPanel
+                                Orientation="Horizontal"
+                                Spacing="8"
+                                Visibility="{x:Bind local:MainPage.BoolToVisibility(ViewModel.Suite.HasHeadline), Mode=OneWay}">
+                                <TextBlock
+                                    Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                    Style="{StaticResource SubtitleTextBlockStyle}"
+                                    Text="{x:Bind ViewModel.Suite.HeadlineValue, Mode=OneWay}" />
+                                <TextBlock
+                                    Margin="0,0,0,3"
+                                    VerticalAlignment="Bottom"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    Style="{StaticResource CaptionTextBlockStyle}"
+                                    Text="{x:Bind ViewModel.Suite.HeadlineCaption, Mode=OneWay}" />
+                            </StackPanel>
+
+                            <!--  Honest perf-mode caveat (shown only when performance mode is genuinely off)  -->
+                            <StackPanel
+                                Orientation="Horizontal"
+                                Spacing="8"
+                                Visibility="{x:Bind local:MainPage.BoolToVisibility(ViewModel.Suite.ShowPerformanceModeCaption), Mode=OneWay}">
+                                <FontIcon
+                                    VerticalAlignment="Top"
+                                    FontSize="14"
+                                    Glyph="{x:Bind ViewModel.Suite.CaveatGlyph, Mode=OneTime}" />
+                                <TextBlock
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    Style="{StaticResource CaptionTextBlockStyle}"
+                                    Text="{x:Bind ViewModel.Suite.PerformanceModeCaptionMessage, Mode=OneTime}"
+                                    TextWrapping="Wrap" />
+                            </StackPanel>
+
+                            <!--  Honest note: throwaway fixtures, real packages  -->
+                            <TextBlock
+                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                Style="{StaticResource CaptionTextBlockStyle}"
+                                Text="{x:Bind ViewModel.Suite.SuiteHonestyLine, Mode=OneTime}"
+                                TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Border>
+
+                    <!--  One collapsible card per ecosystem  -->
+                    <ItemsControl
+                        AutomationProperties.AutomationId="EcosystemsList"
+                        HorizontalContentAlignment="Stretch"
+                        ItemsSource="{x:Bind ViewModel.Ecosystems.Cards, Mode=OneWay}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <StackPanel Spacing="8" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:EcosystemCardViewModel">
+                                <Expander
+                                    AutomationProperties.AutomationId="{x:Bind AutomationId}"
+                                    AutomationProperties.Name="{x:Bind Name}"
+                                    HorizontalAlignment="Stretch"
+                                    HorizontalContentAlignment="Stretch"
+                                    IsExpanded="{x:Bind ShouldExpand, Mode=OneWay}">
+                                    <Expander.Header>
+                                        <Grid ColumnSpacing="12" MinHeight="48">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <FontIcon
+                                                Grid.Column="0"
+                                                VerticalAlignment="Center"
+                                                FontSize="20"
+                                                Glyph="{x:Bind Glyph}" />
+                                            <StackPanel
+                                                Grid.Column="1"
+                                                VerticalAlignment="Center"
+                                                Spacing="1">
+                                                <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="{x:Bind Name}" />
+                                                <TextBlock
+                                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                    Style="{StaticResource CaptionTextBlockStyle}"
+                                                    Text="{x:Bind ToolsLine}" />
+                                            </StackPanel>
+                                            <StackPanel
+                                                Grid.Column="2"
+                                                Orientation="Horizontal"
+                                                VerticalAlignment="Center"
+                                                Spacing="10">
+                                                <Border
+                                                    Padding="10,2,10,3"
+                                                    VerticalAlignment="Center"
+                                                    Background="{x:Bind local:MainPage.PillBackground(LocationKind), Mode=OneWay}"
+                                                    CornerRadius="10"
+                                                    Visibility="{x:Bind local:MainPage.InvertBoolToVisibility(IsBenchmarkOnly), Mode=OneTime}">
+                                                    <TextBlock
+                                                        Foreground="{x:Bind local:MainPage.PillForeground(LocationKind), Mode=OneWay}"
+                                                        Style="{StaticResource CaptionTextBlockStyle}"
+                                                        Text="{x:Bind LocationText, Mode=OneWay}" />
+                                                </Border>
+                                                <TextBlock
+                                                    VerticalAlignment="Center"
+                                                    Foreground="{x:Bind local:MainPage.RatioBrush(Benchmark.DeltaIsFavorable), Mode=OneWay}"
+                                                    Style="{StaticResource BodyStrongTextBlockStyle}"
+                                                    Text="{x:Bind Benchmark.DeltaText, Mode=OneWay}"
+                                                    Visibility="{x:Bind local:MainPage.BoolToVisibility(Benchmark.IsDone), Mode=OneWay}" />
+                                            </StackPanel>
+                                        </Grid>
+                                    </Expander.Header>
+                                    <Expander.Content>
+                                        <StackPanel Margin="0,4,0,4" Spacing="12">
+                                            <TextBlock
+                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                Style="{StaticResource CaptionTextBlockStyle}"
+                                                Text="{x:Bind StatusSummary, Mode=OneWay}"
+                                                TextWrapping="Wrap"
+                                                Visibility="{x:Bind local:MainPage.InvertBoolToVisibility(IsBenchmarkOnly), Mode=OneTime}" />
+
+                                            <!--  Per-tool rows — reuse the REAL reversible move + Map/remap engine  -->
+                                            <ItemsControl HorizontalContentAlignment="Stretch" ItemsSource="{x:Bind Rows}">
+                                                <ItemsControl.ItemsPanel>
+                                                    <ItemsPanelTemplate>
+                                                        <StackPanel Spacing="4" />
+                                                    </ItemsPanelTemplate>
+                                                </ItemsControl.ItemsPanel>
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate x:DataType="vm:PackageCacheRowViewModel">
+                                                        <StackPanel Spacing="4">
+                                                            <controls:SettingsCard
+                                                                AutomationProperties.AutomationId="{x:Bind RowAutomationId}"
+                                                                AutomationProperties.Name="{x:Bind AutomationName, Mode=OneWay}"
+                                                                Description="{x:Bind Description}"
+                                                                Header="{x:Bind Header}"
+                                                                Opacity="{x:Bind RowOpacity}"
+                                                                ToolTipService.ToolTip="{x:Bind ResolvedPath}">
+                                                                <controls:SettingsCard.HeaderIcon>
+                                                                    <FontIcon Glyph="&#xE8B7;" />
+                                                                </controls:SettingsCard.HeaderIcon>
+                                                                <StackPanel
+                                                                    Orientation="Horizontal"
+                                                                    VerticalAlignment="Center"
+                                                                    Spacing="10">
+                                                                    <TextBlock
+                                                                        VerticalAlignment="Center"
+                                                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                                        Text="{x:Bind SizeText, Mode=OneWay}" />
+                                                                    <Border
+                                                                        Padding="10,2,10,3"
+                                                                        VerticalAlignment="Center"
+                                                                        Background="{x:Bind local:MainPage.PillBackground(StatusKind), Mode=OneWay}"
+                                                                        CornerRadius="10">
+                                                                        <TextBlock
+                                                                            Foreground="{x:Bind local:MainPage.PillForeground(StatusKind), Mode=OneWay}"
+                                                                            Style="{StaticResource CaptionTextBlockStyle}"
+                                                                            Text="{x:Bind StatusText, Mode=OneWay}" />
+                                                                    </Border>
+                                                                    <Button
+                                                                        AutomationProperties.AutomationId="{x:Bind MoveButtonAutomationId}"
+                                                                        Command="{x:Bind MoveCommand}"
+                                                                        Content="Move"
+                                                                        Visibility="{x:Bind local:MainPage.BoolToVisibility(ShowMoveButton), Mode=OneWay}" />
+                                                                    <Button
+                                                                        AutomationProperties.AutomationId="{x:Bind MoveBackButtonAutomationId}"
+                                                                        Command="{x:Bind MoveBackCommand}"
+                                                                        Content="Move back"
+                                                                        Visibility="{x:Bind local:MainPage.BoolToVisibility(ShowMoveBackButton), Mode=OneWay}" />
+                                                                    <FontIcon
+                                                                        AutomationProperties.Name="Already on Dev Drive"
+                                                                        FontSize="16"
+                                                                        Foreground="{ThemeResource SystemFillColorSuccessBrush}"
+                                                                        Glyph="&#xE73E;"
+                                                                        Visibility="{x:Bind local:MainPage.BoolToVisibility(IsSet), Mode=OneWay}" />
+                                                                </StackPanel>
+                                                            </controls:SettingsCard>
+
+                                                            <!--  Map / Move &amp; remap for an UNDETECTED tool (no dead "Not found")  -->
+                                                            <Border
+                                                                Margin="48,2,16,2"
+                                                                AutomationProperties.AutomationId="{x:Bind MapBlockAutomationId}"
+                                                                Style="{StaticResource InlineConfirmPanelStyle}"
+                                                                Visibility="{x:Bind local:MainPage.BoolToVisibility(ShowMapBlock), Mode=OneWay}">
+                                                                <StackPanel Spacing="8">
+                                                                    <TextBlock
+                                                                        Style="{StaticResource CaptionTextBlockStyle}"
+                                                                        Text="Not detected — point us at this tool's cache folder and we'll track it (per-user, reversible). If that folder already exists, &#x201C;Move &amp; remap&#x201D; also copies it onto your Dev Drive."
+                                                                        TextWrapping="Wrap" />
+                                                                    <Grid ColumnSpacing="8">
+                                                                        <Grid.ColumnDefinitions>
+                                                                            <ColumnDefinition Width="*" />
+                                                                            <ColumnDefinition Width="Auto" />
+                                                                        </Grid.ColumnDefinitions>
+                                                                        <TextBox
+                                                                            Grid.Column="0"
+                                                                            AutomationProperties.AutomationId="{x:Bind MapPathInputAutomationId}"
+                                                                            AutomationProperties.Name="Cache folder path"
+                                                                            Text="{x:Bind MapPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                                                        <Button
+                                                                            Grid.Column="1"
+                                                                            AutomationProperties.AutomationId="{x:Bind BrowseMapPathButtonAutomationId}"
+                                                                            AutomationProperties.Name="Browse for cache folder"
+                                                                            Click="BrowseForMapPath_Click">
+                                                                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                                                                <FontIcon FontSize="14" Glyph="&#xE838;" />
+                                                                                <TextBlock Text="Browse&#x2026;" />
+                                                                            </StackPanel>
+                                                                        </Button>
+                                                                    </Grid>
+                                                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                                                        <Button
+                                                                            AutomationProperties.AutomationId="{x:Bind MapPathButtonAutomationId}"
+                                                                            Command="{x:Bind MapPathActionCommand}"
+                                                                            Style="{StaticResource AccentButtonStyle}">
+                                                                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                                                                <FontIcon FontSize="14" Glyph="&#xE81E;" />
+                                                                                <TextBlock Text="Map path" />
+                                                                            </StackPanel>
+                                                                        </Button>
+                                                                        <Button
+                                                                            AutomationProperties.AutomationId="{x:Bind MoveAndRemapButtonAutomationId}"
+                                                                            Command="{x:Bind MoveAndRemapCommand}"
+                                                                            Visibility="{x:Bind local:MainPage.BoolToVisibility(CanMoveAndRemap), Mode=OneWay}">
+                                                                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                                                                <FontIcon FontSize="14" Glyph="&#xE8DE;" />
+                                                                                <TextBlock Text="Move &amp; remap" />
+                                                                            </StackPanel>
+                                                                        </Button>
+                                                                    </StackPanel>
+                                                                </StackPanel>
+                                                            </Border>
+
+                                                            <!--  Inline confirm — Move / Map / Move &amp; remap all funnel through this gated panel  -->
+                                                            <Border
+                                                                Margin="48,2,16,2"
+                                                                AutomationProperties.AutomationId="{x:Bind MoveConfirmPanelAutomationId}"
+                                                                Style="{StaticResource InlineConfirmPanelStyle}"
+                                                                Visibility="{x:Bind local:MainPage.BoolToVisibility(IsConfirmingMove), Mode=OneWay}">
+                                                                <StackPanel Spacing="8">
+                                                                    <TextBlock
+                                                                        Style="{StaticResource CaptionTextBlockStyle}"
+                                                                        Text="{x:Bind MoveConfirmBodyText, Mode=OneWay}"
+                                                                        TextWrapping="Wrap" />
+                                                                    <StackPanel
+                                                                        HorizontalAlignment="Right"
+                                                                        Orientation="Horizontal"
+                                                                        Spacing="8">
+                                                                        <Button
+                                                                            AutomationProperties.AutomationId="{x:Bind CancelMoveButtonAutomationId}"
+                                                                            Command="{x:Bind CancelMoveCommand}"
+                                                                            Content="Cancel" />
+                                                                        <Button
+                                                                            AutomationProperties.AutomationId="{x:Bind ConfirmMoveButtonAutomationId}"
+                                                                            Command="{x:Bind ConfirmMoveCommand}"
+                                                                            Content="Confirm"
+                                                                            Style="{StaticResource AccentButtonStyle}" />
+                                                                    </StackPanel>
+                                                                </StackPanel>
+                                                            </Border>
+
+                                                            <!--  Live per-row progress (files/bytes), off the UI thread via Progress&lt;T&gt;  -->
+                                                            <StackPanel
+                                                                Margin="48,0,16,2"
+                                                                Spacing="4"
+                                                                Visibility="{x:Bind local:MainPage.BoolToVisibility(IsMoving), Mode=OneWay}">
+                                                                <Grid ColumnSpacing="8">
+                                                                    <Grid.ColumnDefinitions>
+                                                                        <ColumnDefinition Width="*" />
+                                                                        <ColumnDefinition Width="Auto" />
+                                                                    </Grid.ColumnDefinitions>
+                                                                    <ProgressBar
+                                                                        Grid.Column="0"
+                                                                        VerticalAlignment="Center"
+                                                                        AutomationProperties.AutomationId="{x:Bind MoveProgressAutomationId}"
+                                                                        AutomationProperties.Name="Move progress"
+                                                                        Maximum="100"
+                                                                        Value="{x:Bind MoveProgressPercent, Mode=OneWay}" />
+                                                                    <Button
+                                                                        Grid.Column="1"
+                                                                        AutomationProperties.AutomationId="{x:Bind CancelActiveMoveButtonAutomationId}"
+                                                                        AutomationProperties.Name="Cancel move"
+                                                                        Command="{x:Bind CancelActiveMoveCommand}"
+                                                                        Content="Cancel" />
+                                                                </Grid>
+                                                                <TextBlock
+                                                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                                    Style="{StaticResource CaptionTextBlockStyle}"
+                                                                    Text="{x:Bind MoveProgressText, Mode=OneWay}"
+                                                                    TextWrapping="Wrap" />
+                                                            </StackPanel>
+
+                                                            <!--  Real, reversible result line after Confirm  -->
+                                                            <TextBlock
+                                                                Margin="48,0,16,2"
+                                                                AutomationProperties.AutomationId="{x:Bind MoveResultAutomationId}"
+                                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                                Style="{StaticResource CaptionTextBlockStyle}"
+                                                                Text="{x:Bind MoveResultText, Mode=OneWay}"
+                                                                TextWrapping="Wrap"
+                                                                Visibility="{x:Bind local:MainPage.BoolToVisibility(ShowMoveResult), Mode=OneWay}" />
+                                                        </StackPanel>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+
+                                            <!--  Measured benchmark — ONLY Node / .NET / Rust (npm / dotnet / cargo workloads)  -->
+                                            <Border
+                                                Padding="12"
+                                                Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}"
+                                                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                                BorderThickness="1"
+                                                CornerRadius="{StaticResource ControlCornerRadius}"
+                                                Visibility="{x:Bind local:MainPage.BoolToVisibility(HasBenchmark), Mode=OneWay}">
+                                                <StackPanel Spacing="8">
+                                                    <Grid ColumnSpacing="12">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="*" />
+                                                            <ColumnDefinition Width="Auto" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <StackPanel
+                                                            Grid.Column="0"
+                                                            Orientation="Horizontal"
+                                                            VerticalAlignment="Center"
+                                                            Spacing="8">
+                                                            <FontIcon FontSize="16" Glyph="&#xE9D9;" />
+                                                            <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Measured — real build" />
+                                                            <TextBlock
+                                                                VerticalAlignment="Center"
+                                                                Foreground="{x:Bind local:MainPage.RatioBrush(Benchmark.DeltaIsFavorable), Mode=OneWay}"
+                                                                Style="{StaticResource BodyStrongTextBlockStyle}"
+                                                                Text="{x:Bind Benchmark.DeltaText, Mode=OneWay}"
+                                                                Visibility="{x:Bind local:MainPage.BoolToVisibility(Benchmark.IsDone), Mode=OneWay}" />
+                                                        </StackPanel>
+                                                        <Button
+                                                            Grid.Column="1"
+                                                            AutomationProperties.AutomationId="{x:Bind Benchmark.RunButtonAutomationId, Mode=OneTime}"
+                                                            AutomationProperties.Name="{x:Bind Benchmark.RunAccessibleName, Mode=OneTime}"
+                                                            Command="{x:Bind Benchmark.RunCommand}">
+                                                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                                                <FontIcon FontSize="14" Glyph="&#xE768;" />
+                                                                <TextBlock Text="Run test" />
+                                                            </StackPanel>
+                                                        </Button>
+                                                    </Grid>
+
+                                                    <!--  Done: side-by-side C:/G: bars (slower drive = longer bar; accent = Dev Drive)  -->
+                                                    <StackPanel
+                                                        Spacing="5"
+                                                        Visibility="{x:Bind local:MainPage.BoolToVisibility(Benchmark.IsDone), Mode=OneWay}">
+                                                        <Grid ColumnSpacing="8">
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="22" />
+                                                                <ColumnDefinition Width="300" />
+                                                                <ColumnDefinition Width="Auto" />
+                                                            </Grid.ColumnDefinitions>
+                                                            <TextBlock
+                                                                VerticalAlignment="Center"
+                                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                                Style="{StaticResource CaptionTextBlockStyle}"
+                                                                Text="{x:Bind Benchmark.SystemDriveLabel, Mode=OneTime}" />
+                                                            <Border
+                                                                Grid.Column="1"
+                                                                Height="16"
+                                                                HorizontalAlignment="Left"
+                                                                Background="{ThemeResource ControlFillColorSecondaryBrush}"
+                                                                CornerRadius="4">
+                                                                <Border
+                                                                    Width="{x:Bind Benchmark.SystemBarWidth, Mode=OneWay}"
+                                                                    HorizontalAlignment="Left"
+                                                                    Background="{ThemeResource PerfBaselineBarBrush}"
+                                                                    CornerRadius="4" />
+                                                            </Border>
+                                                            <TextBlock
+                                                                Grid.Column="2"
+                                                                VerticalAlignment="Center"
+                                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                                Style="{StaticResource CaptionTextBlockStyle}"
+                                                                Text="{x:Bind Benchmark.SystemValueText, Mode=OneWay}" />
+                                                        </Grid>
+                                                        <Grid ColumnSpacing="8">
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="22" />
+                                                                <ColumnDefinition Width="300" />
+                                                                <ColumnDefinition Width="Auto" />
+                                                            </Grid.ColumnDefinitions>
+                                                            <TextBlock
+                                                                VerticalAlignment="Center"
+                                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                                Style="{StaticResource CaptionTextBlockStyle}"
+                                                                Text="{x:Bind Benchmark.DevDriveLabel, Mode=OneTime}" />
+                                                            <Border
+                                                                Grid.Column="1"
+                                                                Height="16"
+                                                                HorizontalAlignment="Left"
+                                                                Background="{ThemeResource ControlFillColorSecondaryBrush}"
+                                                                CornerRadius="4">
+                                                                <Border
+                                                                    Width="{x:Bind Benchmark.DevBarWidth, Mode=OneWay}"
+                                                                    HorizontalAlignment="Left"
+                                                                    Background="{ThemeResource PerfDevDriveBarBrush}"
+                                                                    CornerRadius="4" />
+                                                            </Border>
+                                                            <TextBlock
+                                                                Grid.Column="2"
+                                                                VerticalAlignment="Center"
+                                                                Style="{StaticResource CaptionTextBlockStyle}"
+                                                                Text="{x:Bind Benchmark.DevValueText, Mode=OneWay}" />
+                                                        </Grid>
+                                                    </StackPanel>
+
+                                                    <!--  Running: indeterminate  -->
+                                                    <StackPanel
+                                                        Orientation="Horizontal"
+                                                        Spacing="8"
+                                                        Visibility="{x:Bind local:MainPage.BoolToVisibility(Benchmark.IsRunning), Mode=OneWay}">
+                                                        <ProgressRing
+                                                            Width="14"
+                                                            Height="14"
+                                                            IsActive="{x:Bind Benchmark.IsRunning, Mode=OneWay}" />
+                                                        <TextBlock
+                                                            VerticalAlignment="Center"
+                                                            Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                                            Style="{StaticResource CaptionTextBlockStyle}"
+                                                            Text="{x:Bind Benchmark.RunStatusText, Mode=OneWay}" />
+                                                    </StackPanel>
+
+                                                    <!--  Skipped: honest reason  -->
+                                                    <TextBlock
+                                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                        Style="{StaticResource CaptionTextBlockStyle}"
+                                                        Text="{x:Bind Benchmark.SkipReasonText, Mode=OneWay}"
+                                                        TextWrapping="Wrap"
+                                                        Visibility="{x:Bind local:MainPage.BoolToVisibility(Benchmark.IsSkipped), Mode=OneWay}" />
+
+                                                    <!--  Methodology / what the build is  -->
+                                                    <TextBlock
+                                                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                                        Style="{StaticResource CaptionTextBlockStyle}"
+                                                        Text="{x:Bind Benchmark.Sub, Mode=OneWay}"
+                                                        TextWrapping="Wrap" />
+                                                </StackPanel>
+                                            </Border>
+
+                                            <!--  Honest "no benchmark" note — every ecosystem WITHOUT a workload (no fake number, no dead Run-test)  -->
+                                            <StackPanel
+                                                Orientation="Horizontal"
+                                                Spacing="8"
+                                                Visibility="{x:Bind local:MainPage.BoolToVisibility(ShowNoBenchmarkNote), Mode=OneWay}">
+                                                <FontIcon
+                                                    VerticalAlignment="Top"
+                                                    FontSize="14"
+                                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                    Glyph="&#xE946;" />
+                                                <TextBlock
+                                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                    Style="{StaticResource CaptionTextBlockStyle}"
+                                                    Text="{x:Bind NoBenchmarkNote}"
+                                                    TextWrapping="Wrap" />
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </Expander.Content>
+                                </Expander>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+
+            </StackPanel>
+
+            <!--  All drives on this PC — demoted to a collapsed disclosure; the Dev Drive is summarised in Drive health above.  -->
+            <Expander
+                Margin="0,4,0,0"
+                AutomationProperties.AutomationId="AllDrivesExpander"
+                HorizontalAlignment="Stretch"
+                HorizontalContentAlignment="Stretch"
+                IsExpanded="False">
+                <Expander.Header>
+                    <Grid HorizontalAlignment="Stretch">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock VerticalAlignment="Center" Text="All drives on this PC" />
+                        <ProgressRing
+                            Grid.Column="1"
+                            Width="20"
+                            Height="20"
+                            AutomationProperties.Name="Loading volumes"
+                            IsActive="{x:Bind ViewModel.IsLoading, Mode=OneWay}" />
+                    </Grid>
+                </Expander.Header>
+
+            <ItemsControl
+                AutomationProperties.AutomationId="VolumesList"
+                HorizontalContentAlignment="Stretch"
+                ItemsSource="{x:Bind ViewModel.Volumes, Mode=OneWay}">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <StackPanel Spacing="4" />
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:VolumeRowViewModel">
+                        <controls:SettingsCard
+                            AutomationProperties.AutomationId="{x:Bind AutomationId}"
+                            AutomationProperties.Name="{x:Bind AutomationName}"
+                            Description="{x:Bind Description}"
+                            Header="{x:Bind Header}">
+                            <controls:SettingsCard.HeaderIcon>
+                                <FontIcon Foreground="{x:Bind local:MainPage.DriveGlyphBrush(IsDevDrive), Mode=OneTime}" Glyph="{x:Bind GlyphCode}" />
+                            </controls:SettingsCard.HeaderIcon>
+                            <StackPanel
+                                Orientation="Horizontal"
+                                VerticalAlignment="Center"
+                                Spacing="8">
+                                <Border
+                                    Padding="10,2,10,3"
+                                    VerticalAlignment="Center"
+                                    AutomationProperties.AutomationId="{x:Bind DevDriveBadgeAutomationId}"
+                                    AutomationProperties.Name="Dev Drive"
+                                    Background="{ThemeResource AccentFillColorDefaultBrush}"
+                                    CornerRadius="10"
+                                    Visibility="{x:Bind local:MainPage.BoolToVisibility(IsDevDrive), Mode=OneTime}">
+                                    <TextBlock
+                                        Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}"
+                                        Style="{StaticResource CaptionTextBlockStyle}"
+                                        Text="Dev Drive" />
+                                </Border>
+                                <Border
+                                    Padding="10,2,10,3"
+                                    VerticalAlignment="Center"
+                                    AutomationProperties.Name="Trusted"
+                                    Background="{ThemeResource SystemFillColorSuccessBackgroundBrush}"
+                                    BorderBrush="{ThemeResource SystemFillColorSuccessBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="10"
+                                    Visibility="{x:Bind local:MainPage.BoolToVisibility(IsTrusted), Mode=OneTime}">
+                                    <TextBlock
+                                        Foreground="{ThemeResource SystemFillColorSuccessBrush}"
+                                        Style="{StaticResource CaptionTextBlockStyle}"
+                                        Text="Trusted" />
+                                </Border>
+                                <Border
+                                    Padding="10,2,10,3"
+                                    VerticalAlignment="Center"
+                                    AutomationProperties.Name="VHD backed"
+                                    Background="{ThemeResource ControlFillColorSecondaryBrush}"
+                                    BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="10"
+                                    ToolTipService.ToolTip="{x:Bind VhdFilePath}"
+                                    Visibility="{x:Bind local:MainPage.BoolToVisibility(IsVhd), Mode=OneTime}">
+                                    <TextBlock
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                        Style="{StaticResource CaptionTextBlockStyle}"
+                                        Text="VHD" />
+                                </Border>
+                            </StackPanel>
+                        </controls:SettingsCard>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            </Expander>
+
+            <!--  Footer milestone note  -->
+            <TextBlock
+                Margin="0,8,0,0"
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                Style="{StaticResource CaptionTextBlockStyle}"
+                Text="Preview · Detection, drive health, and the build benchmarks are real. Package-cache moves are real, confirmed, per-user, and reversible."
+                TextWrapping="Wrap" />
+        </StackPanel>
+    </ScrollViewer>
+</Page>

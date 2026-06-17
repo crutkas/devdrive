@@ -1,0 +1,142 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <RootNamespace>DevDriveManager</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Platforms>x86;x64;ARM64</Platforms>
+    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">win-$([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString().ToLowerInvariant())</RuntimeIdentifier>
+    <PublishProfile Condition="Exists('Properties\PublishProfiles\win-$(Platform).pubxml')">win-$(Platform).pubxml</PublishProfile>
+    <UseWinUI>true</UseWinUI>
+    <WinUISDKReferences>false</WinUISDKReferences>
+    <EnableMsixTooling>true</EnableMsixTooling>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!--
+      WUI2010 (nested x:Bind path may crash on a null segment) is suppressed *intentionally*.
+      MainPage binds to section sub-ViewModels (ViewModel.Suite/PackageCaches/
+      DriveHealth.*). Every sub-VM is a get-only property assigned once in the
+      MainPageViewModel constructor and never reassigned or set null, so no path segment can be
+      null at binding time — the rule is a syntactic false positive for this composition. The
+      sub-VM split is deliberate (testability; each section is unit-tested in DevDriveCore.Tests).
+    -->
+    <NoWarn>$(NoWarn);WUI2010</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="Assets\SplashScreen.scale-200.png" />
+    <Content Include="Assets\LockScreenLogo.scale-200.png" />
+    <Content Include="Assets\Square150x150Logo.scale-200.png" />
+    <Content Include="Assets\Square44x44Logo.scale-200.png" />
+    <Content Include="Assets\Square44x44Logo.targetsize-24_altform-unplated.png" />
+    <Content Include="Assets\Square44x44Logo.targetsize-48_altform-lightunplated.png" />
+    <Content Include="Assets\StoreLogo.png" />
+    <Content Include="Assets\AppIcon.ico" />
+    <Content Include="Assets\Wide310x150Logo.scale-200.png" />
+    <Content Include="..\docs\PackageCacheMoves.md" Link="docs\PackageCacheMoves.md">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Manifest Include="$(ApplicationManifest)" />
+  </ItemGroup>
+
+  <!--
+    Defining the "Msix" ProjectCapability here allows the Single-project MSIX Packaging
+    Tools extension to be activated for this project even if the Windows App SDK Nuget
+    package has not yet been restored.
+  -->
+  <ItemGroup Condition="'$(DisableMsixProjectCapabilityAddedByProject)'!='true' and '$(EnableMsixTooling)'=='true'">
+    <ProjectCapability Include="Msix" />
+  </ItemGroup>
+
+  <!--
+    Microsoft.Windows.SDK.BuildTools.WinApp adds first-class support for
+    `dotnet run` on packaged WinUI apps: it hooks the .NET CLI Run target to
+    register a debug identity via the winapp CLI and launch the app with
+    package identity (AUMID).
+    Set <EnableWinAppRunSupport>false</EnableWinAppRunSupport> in a
+    <PropertyGroup> above to opt out.
+  -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.28000.1839" />
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.2.0" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <PackageReference Include="CommunityToolkit.WinUI.Controls.SettingsControls" Version="8.2.251219" />
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools.WinApp" Version="0.3.2" />
+  </ItemGroup>
+
+  <!--
+    F7: a .slnx / bare `dotnet build` leaves $(Platform) empty or AnyCPU, which the FilterProbe helper
+    has no output folder for (its bin\AnyCPU\... path doesn't exist → MSB3030 when staging its files).
+    Normalize empty/AnyCPU to x64 (consistent with the helper's win-x64 RID default) and use this single
+    normalized value for BOTH the helper's SetPlatform and its staged output path so they always agree.
+  -->
+  <PropertyGroup>
+    <_FilterProbePlatform>$(Platform)</_FilterProbePlatform>
+    <_FilterProbePlatform Condition="'$(_FilterProbePlatform)' == '' or '$(_FilterProbePlatform)' == 'AnyCPU'">x64</_FilterProbePlatform>
+  </PropertyGroup>
+
+  <!-- All Dev Drive logic lives in the UI-agnostic core (public APIs only). -->
+  <ItemGroup>
+    <ProjectReference Include="..\DevDriveCore\DevDriveCore.csproj" />
+    <!--
+      The elevated filter-probe helper (the "Iso app"). ReferenceOutputAssembly=false: we ship its EXE
+      next to ours but never link its assembly. GlobalPropertiesToRemove strips the main app's RID /
+      SelfContained / TFM so the helper builds with its OWN (net10.0, self-contained). Platform is
+      DELIBERATELY allowed to flow through (and pinned via SetPlatform) so the helper's arch + output
+      path match the main app's (x64 → win-x64), which the static Content ItemGroup below then copies.
+    -->
+    <ProjectReference Include="..\DevDriveManager.FilterProbe\DevDriveManager.FilterProbe.csproj"
+                      ReferenceOutputAssembly="false"
+                      SkipGetTargetFrameworkProperties="true"
+                      Private="false"
+                      SetPlatform="Platform=$(_FilterProbePlatform)"
+                      GlobalPropertiesToRemove="RuntimeIdentifier;SelfContained;TargetFramework" />
+  </ItemGroup>
+
+  <!--
+    Stage the elevated helper next to DevDriveManager.exe so it is present in the MSIX install dir and
+    resolvable via the app's base directory. The helper builds self-contained, but its install dir IS
+    our install dir (which already carries the .NET runtime), so we copy ONLY the helper's own 4 files —
+    NOT a duplicate runtime — keeping the package lean. These are declared as STATIC Content (evaluated
+    once) — NOT inside a BeforeTargets="AssignTargetPaths" target — because that target re-runs each time
+    AssignTargetPaths is invoked during a packaged build (build + appx payload), which re-added the
+    literal items and produced duplicate publish outputs (NETSDK1152). The helper is a ProjectReference,
+    so it is built before these files are copied. _FilterProbeOutDir tracks the build Platform (x64 →
+    win-x64), matched to the helper's RID.
+  -->
+  <PropertyGroup>
+    <_FilterProbeRid Condition="'$(_FilterProbePlatform)' == 'ARM64'">win-arm64</_FilterProbeRid>
+    <_FilterProbeRid Condition="'$(_FilterProbePlatform)' == 'x86'">win-x86</_FilterProbeRid>
+    <_FilterProbeRid Condition="'$(_FilterProbeRid)' == ''">win-x64</_FilterProbeRid>
+    <_FilterProbeOutDir>$(MSBuildThisFileDirectory)..\DevDriveManager.FilterProbe\bin\$(_FilterProbePlatform)\$(Configuration)\net10.0\$(_FilterProbeRid)\</_FilterProbeOutDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="$(_FilterProbeOutDir)DevDriveManager.FilterProbe.exe;$(_FilterProbeOutDir)DevDriveManager.FilterProbe.dll;$(_FilterProbeOutDir)DevDriveManager.FilterProbe.runtimeconfig.json;$(_FilterProbeOutDir)DevDriveManager.FilterProbe.deps.json">
+      <Link>%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Visible>false</Visible>
+    </Content>
+  </ItemGroup>
+
+  <!--
+    Defining the "HasPackageAndPublishMenuAddedByProject" property here allows the Solution
+    Explorer "Package and Publish" context menu entry to be enabled for this project even if
+    the Windows App SDK Nuget package has not yet been restored.
+  -->
+  <PropertyGroup Condition="'$(DisableHasPackageAndPublishMenuAddedByProject)'!='true' and '$(EnableMsixTooling)'=='true'">
+    <HasPackageAndPublishMenu>true</HasPackageAndPublishMenu>
+  </PropertyGroup>
+
+  <!-- Publish Properties -->
+  <PropertyGroup>
+    <PublishReadyToRun Condition="'$(Configuration)' == 'Debug'">False</PublishReadyToRun>
+    <PublishReadyToRun Condition="'$(Configuration)' != 'Debug'">True</PublishReadyToRun>
+    <PublishTrimmed Condition="'$(Configuration)' == 'Debug'">False</PublishTrimmed>
+    <PublishTrimmed Condition="'$(Configuration)' != 'Debug'">True</PublishTrimmed>
+  </PropertyGroup>
+</Project>

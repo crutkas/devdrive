@@ -1,0 +1,79 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    DevDriveCore.Tests: unit tests for the UI-agnostic core.
+    * Mocks INativeVolumeApi / IProcessRunner / IStorageQuery (NSubstitute) and
+      verifies the pure decision logic in DevDriveService + the fsutil parser +
+      size formatting + VHD mapping.
+    * Contains ONE guarded integration test that exercises the REAL service
+      against this machine and asserts G: is a Dev Drive, going Inconclusive when
+      no such Dev Drive is present (so the suite stays portable).
+    TFM matches DevDriveCore so the project reference resolves cleanly. AnyCPU is
+    included so a bare `dotnet test` works; x64 so the solution builds -p:Platform=x64.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <Platforms>AnyCPU;x86;x64;ARM64</Platforms>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MSTest" Version="4.0.2" />
+    <PackageReference Include="NSubstitute" Version="5.3.0" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DevDriveCore\DevDriveCore.csproj" />
+  </ItemGroup>
+
+  <!--
+    The unified Performance-suite ViewModels depend ONLY on CommunityToolkit.Mvvm + DevDriveCore (no
+    Microsoft.UI.Xaml), so they are linked in here and unit-tested headlessly with mocked engines —
+    row/group state machine, run-all vs per-group, skip handling, and bar-sizing for higher-vs-lower-
+    better. The app compiles the same files; there is no project reference to the WinUI app.
+  -->
+  <ItemGroup>
+    <Compile Include="..\DevDriveManager\ViewModels\PerfSuiteRowViewModel.cs" Link="SuiteViewModels\PerfSuiteRowViewModel.cs" />
+    <Compile Include="..\DevDriveManager\ViewModels\PerfSuiteGroupViewModel.cs" Link="SuiteViewModels\PerfSuiteGroupViewModel.cs" />
+    <Compile Include="..\DevDriveManager\ViewModels\PerformanceSuiteViewModel.cs" Link="SuiteViewModels\PerformanceSuiteViewModel.cs" />
+    <!--  Trust/filters sub-VM: also UI-agnostic (CommunityToolkit.Mvvm + DevDriveCore + IElevatedFilterProbe),
+          so the "See Filters" elevated-probe flow + trust projection are unit-tested headlessly with a fake probe.  -->
+    <Compile Include="..\DevDriveManager\ViewModels\TrustFiltersViewModel.cs" Link="SuiteViewModels\TrustFiltersViewModel.cs" />
+  </ItemGroup>
+
+  <!--
+    The package-caches VM + its row VM are likewise UI-agnostic (CommunityToolkit.Mvvm + DevDriveCore),
+    so they are linked in and unit-tested headlessly against the REAL move coordinator over in-memory
+    seams — pinning the F2 "live CanMove vs immutable Info.OnDevDrive" warning/count behaviour. The VM's
+    CreateDefault factory references MutationComposition + the two safe-fake movers, so those (also
+    UI-agnostic) files are linked too, purely to satisfy compilation.
+  -->
+  <ItemGroup>
+    <Compile Include="..\DevDriveManager\ViewModels\PackageCachesViewModel.cs" Link="CacheViewModels\PackageCachesViewModel.cs" />
+    <Compile Include="..\DevDriveManager\ViewModels\PackageCacheRowViewModel.cs" Link="CacheViewModels\PackageCacheRowViewModel.cs" />
+    <Compile Include="..\DevDriveManager\Services\MutationComposition.cs" Link="CacheViewModels\MutationComposition.cs" />
+    <Compile Include="..\DevDriveManager\Services\SafeFakePackageCacheMover.cs" Link="CacheViewModels\SafeFakePackageCacheMover.cs" />
+    <Compile Include="..\DevDriveManager\Services\SafeFakeVhdProvisioner.cs" Link="CacheViewModels\SafeFakeVhdProvisioner.cs" />
+    <Compile Include="..\DevDriveManager\Services\SafeFakeVolumeResizer.cs" Link="CacheViewModels\SafeFakeVolumeResizer.cs" />
+  </ItemGroup>
+
+  <!--
+    Concept A "ecosystem cards": the per-ecosystem adapter VM (EcosystemCardViewModel) and its
+    owner (EcosystemsViewModel) are pure restructure layers over the same caches + suite engines,
+    so they are UI-agnostic too and linked in for headless grouping/aggregate + map/remap tests.
+  -->
+  <ItemGroup>
+    <Compile Include="..\DevDriveManager\ViewModels\EcosystemCardViewModel.cs" Link="EcosystemViewModels\EcosystemCardViewModel.cs" />
+    <Compile Include="..\DevDriveManager\ViewModels\EcosystemsViewModel.cs" Link="EcosystemViewModels\EcosystemsViewModel.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Microsoft.VisualStudio.TestTools.UnitTesting" />
+  </ItemGroup>
+
+</Project>

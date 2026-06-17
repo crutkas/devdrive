@@ -1,0 +1,65 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    DevDriveManager.FilterProbe: a tiny, self-contained console helper that the main app launches
+    UAC-elevated (Verb="runas") so it can do one elevated thing per short UAC prompt WITHOUT restarting
+    the whole app as administrator (the "Iso app" pattern).
+
+    It started life strictly READ-ONLY (`fsutil devdrv query <X:>` => JSON), and that `query` verb still
+    performs NO mutation. It now ALSO hosts the gated resize broker: the `resize` whatif mode is
+    READ-ONLY (feasibility only), while the `resize` execute mode is the single DESTRUCTIVE path
+    (shrink => carve => Format-Volume DevDrive). The destructive path is reached only via an explicit,
+    authorized execute request that the app keeps behind a default-off feature flag, an explicit user
+    confirmation, and UAC elevation; before it runs, ResizeGuard re-validates the plan against a fresh
+    read-only disk snapshot. See Program.cs for the full safety model.
+
+    Framework-dependent net10.0 win-x64. It ships INSIDE the MSIX next to DevDriveManager.exe (see the
+    copy target in DevDriveManager.csproj), so when launched it resolves the .NET runtime that the main
+    app already carries in that same directory.
+  -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>DevDriveManager.FilterProbe</RootNamespace>
+    <AssemblyName>DevDriveManager.FilterProbe</AssemblyName>
+    <Platforms>x86;x64;ARM64</Platforms>
+    <!-- RID follows the build Platform so the apphost arch matches the main app (x64 by default). -->
+    <RuntimeIdentifier Condition="'$(Platform)' == 'ARM64'">win-arm64</RuntimeIdentifier>
+    <RuntimeIdentifier Condition="'$(Platform)' == 'x86'">win-x86</RuntimeIdentifier>
+    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">win-x64</RuntimeIdentifier>
+    <!--
+      MUST be self-contained: shipped INSIDE the main app's self-contained MSIX, the helper's apphost
+      otherwise loads the package's bundled (self-contained) hostfxr.dll, which then can't find a shared
+      framework and fails to launch. A self-contained apphost instead resolves the runtime from its own
+      directory — which is the main app's install dir, where the .NET runtime already lives. Only the
+      helper's OWN 4 files are copied into the package (see DevDriveManager.csproj), NOT a duplicate
+      runtime, so the package stays lean.
+    -->
+    <SelfContained>true</SelfContained>
+    <UseAppHost>true</UseAppHost>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- No UI, no satellite assemblies, no extra junk in the package dir. -->
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <!--
+    Shared, dependency-free Core sources linked in (NOT a project reference) so the helper reuses the
+    EXACT same resize models + guard logic as the app without taking a Windows-TFM dependency on
+    DevDriveCore (which would break this helper's lean self-contained net10.0 packaging). The wire format
+    across the elevation boundary is JSON, so compiling its own copy of these types is harmless. These
+    files use only System.* + System.Text.Json, so they compile cleanly under plain net10.0.
+  -->
+  <ItemGroup>
+    <Compile Include="..\DevDriveCore\ByteSizeFormatter.cs" Link="Shared\ByteSizeFormatter.cs" />
+    <Compile Include="..\DevDriveCore\Models\ResizePlan.cs" Link="Shared\ResizePlan.cs" />
+    <Compile Include="..\DevDriveCore\Models\DiskLayoutSnapshot.cs" Link="Shared\DiskLayoutSnapshot.cs" />
+    <Compile Include="..\DevDriveCore\Models\ResizeFeasibility.cs" Link="Shared\ResizeFeasibility.cs" />
+    <Compile Include="..\DevDriveCore\Models\ResizeExecuteOutcome.cs" Link="Shared\ResizeExecuteOutcome.cs" />
+    <Compile Include="..\DevDriveCore\Services\ResizeGuard.cs" Link="Shared\ResizeGuard.cs" />
+  </ItemGroup>
+
+</Project>

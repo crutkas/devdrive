@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Application
+    x:Class="DevDriveManager.App"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:DevDriveManager">
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
+                <!-- Other merged dictionaries here -->
+            </ResourceDictionary.MergedDictionaries>
+            <!--  App-level drive colours, used by BOTH the perf bars (via ThemeResource) and the location
+                  chips (resolved through Application.Current.Resources in MainPage.xaml.cs). They are ONE
+                  accent family — never grey: the Dev Drive is the user's bright/base accent and the system
+                  (C:) drive is a DARKER accent shade, so the Dev Drive reads as the brighter, highlighted
+                  one. Foreground brushes pair readable text onto each fill. High Contrast swaps to
+                  SystemColor* so it auto-corrects (Dev = Highlight, system = WindowText).  -->
+            <ResourceDictionary.ThemeDictionaries>
+                <ResourceDictionary x:Key="Light">
+                    <StaticResource x:Key="PerfDevDriveBarBrush" ResourceKey="AccentFillColorDefaultBrush" />
+                    <StaticResource x:Key="PerfDevDriveForegroundBrush" ResourceKey="TextOnAccentFillColorPrimaryBrush" />
+                    <SolidColorBrush x:Key="PerfBaselineBarBrush" Color="{ThemeResource SystemAccentColorDark2}" />
+                    <SolidColorBrush x:Key="PerfBaselineForegroundBrush" Color="White" />
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="Dark">
+                    <StaticResource x:Key="PerfDevDriveBarBrush" ResourceKey="AccentFillColorDefaultBrush" />
+                    <StaticResource x:Key="PerfDevDriveForegroundBrush" ResourceKey="TextOnAccentFillColorPrimaryBrush" />
+                    <SolidColorBrush x:Key="PerfBaselineBarBrush" Color="{ThemeResource SystemAccentColorDark2}" />
+                    <SolidColorBrush x:Key="PerfBaselineForegroundBrush" Color="White" />
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="HighContrast">
+                    <StaticResource x:Key="PerfDevDriveBarBrush" ResourceKey="SystemColorHighlightColorBrush" />
+                    <StaticResource x:Key="PerfDevDriveForegroundBrush" ResourceKey="SystemColorHighlightTextColorBrush" />
+                    <StaticResource x:Key="PerfBaselineBarBrush" ResourceKey="SystemColorWindowTextColorBrush" />
+                    <StaticResource x:Key="PerfBaselineForegroundBrush" ResourceKey="SystemColorWindowColorBrush" />
+                </ResourceDictionary>
+            </ResourceDictionary.ThemeDictionaries>
+            <!-- Other app resources here -->
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>
