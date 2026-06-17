@@ -22,10 +22,9 @@
     <TargetFramework>net10.0</TargetFramework>
     <RootNamespace>DevDriveManager.FilterProbe</RootNamespace>
     <AssemblyName>DevDriveManager.FilterProbe</AssemblyName>
-    <Platforms>x86;x64;ARM64</Platforms>
+    <Platforms>x64;ARM64</Platforms>
     <!-- RID follows the build Platform so the apphost arch matches the main app (x64 by default). -->
     <RuntimeIdentifier Condition="'$(Platform)' == 'ARM64'">win-arm64</RuntimeIdentifier>
-    <RuntimeIdentifier Condition="'$(Platform)' == 'x86'">win-x86</RuntimeIdentifier>
     <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">win-x64</RuntimeIdentifier>
     <!--
       MUST be self-contained: shipped INSIDE the main app's self-contained MSIX, the helper's apphost

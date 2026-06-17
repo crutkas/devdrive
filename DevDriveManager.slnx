@@ -1,13 +1,22 @@
 <Solution>
   <Configurations>
-    <BuildType Name="Debug" />
-    <BuildType Name="Release" />
     <Platform Name="x64" />
-    <Platform Name="x86" />
     <Platform Name="ARM64" />
   </Configurations>
-  <Project Path="DevDriveCore/DevDriveCore.csproj" />
-  <Project Path="DevDriveCore.Tests/DevDriveCore.Tests.csproj" />
-  <Project Path="DevDriveManager/DevDriveManager.csproj" />
-  <Project Path="DevDriveManager.FilterProbe/DevDriveManager.FilterProbe.csproj" />
+  <Project Path="DevDriveCore/DevDriveCore.csproj">
+    <Platform Solution="*|x64" Project="x64" />
+    <Platform Solution="*|ARM64" Project="ARM64" />
+  </Project>
+  <Project Path="DevDriveCore.Tests/DevDriveCore.Tests.csproj">
+    <Platform Solution="*|x64" Project="x64" />
+    <Platform Solution="*|ARM64" Project="ARM64" />
+  </Project>
+  <Project Path="DevDriveManager/DevDriveManager.csproj">
+    <Platform Solution="*|x64" Project="x64" />
+    <Platform Solution="*|ARM64" Project="ARM64" />
+  </Project>
+  <Project Path="DevDriveManager.FilterProbe/DevDriveManager.FilterProbe.csproj">
+    <Platform Solution="*|x64" Project="x64" />
+    <Platform Solution="*|ARM64" Project="ARM64" />
+  </Project>
 </Solution>
