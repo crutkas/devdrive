@@ -153,6 +153,14 @@ public partial class PerfSuiteRowViewModel : ObservableObject
     [ObservableProperty]
     public partial bool HasRawRuns { get; set; }
 
+    /// <summary>Where the wall-clock time actually went (prepare + cold-cache copy + builds), shown after a run.</summary>
+    [ObservableProperty]
+    public partial string PhaseBreakdownText { get; set; } = string.Empty;
+
+    /// <summary>True once a phase breakdown is available (after a measured run); drives its visibility.</summary>
+    [ObservableProperty]
+    public partial bool HasPhaseBreakdown { get; set; }
+
     /// <summary>Resets the row to its dimmed "Queued" state and clears any previous result.</summary>
     public void Reset()
     {
@@ -171,6 +179,8 @@ public partial class PerfSuiteRowViewModel : ObservableObject
         SystemRunsText = string.Empty;
         DevRunsText = string.Empty;
         HasRawRuns = false;
+        PhaseBreakdownText = string.Empty;
+        HasPhaseBreakdown = false;
         Speedup = 0d;
         AutomationName = $"{Name}: queued.";
     }
@@ -209,8 +219,46 @@ public partial class PerfSuiteRowViewModel : ObservableObject
         SystemRunsText = FormatRuns(metric.SystemRuns, SystemDriveLabel, metric.SystemSeconds);
         DevRunsText = FormatRuns(metric.DevRuns, DevDriveLabel, metric.DevSeconds);
         HasRawRuns = metric.SystemRuns.Count > 0 || metric.DevRuns.Count > 0;
+        PhaseBreakdownText = FormatPhaseBreakdown(metric);
+        HasPhaseBreakdown = metric.TotalSeconds > 0d;
 
         ApplyResult(metric.SystemSeconds, metric.DevSeconds, higherIsBetter: false, systemValue, devValue);
+    }
+
+    /// <summary>
+    /// Honest, plain-language breakdown of where the row's wall-clock went — so a ~15s reported result that
+    /// actually took minutes is not a black box. The reported delta above is the MEDIAN BUILD only.
+    /// </summary>
+    private static string FormatPhaseBreakdown(WorkloadMetric metric)
+    {
+        int runs = metric.SystemRuns.Count + metric.DevRuns.Count;
+        return $"Time spent: {FormatDuration(metric.TotalSeconds)} total \u2014 prepare (clone + warm cache) " +
+            $"{FormatDuration(metric.PrepareSeconds)} \u00B7 cold-cache copy {FormatDuration(metric.SetupSeconds)} \u00B7 " +
+            $"builds {FormatDuration(metric.BuildSeconds)} ({runs} runs). The result above is the median build only.";
+    }
+
+    /// <summary>Formats a duration as "&lt;1s", "42s", or "2m 05s".</summary>
+    private static string FormatDuration(double seconds)
+    {
+        if (seconds < 1d)
+        {
+            return "<1s";
+        }
+
+        if (seconds < 60d)
+        {
+            return $"{(int)Math.Round(seconds)}s";
+        }
+
+        int minutes = (int)(seconds / 60d);
+        int remainder = (int)Math.Round(seconds - (minutes * 60d));
+        if (remainder == 60)
+        {
+            minutes++;
+            remainder = 0;
+        }
+
+        return $"{minutes}m {remainder:00}s";
     }
 
     /// <summary>Marks the row skipped with a reason (missing tool, no network, low disk, cancelled…).</summary>

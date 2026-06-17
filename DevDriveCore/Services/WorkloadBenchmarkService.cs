@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using DevDriveCore.Abstractions;
 using DevDriveCore.Models;
 using DevDriveCore.Platform;
@@ -182,12 +183,24 @@ public sealed class WorkloadBenchmarkService : IWorkloadBenchmarkService
         try
         {
             progress?.Report(new WorkloadRunProgress(WorkloadRunStage.Preparing, 0, iterations));
+            var prepareStopwatch = Stopwatch.StartNew();
             benchmark.Prepare(environment, cancellationToken);
+            prepareStopwatch.Stop();
 
+            // Wrap each per-drive measurement so we can separate the UNTIMED per-iteration setup (the cold
+            // cache re-copy + source copy) from the measured builds: setup = measured wall-clock − the build
+            // times themselves. This is what makes a ~15s build take minutes — surfaced for transparency.
+            var measureStopwatch = Stopwatch.StartNew();
             double[] systemRuns = MeasureDrive(benchmark, systemDriveRoot, iterations, WorkloadRunStage.SystemDrive, progress, cancellationToken);
             double[] devRuns = MeasureDrive(benchmark, devDriveRoot, iterations, WorkloadRunStage.DevDrive, progress, cancellationToken);
+            measureStopwatch.Stop();
 
-            return WorkloadMath.BuildMetric(benchmark.Name, benchmark.Detail, systemRuns, devRuns);
+            double buildSeconds = systemRuns.Sum() + devRuns.Sum();
+            double setupSeconds = measureStopwatch.Elapsed.TotalSeconds - buildSeconds; // cold-cache + source copy
+
+            return WorkloadMath.BuildMetric(
+                benchmark.Name, benchmark.Detail, systemRuns, devRuns,
+                prepareStopwatch.Elapsed.TotalSeconds, setupSeconds);
         }
         catch (OperationCanceledException)
         {

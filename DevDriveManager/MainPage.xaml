@@ -841,6 +841,14 @@
                                                         Style="{StaticResource CaptionTextBlockStyle}"
                                                         Text="{x:Bind Benchmark.Sub, Mode=OneWay}"
                                                         TextWrapping="Wrap" />
+
+                                                    <!--  Where the wall-clock actually went (prepare + cold-cache copy + builds) — shown after a run so the long runtime isn't a black box  -->
+                                                    <TextBlock
+                                                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                                        Style="{StaticResource CaptionTextBlockStyle}"
+                                                        Text="{x:Bind Benchmark.PhaseBreakdownText, Mode=OneWay}"
+                                                        TextWrapping="Wrap"
+                                                        Visibility="{x:Bind local:MainPage.BoolToVisibility(Benchmark.HasPhaseBreakdown), Mode=OneWay}" />
                                                 </StackPanel>
                                             </Border>
 

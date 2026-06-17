@@ -70,6 +70,29 @@ public sealed class WorkloadMathTests
     }
 
     [TestMethod]
+    public void BuildMetric_CarriesPhaseTimings_AndComputesBuildAndTotal()
+    {
+        var system = new[] { 5d, 3d, 3d };
+        var dev = new[] { 4d, 2d, 2d };
+
+        WorkloadMetric m = WorkloadMath.BuildMetric("dotnet build", "rx", system, dev, prepareSeconds: 45d, setupSeconds: 30d);
+
+        Assert.AreEqual(45d, m.PrepareSeconds, 1e-9);
+        Assert.AreEqual(30d, m.SetupSeconds, 1e-9);
+        Assert.AreEqual(19d, m.BuildSeconds, 1e-9);  // (5+3+3) + (4+2+2) = 11 + 8
+        Assert.AreEqual(94d, m.TotalSeconds, 1e-9);  // 45 + 30 + 19
+    }
+
+    [TestMethod]
+    public void BuildMetric_NegativePhaseTimings_AreClampedToZero()
+    {
+        WorkloadMetric m = WorkloadMath.BuildMetric("x", "y", new[] { 2d }, new[] { 1d }, prepareSeconds: -5d, setupSeconds: -3d);
+
+        Assert.AreEqual(0d, m.PrepareSeconds, 1e-9);
+        Assert.AreEqual(0d, m.SetupSeconds, 1e-9);
+    }
+
+    [TestMethod]
     public void Skipped_ProducesSkippedRowWithReasonAndZeroSpeedup()
     {
         WorkloadMetric metric = WorkloadMath.Skipped("npm ci", "chalk", "npm is not installed");

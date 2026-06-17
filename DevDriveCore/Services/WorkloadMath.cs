@@ -56,7 +56,7 @@ public static class WorkloadMath
     /// first run (see <see cref="MedianAfterDiscardingFirst"/>). The raw runs are preserved on the
     /// metric for transparency.
     /// </summary>
-    public static WorkloadMetric BuildMetric(string name, string detail, IReadOnlyList<double> systemRuns, IReadOnlyList<double> devRuns)
+    public static WorkloadMetric BuildMetric(string name, string detail, IReadOnlyList<double> systemRuns, IReadOnlyList<double> devRuns, double prepareSeconds = 0d, double setupSeconds = 0d)
     {
         IReadOnlyList<double> system = systemRuns ?? Array.Empty<double>();
         IReadOnlyList<double> dev = devRuns ?? Array.Empty<double>();
@@ -70,6 +70,8 @@ public static class WorkloadMath
             DevSeconds = MedianAfterDiscardingFirst(dev),
             SystemRuns = system,
             DevRuns = dev,
+            PrepareSeconds = Math.Max(0d, prepareSeconds),
+            SetupSeconds = Math.Max(0d, setupSeconds),
         };
     }
 

@@ -190,6 +190,22 @@ public sealed class WorkloadBenchmarkServiceTests
     }
 
     [TestMethod]
+    public async Task RunAsync_PopulatesPhaseTimings_BuildSecondsSumsEveryRun()
+    {
+        var git = new FakeWorkloadBenchmark("git clone", "git", SystemRoot, systemSeconds: 4d, devSeconds: 2d);
+        var service = Service(new IWorkloadBenchmark[] { git }, Detector(("git", true)), iterations: 3);
+
+        WorkloadComparison comparison = await service.RunAsync(SystemRoot, DevRoot, 'G');
+        WorkloadMetric m = comparison.Metrics[0];
+
+        // 3 system runs (4d) + 3 dev runs (2d) = 18s of measured builds, across both drives.
+        Assert.AreEqual(18d, m.BuildSeconds, 1e-9);
+        Assert.IsGreaterThanOrEqualTo(0d, m.PrepareSeconds);
+        Assert.IsGreaterThanOrEqualTo(0d, m.SetupSeconds);
+        Assert.IsGreaterThanOrEqualTo(m.BuildSeconds, m.TotalSeconds); // total >= just the builds
+    }
+
+    [TestMethod]
     public async Task RunAsync_BlankRoots_Throw()
     {
         var service = Service(Array.Empty<IWorkloadBenchmark>(), Detector());
