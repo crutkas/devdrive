@@ -23,7 +23,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
-    <Platforms>AnyCPU;x86;x64;ARM64</Platforms>
+    <Platforms>x86;x64;ARM64</Platforms>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <!-- Some public members are self-documenting; don't fail the build on missing XML docs. -->
     <NoWarn>$(NoWarn);CS1591</NoWarn>
