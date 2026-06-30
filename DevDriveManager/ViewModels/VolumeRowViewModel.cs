@@ -71,6 +71,12 @@ public sealed class VolumeRowViewModel
 
     public string AutomationName { get; }
 
+    /// <summary>
+    /// True for alternate ("banded") rows so the volumes table gives the eye a stripe to follow. Assigned
+    /// by the loader in row order; bound OneTime by the Drives page.
+    /// </summary>
+    public bool BandAlt { get; set; }
+
     private string BuildAutomationName(string label, string fileSystem, string size, string free)
     {
         string head = Volume.DriveLetter is char c ? $"Drive {c}, {label}" : label;

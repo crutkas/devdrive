@@ -1,0 +1,388 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Page
+    x:Class="DevDriveManager.Pages.PackageCachesPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:CommunityToolkit.WinUI.Controls"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:local="using:DevDriveManager"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:vm="using:DevDriveManager.ViewModels"
+    mc:Ignorable="d">
+
+    <Page.Resources>
+        <ResourceDictionary>
+            <!--  Shared inline-confirm panel: a subtle accent-tinted card that reveals in place when a
+                  gated, explicit action is invoked. Hosts supply a body caption + Cancel + accent Confirm;
+                  confirming runs the REAL, reversible change.  -->
+            <Style x:Key="InlineConfirmPanelStyle" TargetType="Border">
+                <Setter Property="Background" Value="{ThemeResource SystemFillColorAttentionBackgroundBrush}" />
+                <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="CornerRadius" Value="{StaticResource ControlCornerRadius}" />
+                <Setter Property="Padding" Value="12,8" />
+            </Style>
+
+            <!--  One developer tool's cache row — banded, with the REAL reversible Move / Move back /
+                  Map / Move &amp; remap engine reused verbatim. Shared by all three status groups.  -->
+            <DataTemplate x:Key="CacheRowTemplate" x:DataType="vm:PackageCacheRowViewModel">
+                <StackPanel Spacing="4">
+                    <controls:SettingsCard
+                        AutomationProperties.AutomationId="{x:Bind RowAutomationId}"
+                        AutomationProperties.Name="{x:Bind AutomationName, Mode=OneWay}"
+                        Background="{x:Bind local:UiHelpers.BandBrush(BandAlt), Mode=OneWay}"
+                        Description="{x:Bind Description}"
+                        Header="{x:Bind Header}"
+                        Opacity="{x:Bind RowOpacity}"
+                        ToolTipService.ToolTip="{x:Bind ResolvedPath}">
+                        <controls:SettingsCard.HeaderIcon>
+                            <FontIcon Glyph="&#xE8B7;" />
+                        </controls:SettingsCard.HeaderIcon>
+                        <StackPanel
+                            Orientation="Horizontal"
+                            VerticalAlignment="Center"
+                            Spacing="10">
+                            <TextBlock
+                                VerticalAlignment="Center"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Text="{x:Bind SizeText, Mode=OneWay}" />
+                            <Border
+                                Padding="10,2,10,3"
+                                VerticalAlignment="Center"
+                                Background="{x:Bind local:UiHelpers.PillBackground(StatusKind), Mode=OneWay}"
+                                CornerRadius="10">
+                                <TextBlock
+                                    Foreground="{x:Bind local:UiHelpers.PillForeground(StatusKind), Mode=OneWay}"
+                                    Style="{StaticResource CaptionTextBlockStyle}"
+                                    Text="{x:Bind StatusText, Mode=OneWay}" />
+                            </Border>
+                            <Button
+                                AutomationProperties.AutomationId="{x:Bind MoveButtonAutomationId}"
+                                Command="{x:Bind MoveCommand}"
+                                Content="Move"
+                                Style="{StaticResource AccentButtonStyle}"
+                                Visibility="{x:Bind local:UiHelpers.BoolToVisibility(ShowMoveButton), Mode=OneWay}" />
+                            <Button
+                                AutomationProperties.AutomationId="{x:Bind MoveBackButtonAutomationId}"
+                                Command="{x:Bind MoveBackCommand}"
+                                Content="Move back"
+                                Visibility="{x:Bind local:UiHelpers.BoolToVisibility(ShowMoveBackButton), Mode=OneWay}" />
+                            <FontIcon
+                                AutomationProperties.Name="Already on Dev Drive"
+                                FontSize="16"
+                                Foreground="{ThemeResource SystemFillColorSuccessBrush}"
+                                Glyph="&#xE73E;"
+                                Visibility="{x:Bind local:UiHelpers.BoolToVisibility(IsSet), Mode=OneWay}" />
+                        </StackPanel>
+                    </controls:SettingsCard>
+
+                    <!--  Map / Move &amp; remap for an UNDETECTED tool (no dead "Not found")  -->
+                    <Border
+                        Margin="48,2,16,2"
+                        AutomationProperties.AutomationId="{x:Bind MapBlockAutomationId}"
+                        Style="{StaticResource InlineConfirmPanelStyle}"
+                        Visibility="{x:Bind local:UiHelpers.BoolToVisibility(ShowMapBlock), Mode=OneWay}">
+                        <StackPanel Spacing="8">
+                            <TextBlock
+                                Style="{StaticResource CaptionTextBlockStyle}"
+                                Text="Point us at this tool's cache folder and we'll track it (per-user, reversible). If that folder already exists, &#x201C;Move &amp; remap&#x201D; also copies it onto your Dev Drive."
+                                TextWrapping="Wrap" />
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBox
+                                    Grid.Column="0"
+                                    AutomationProperties.AutomationId="{x:Bind MapPathInputAutomationId}"
+                                    AutomationProperties.Name="Cache folder path"
+                                    Text="{x:Bind MapPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                <Button
+                                    Grid.Column="1"
+                                    AutomationProperties.AutomationId="{x:Bind BrowseMapPathButtonAutomationId}"
+                                    AutomationProperties.Name="Browse for cache folder"
+                                    Click="BrowseForMapPath_Click">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <FontIcon FontSize="14" Glyph="&#xE838;" />
+                                        <TextBlock Text="Browse&#x2026;" />
+                                    </StackPanel>
+                                </Button>
+                            </Grid>
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <Button
+                                    AutomationProperties.AutomationId="{x:Bind MapPathButtonAutomationId}"
+                                    Command="{x:Bind MapPathActionCommand}"
+                                    Style="{StaticResource AccentButtonStyle}">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <FontIcon FontSize="14" Glyph="&#xE81E;" />
+                                        <TextBlock Text="Map path" />
+                                    </StackPanel>
+                                </Button>
+                                <Button
+                                    AutomationProperties.AutomationId="{x:Bind MoveAndRemapButtonAutomationId}"
+                                    Command="{x:Bind MoveAndRemapCommand}"
+                                    Visibility="{x:Bind local:UiHelpers.BoolToVisibility(CanMoveAndRemap), Mode=OneWay}">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <FontIcon FontSize="14" Glyph="&#xE8DE;" />
+                                        <TextBlock Text="Move &amp; remap" />
+                                    </StackPanel>
+                                </Button>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <!--  Inline confirm — Move / Map / Move &amp; remap all funnel through this gated panel  -->
+                    <Border
+                        Margin="48,2,16,2"
+                        AutomationProperties.AutomationId="{x:Bind MoveConfirmPanelAutomationId}"
+                        Style="{StaticResource InlineConfirmPanelStyle}"
+                        Visibility="{x:Bind local:UiHelpers.BoolToVisibility(IsConfirmingMove), Mode=OneWay}">
+                        <StackPanel Spacing="8">
+                            <TextBlock
+                                Style="{StaticResource CaptionTextBlockStyle}"
+                                Text="{x:Bind MoveConfirmBodyText, Mode=OneWay}"
+                                TextWrapping="Wrap" />
+                            <StackPanel
+                                HorizontalAlignment="Right"
+                                Orientation="Horizontal"
+                                Spacing="8">
+                                <Button
+                                    AutomationProperties.AutomationId="{x:Bind CancelMoveButtonAutomationId}"
+                                    Command="{x:Bind CancelMoveCommand}"
+                                    Content="Cancel" />
+                                <Button
+                                    AutomationProperties.AutomationId="{x:Bind ConfirmMoveButtonAutomationId}"
+                                    Command="{x:Bind ConfirmMoveCommand}"
+                                    Content="Confirm"
+                                    Style="{StaticResource AccentButtonStyle}" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <!--  Live per-row progress (files/bytes), off the UI thread via Progress&lt;T&gt;  -->
+                    <StackPanel
+                        Margin="48,0,16,2"
+                        Spacing="4"
+                        Visibility="{x:Bind local:UiHelpers.BoolToVisibility(IsMoving), Mode=OneWay}">
+                        <Grid ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <ProgressBar
+                                Grid.Column="0"
+                                VerticalAlignment="Center"
+                                AutomationProperties.AutomationId="{x:Bind MoveProgressAutomationId}"
+                                AutomationProperties.Name="Move progress"
+                                Maximum="100"
+                                Value="{x:Bind MoveProgressPercent, Mode=OneWay}" />
+                            <Button
+                                Grid.Column="1"
+                                AutomationProperties.AutomationId="{x:Bind CancelActiveMoveButtonAutomationId}"
+                                AutomationProperties.Name="Cancel move"
+                                Command="{x:Bind CancelActiveMoveCommand}"
+                                Content="Cancel" />
+                        </Grid>
+                        <TextBlock
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            Text="{x:Bind MoveProgressText, Mode=OneWay}"
+                            TextWrapping="Wrap" />
+                    </StackPanel>
+
+                    <!--  Real, reversible result line after Confirm  -->
+                    <TextBlock
+                        Margin="48,0,16,2"
+                        AutomationProperties.AutomationId="{x:Bind MoveResultAutomationId}"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        Text="{x:Bind MoveResultText, Mode=OneWay}"
+                        TextWrapping="Wrap"
+                        Visibility="{x:Bind local:UiHelpers.BoolToVisibility(ShowMoveResult), Mode=OneWay}" />
+                </StackPanel>
+            </DataTemplate>
+        </ResourceDictionary>
+    </Page.Resources>
+
+    <ScrollViewer AutomationProperties.AutomationId="PackageCachesScrollViewer" VerticalScrollBarVisibility="Auto">
+        <StackPanel
+            MaxWidth="1000"
+            Padding="36,24,36,40"
+            HorizontalAlignment="Stretch"
+            Spacing="20">
+
+            <!--  Page header  -->
+            <StackPanel Spacing="4">
+                <TextBlock Style="{StaticResource TitleTextBlockStyle}" Text="Package caches" />
+                <TextBlock
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Style="{StaticResource BodyTextBlockStyle}"
+                    Text="Moving copies a tool's cache to your Dev Drive and repoints its per-user environment variable. Nothing is deleted and it's reversible at any time."
+                    TextWrapping="Wrap" />
+                <HyperlinkButton
+                    AutomationProperties.AutomationId="LearnWhatThisDoes"
+                    Padding="0"
+                    Click="LearnAboutCacheMoves_Click"
+                    Content="Learn what this does" />
+            </StackPanel>
+
+            <!--  ── Move-all hero ──  -->
+            <Border
+                Padding="18"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="{StaticResource ControlCornerRadius}">
+                <StackPanel Spacing="12">
+                    <Grid ColumnSpacing="14">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <FontIcon
+                            Grid.Column="0"
+                            VerticalAlignment="Center"
+                            FontSize="22"
+                            Foreground="{ThemeResource SystemFillColorCautionBrush}"
+                            Glyph="&#xE7BA;" />
+                        <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                            <TextBlock
+                                AutomationProperties.AutomationId="CachesWarning"
+                                Style="{StaticResource BodyStrongTextBlockStyle}"
+                                Text="{x:Bind Caches.WarningMessage, Mode=OneWay}"
+                                TextWrapping="Wrap" />
+                            <TextBlock
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Style="{StaticResource CaptionTextBlockStyle}"
+                                Text="One click moves every detected cache that's still on your system drive."
+                                Visibility="{x:Bind local:UiHelpers.BoolToVisibility(Caches.ShowMoveAllButton), Mode=OneWay}" />
+                        </StackPanel>
+                        <Button
+                            Grid.Column="2"
+                            VerticalAlignment="Center"
+                            AutomationProperties.AutomationId="MoveAllButton"
+                            Command="{x:Bind Caches.MoveAllCommand}"
+                            Content="{x:Bind Caches.MoveAllButtonText, Mode=OneWay}"
+                            Style="{StaticResource AccentButtonStyle}"
+                            Visibility="{x:Bind local:UiHelpers.BoolToVisibility(Caches.ShowMoveAllButton), Mode=OneWay}" />
+                    </Grid>
+
+                    <!--  All-clear state  -->
+                    <StackPanel
+                        Orientation="Horizontal"
+                        Spacing="8"
+                        Visibility="{x:Bind local:UiHelpers.InvertBoolToVisibility(Caches.HasCachesOnSystemDrive), Mode=OneWay}">
+                        <FontIcon
+                            FontSize="16"
+                            Foreground="{ThemeResource SystemFillColorSuccessBrush}"
+                            Glyph="&#xE73E;" />
+                        <TextBlock
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            Text="Every detected cache is already on your Dev Drive."
+                            TextWrapping="Wrap" />
+                    </StackPanel>
+
+                    <!--  Move-all inline confirm  -->
+                    <Border
+                        AutomationProperties.AutomationId="MoveAllConfirmPanel"
+                        Style="{StaticResource InlineConfirmPanelStyle}"
+                        Visibility="{x:Bind local:UiHelpers.BoolToVisibility(Caches.IsConfirmingMoveAll), Mode=OneWay}">
+                        <StackPanel Spacing="8">
+                            <TextBlock
+                                Style="{StaticResource CaptionTextBlockStyle}"
+                                Text="{x:Bind Caches.MoveAllConfirmBodyText, Mode=OneWay}"
+                                TextWrapping="Wrap" />
+                            <StackPanel
+                                HorizontalAlignment="Right"
+                                Orientation="Horizontal"
+                                Spacing="8">
+                                <Button
+                                    AutomationProperties.AutomationId="CancelMoveAllButton"
+                                    Command="{x:Bind Caches.CancelMoveAllCommand}"
+                                    Content="Cancel" />
+                                <Button
+                                    AutomationProperties.AutomationId="ConfirmMoveAllButton"
+                                    Command="{x:Bind Caches.ConfirmMoveAllCommand}"
+                                    Content="Move all"
+                                    Style="{StaticResource AccentButtonStyle}" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <!--  Move-all result  -->
+                    <TextBlock
+                        AutomationProperties.AutomationId="MoveAllResult"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        Text="{x:Bind Caches.MoveAllResultText, Mode=OneWay}"
+                        TextWrapping="Wrap"
+                        Visibility="{x:Bind local:UiHelpers.BoolToVisibility(Caches.ShowMoveAllResult), Mode=OneWay}" />
+                </StackPanel>
+            </Border>
+
+            <!--  ── Group: Needs action (on system drive, movable) ──  -->
+            <StackPanel x:Name="NeedsActionSection" Spacing="8">
+                <TextBlock
+                    x:Name="NeedsActionHeader"
+                    Style="{StaticResource BodyStrongTextBlockStyle}"
+                    Text="Needs action" />
+                <ItemsControl
+                    AutomationProperties.AutomationId="NeedsActionList"
+                    HorizontalContentAlignment="Stretch"
+                    ItemsSource="{x:Bind NeedsAction, Mode=OneWay}"
+                    ItemTemplate="{StaticResource CacheRowTemplate}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <StackPanel Spacing="2" />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                </ItemsControl>
+            </StackPanel>
+
+            <!--  ── Group: On your Dev Drive ──  -->
+            <StackPanel x:Name="OnDevDriveSection" Spacing="8">
+                <TextBlock
+                    x:Name="OnDevDriveHeader"
+                    Style="{StaticResource BodyStrongTextBlockStyle}"
+                    Text="On your Dev Drive" />
+                <ItemsControl
+                    AutomationProperties.AutomationId="OnDevDriveList"
+                    HorizontalContentAlignment="Stretch"
+                    ItemsSource="{x:Bind OnDevDrive, Mode=OneWay}"
+                    ItemTemplate="{StaticResource CacheRowTemplate}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <StackPanel Spacing="2" />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                </ItemsControl>
+            </StackPanel>
+
+            <!--  ── Group: Not installed ──  -->
+            <StackPanel x:Name="NotInstalledSection" Spacing="8">
+                <TextBlock
+                    x:Name="NotInstalledHeader"
+                    Style="{StaticResource BodyStrongTextBlockStyle}"
+                    Text="Not installed" />
+                <TextBlock
+                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                    Style="{StaticResource CaptionTextBlockStyle}"
+                    Text="We didn't find these tools. If you use one, point us at its cache folder to track it."
+                    TextWrapping="Wrap" />
+                <ItemsControl
+                    AutomationProperties.AutomationId="NotInstalledList"
+                    HorizontalContentAlignment="Stretch"
+                    ItemsSource="{x:Bind NotInstalled, Mode=OneWay}"
+                    ItemTemplate="{StaticResource CacheRowTemplate}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <StackPanel Spacing="2" />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                </ItemsControl>
+            </StackPanel>
+        </StackPanel>
+    </ScrollViewer>
+</Page>

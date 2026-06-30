@@ -1,3 +1,4 @@
+using DevDriveManager.ViewModels;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Data;
@@ -35,6 +36,13 @@ public partial class App : Application
     /// </summary>
     public static nint WindowHandle =>
         WinRT.Interop.WindowNative.GetWindowHandle(Window);
+
+    /// <summary>
+    /// The single, shared composition-root view model. Every page in the NavigationView shell binds to
+    /// this one instance (or its sub-view-models), so the expensive volume / Dev Drive / package-cache
+    /// load runs once and all pages reflect the same live state. Created lazily on first access.
+    /// </summary>
+    public static MainPageViewModel Shared { get; } = new();
 
     /// <summary>
     /// Initializes the singleton application object.
