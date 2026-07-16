@@ -10,9 +10,8 @@ using Windows.Graphics;
 namespace DevDriveManager;
 
 /// <summary>
-/// The application window. This hosts a Frame that displays pages. Add your
-/// UI and logic to MainPage.xaml / MainPage.xaml.cs instead of here so you
-/// can use Page features such as navigation events and the Loaded lifecycle.
+/// The application window. This hosts a Frame that is navigated to <see cref="ShellPage"/> (the
+/// NavigationView shell) on startup; per-area UI lives in the pages under <c>Pages\</c>, not here.
 /// </summary>
 public sealed partial class MainWindow : Window
 {
@@ -28,13 +27,17 @@ public sealed partial class MainWindow : Window
 
         AppWindow.SetIcon("Assets/AppIcon.ico");
 
-        // Size derived from the settings-page layout (wide volume rows + badges): ~940 x 780 DIPs.
+        // Size derived from the new NavigationView shell (248px pane + content): ~1180 x 820 DIPs.
         // AppWindow.Resize takes physical pixels, so scale by the window DPI.
         nint hwnd = Win32Interop.GetWindowFromWindowId(AppWindow.Id);
         double scale = GetDpiForWindow(hwnd) / 96.0;
-        AppWindow.Resize(new SizeInt32((int)(940 * scale), (int)(780 * scale)));
+        AppWindow.Resize(new SizeInt32((int)(1180 * scale), (int)(820 * scale)));
 
-        // Navigate the root frame to the main page on startup.
-        RootFrame.Navigate(typeof(MainPage));
+        // Navigate the root frame to the navigation shell on startup.
+        RootFrame.Navigate(typeof(ShellPage));
+
+        // Apply the persisted theme override (System / Light / Dark) to the live content root.
+        DevDriveManager.Services.ThemeService.Initialize();
+        RootFrame.RequestedTheme = DevDriveManager.Services.ThemeService.Mode;
     }
 }

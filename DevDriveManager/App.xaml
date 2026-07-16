@@ -11,7 +11,7 @@
                 <!-- Other merged dictionaries here -->
             </ResourceDictionary.MergedDictionaries>
             <!--  App-level drive colours, used by BOTH the perf bars (via ThemeResource) and the location
-                  chips (resolved through Application.Current.Resources in MainPage.xaml.cs). They are ONE
+                  chips (resolved through Application.Current.Resources in UiHelpers). They are ONE
                   accent family — never grey: the Dev Drive is the user's bright/base accent and the system
                   (C:) drive is a DARKER accent shade, so the Dev Drive reads as the brighter, highlighted
                   one. Foreground brushes pair readable text onto each fill. High Contrast swaps to

@@ -147,6 +147,14 @@ public partial class PackageCacheRowViewModel : ObservableObject
     /// <summary>Dim "Not found" rows so the actionable rows stand out.</summary>
     public double RowOpacity => IsNotFound ? 0.5 : 1.0;
 
+    /// <summary>
+    /// True for alternate ("banded") rows within a status group so the eye has a stripe to follow. Set by
+    /// the Package caches page each time the rows are (re)grouped — moving a cache changes its group and
+    /// hence the banding, so this is observable.
+    /// </summary>
+    [ObservableProperty]
+    public partial bool BandAlt { get; set; }
+
     public string RowAutomationId { get; }
 
     public string MoveButtonAutomationId { get; }

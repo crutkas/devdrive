@@ -1,0 +1,293 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Page
+    x:Class="DevDriveManager.Pages.BenchmarksPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:local="using:DevDriveManager"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:vm="using:DevDriveManager.ViewModels"
+    mc:Ignorable="d">
+
+    <ScrollViewer AutomationProperties.AutomationId="BenchmarksScrollViewer" VerticalScrollBarVisibility="Auto">
+        <StackPanel
+            MaxWidth="1000"
+            Padding="36,24,36,40"
+            HorizontalAlignment="Stretch"
+            Spacing="20">
+
+            <!--  Page header  -->
+            <StackPanel Spacing="2">
+                <TextBlock Style="{StaticResource TitleTextBlockStyle}" Text="Benchmarks" />
+                <TextBlock
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Style="{StaticResource BodyTextBlockStyle}"
+                    Text="Real build workloads, run on demand — compare your system drive against your Dev Drive. No need to babysit; run them when you want a number." />
+            </StackPanel>
+
+            <!--  ── Hero: run-all + streaming headline ──  -->
+            <Border
+                Padding="18"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="{StaticResource ControlCornerRadius}">
+                <StackPanel Spacing="12">
+                    <Grid ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <FontIcon
+                            Grid.Column="0"
+                            VerticalAlignment="Center"
+                            FontSize="22"
+                            Glyph="{x:Bind ViewModel.Suite.SuiteGlyph, Mode=OneTime}" />
+                        <TextBlock
+                            Grid.Column="1"
+                            VerticalAlignment="Center"
+                            AutomationProperties.AutomationId="EcosystemsSummary"
+                            Style="{StaticResource BodyStrongTextBlockStyle}"
+                            Text="{x:Bind ViewModel.Ecosystems.SummaryText, Mode=OneWay}"
+                            TextWrapping="Wrap" />
+                        <StackPanel
+                            Grid.Column="2"
+                            Orientation="Horizontal"
+                            Spacing="8">
+                            <Button
+                                AutomationProperties.AutomationId="CancelTestsButton"
+                                Command="{x:Bind ViewModel.Suite.CancelCommand}"
+                                Content="Cancel"
+                                Visibility="{x:Bind local:UiHelpers.BoolToVisibility(ViewModel.Suite.IsRunning), Mode=OneWay}" />
+                            <Button
+                                AutomationProperties.AutomationId="RunAllTestsButton"
+                                Command="{x:Bind ViewModel.Suite.RunAllCommand}"
+                                Style="{StaticResource AccentButtonStyle}">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <FontIcon FontSize="14" Glyph="{x:Bind ViewModel.Suite.RunGlyph, Mode=OneTime}" />
+                                    <TextBlock Text="Run all tests" />
+                                </StackPanel>
+                            </Button>
+                        </StackPanel>
+                    </Grid>
+
+                    <StackPanel
+                        Spacing="4"
+                        Visibility="{x:Bind local:UiHelpers.BoolToVisibility(ViewModel.Suite.IsRunning), Mode=OneWay}">
+                        <ProgressBar
+                            Maximum="{x:Bind ViewModel.Suite.RunProgressMax, Mode=OneWay}"
+                            Value="{x:Bind ViewModel.Suite.RunProgressValue, Mode=OneWay}" />
+                        <TextBlock
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            Text="{x:Bind ViewModel.Suite.RunStatusText, Mode=OneWay}" />
+                    </StackPanel>
+
+                    <StackPanel
+                        Orientation="Horizontal"
+                        Spacing="8"
+                        Visibility="{x:Bind local:UiHelpers.BoolToVisibility(ViewModel.Suite.HasHeadline), Mode=OneWay}">
+                        <TextBlock
+                            Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                            Style="{StaticResource SubtitleTextBlockStyle}"
+                            Text="{x:Bind ViewModel.Suite.HeadlineValue, Mode=OneWay}" />
+                        <TextBlock
+                            Margin="0,0,0,3"
+                            VerticalAlignment="Bottom"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            Text="{x:Bind ViewModel.Suite.HeadlineCaption, Mode=OneWay}" />
+                    </StackPanel>
+
+                    <StackPanel
+                        Orientation="Horizontal"
+                        Spacing="8"
+                        Visibility="{x:Bind local:UiHelpers.BoolToVisibility(ViewModel.Suite.ShowPerformanceModeCaption), Mode=OneWay}">
+                        <FontIcon
+                            VerticalAlignment="Top"
+                            FontSize="14"
+                            Glyph="{x:Bind ViewModel.Suite.CaveatGlyph, Mode=OneTime}" />
+                        <TextBlock
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            Text="{x:Bind ViewModel.Suite.PerformanceModeCaptionMessage, Mode=OneTime}"
+                            TextWrapping="Wrap" />
+                    </StackPanel>
+
+                    <TextBlock
+                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        Text="{x:Bind ViewModel.Suite.SuiteHonestyLine, Mode=OneTime}"
+                        TextWrapping="Wrap" />
+                </StackPanel>
+            </Border>
+
+            <!--  ── Per-workload measured rows (banded) ──  -->
+            <StackPanel Spacing="8">
+                <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Workloads" />
+
+                <ItemsControl
+                    AutomationProperties.AutomationId="BenchmarkWorkloadsList"
+                    HorizontalContentAlignment="Stretch"
+                    ItemsSource="{x:Bind BenchmarkCards, Mode=OneWay}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <StackPanel Spacing="2" />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:EcosystemCardViewModel">
+                            <Border
+                                Padding="16"
+                                AutomationProperties.AutomationId="{x:Bind AutomationId}"
+                                AutomationProperties.Name="{x:Bind Name}"
+                                Background="{x:Bind local:UiHelpers.BandBrush(BandAlt), Mode=OneWay}"
+                                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                BorderThickness="1"
+                                CornerRadius="{StaticResource ControlCornerRadius}">
+                                <StackPanel Spacing="10">
+                                    <Grid ColumnSpacing="12">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <FontIcon
+                                            Grid.Column="0"
+                                            VerticalAlignment="Center"
+                                            FontSize="18"
+                                            Glyph="{x:Bind Glyph}" />
+                                        <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">
+                                            <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="{x:Bind Name}" />
+                                            <TextBlock
+                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                Style="{StaticResource CaptionTextBlockStyle}"
+                                                Text="{x:Bind ToolsLine}" />
+                                        </StackPanel>
+                                        <TextBlock
+                                            Grid.Column="2"
+                                            Margin="0,0,8,0"
+                                            VerticalAlignment="Center"
+                                            Foreground="{x:Bind local:UiHelpers.RatioBrush(Benchmark.DeltaIsFavorable), Mode=OneWay}"
+                                            Style="{StaticResource SubtitleTextBlockStyle}"
+                                            Text="{x:Bind Benchmark.DeltaText, Mode=OneWay}"
+                                            Visibility="{x:Bind local:UiHelpers.BoolToVisibility(Benchmark.IsDone), Mode=OneWay}" />
+                                        <Button
+                                            Grid.Column="3"
+                                            AutomationProperties.AutomationId="{x:Bind Benchmark.RunButtonAutomationId, Mode=OneTime}"
+                                            AutomationProperties.Name="{x:Bind Benchmark.RunAccessibleName, Mode=OneTime}"
+                                            Command="{x:Bind Benchmark.RunCommand}">
+                                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                                <FontIcon FontSize="14" Glyph="&#xE768;" />
+                                                <TextBlock Text="Run test" />
+                                            </StackPanel>
+                                        </Button>
+                                    </Grid>
+
+                                    <!--  Running indicator  -->
+                                    <TextBlock
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                        Style="{StaticResource CaptionTextBlockStyle}"
+                                        Text="{x:Bind Benchmark.RunStatusText, Mode=OneWay}"
+                                        TextWrapping="Wrap"
+                                        Visibility="{x:Bind local:UiHelpers.BoolToVisibility(Benchmark.IsRunning), Mode=OneWay}" />
+
+                                    <!--  Done: side-by-side C:/Dev bars (slower drive = longer bar; accent = Dev Drive)  -->
+                                    <StackPanel
+                                        Spacing="5"
+                                        Visibility="{x:Bind local:UiHelpers.BoolToVisibility(Benchmark.IsDone), Mode=OneWay}">
+                                        <Grid ColumnSpacing="8">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="28" />
+                                                <ColumnDefinition Width="320" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock
+                                                VerticalAlignment="Center"
+                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                Style="{StaticResource CaptionTextBlockStyle}"
+                                                Text="{x:Bind Benchmark.SystemDriveLabel, Mode=OneTime}" />
+                                            <Border
+                                                Grid.Column="1"
+                                                Height="16"
+                                                HorizontalAlignment="Left"
+                                                Background="{ThemeResource ControlFillColorSecondaryBrush}"
+                                                CornerRadius="4">
+                                                <Border
+                                                    Width="{x:Bind Benchmark.SystemBarWidth, Mode=OneWay}"
+                                                    HorizontalAlignment="Left"
+                                                    Background="{ThemeResource PerfBaselineBarBrush}"
+                                                    CornerRadius="4" />
+                                            </Border>
+                                            <TextBlock
+                                                Grid.Column="2"
+                                                VerticalAlignment="Center"
+                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                Style="{StaticResource CaptionTextBlockStyle}"
+                                                Text="{x:Bind Benchmark.SystemValueText, Mode=OneWay}" />
+                                        </Grid>
+                                        <Grid ColumnSpacing="8">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="28" />
+                                                <ColumnDefinition Width="320" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock
+                                                VerticalAlignment="Center"
+                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                Style="{StaticResource CaptionTextBlockStyle}"
+                                                Text="{x:Bind Benchmark.DevDriveLabel, Mode=OneTime}" />
+                                            <Border
+                                                Grid.Column="1"
+                                                Height="16"
+                                                HorizontalAlignment="Left"
+                                                Background="{ThemeResource ControlFillColorSecondaryBrush}"
+                                                CornerRadius="4">
+                                                <Border
+                                                    Width="{x:Bind Benchmark.DevBarWidth, Mode=OneWay}"
+                                                    HorizontalAlignment="Left"
+                                                    Background="{ThemeResource PerfDevDriveBarBrush}"
+                                                    CornerRadius="4" />
+                                            </Border>
+                                            <TextBlock
+                                                Grid.Column="2"
+                                                VerticalAlignment="Center"
+                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                Style="{StaticResource CaptionTextBlockStyle}"
+                                                Text="{x:Bind Benchmark.DevValueText, Mode=OneWay}" />
+                                        </Grid>
+                                    </StackPanel>
+
+                                    <!--  Skipped: honest reason  -->
+                                    <TextBlock
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                        Style="{StaticResource CaptionTextBlockStyle}"
+                                        Text="{x:Bind Benchmark.SkipReasonText, Mode=OneWay}"
+                                        TextWrapping="Wrap"
+                                        Visibility="{x:Bind local:UiHelpers.BoolToVisibility(Benchmark.IsSkipped), Mode=OneWay}" />
+
+                                    <!--  Methodology / what the build is  -->
+                                    <TextBlock
+                                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                        Style="{StaticResource CaptionTextBlockStyle}"
+                                        Text="{x:Bind Benchmark.Sub, Mode=OneWay}"
+                                        TextWrapping="Wrap" />
+
+                                    <!--  Where the wall-clock went (after a run)  -->
+                                    <TextBlock
+                                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                        Style="{StaticResource CaptionTextBlockStyle}"
+                                        Text="{x:Bind Benchmark.PhaseBreakdownText, Mode=OneWay}"
+                                        TextWrapping="Wrap"
+                                        Visibility="{x:Bind local:UiHelpers.BoolToVisibility(Benchmark.HasPhaseBreakdown), Mode=OneWay}" />
+                                </StackPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
+        </StackPanel>
+    </ScrollViewer>
+</Page>

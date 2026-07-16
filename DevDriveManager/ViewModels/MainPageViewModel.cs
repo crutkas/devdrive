@@ -135,9 +135,10 @@ public partial class MainPageViewModel : ObservableObject
                 });
 
             Volumes.Clear();
+            int volumeIndex = 0;
             foreach (VolumeInfo volume in result.volumes)
             {
-                Volumes.Add(new VolumeRowViewModel(volume));
+                Volumes.Add(new VolumeRowViewModel(volume) { BandAlt = (volumeIndex++ % 2) == 1 });
             }
 
             // Authoritative per-volume effective performance mode: from the (reliable, unelevated-readable)

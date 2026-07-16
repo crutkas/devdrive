@@ -112,6 +112,13 @@ public partial class EcosystemCardViewModel : ObservableObject
     [ObservableProperty]
     public partial int OnDevDriveCount { get; set; }
 
+    /// <summary>
+    /// True for alternate ("banded") rows when this card is rendered in a flat banded list (the Benchmarks
+    /// page). Assigned by the page as it (re)builds its filtered list.
+    /// </summary>
+    [ObservableProperty]
+    public partial bool BandAlt { get; set; }
+
     private void OnRowPropertyChanged(object? sender, PropertyChangedEventArgs e) => Recompute();
 
     private void Recompute()
