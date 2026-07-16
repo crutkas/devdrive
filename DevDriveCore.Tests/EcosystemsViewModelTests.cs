@@ -92,6 +92,45 @@ public sealed class EcosystemsViewModelTests
     }
 
     [TestMethod]
+    public async Task NoDevDrive_StillBuildsDetectedCacheInventory()
+    {
+        EcosystemsViewModel eco = BuildEcosystems(out _, out _);
+
+        eco.Initialize(@"C:\", devRoot: null, devLetter: null, systemLetter: 'C');
+        await WaitUntilAsync(() => eco.Cards.Count == EcosystemCatalog.Default.Count
+            && eco.Caches.Caches.Count == 5
+            && eco.Cards.Count(c => c.IsDetected) == 3);
+
+        Assert.IsFalse(eco.Caches.HasDevDrive);
+        Assert.IsTrue(eco.Caches.HasDetectedCaches);
+        Assert.IsTrue(eco.Caches.Caches.Where(c => c.Info.Detected).All(c => !c.CanMove));
+        Assert.IsFalse(eco.Suite.HasDevDrive);
+        Assert.IsTrue(eco.Suite.RunAllCommand.CanExecute(null));
+        Assert.IsTrue(Card(eco, "Node").HasBenchmark);
+        Assert.IsFalse(Card(eco, "Node").Benchmark!.HasComparison);
+        StringAssert.Contains(eco.SummaryText, "3 ecosystems detected on this PC");
+    }
+
+    [TestMethod]
+    public async Task DriveQueryFailure_RestartsDetectionWithoutMoveCapability()
+    {
+        EcosystemsViewModel eco = BuildEcosystems(out _, out _);
+        eco.Initialize(@"C:\", @"G:\", 'G', 'C');
+        await WaitUntilAsync(() => eco.Caches.Caches.Count == 5);
+        PackageCacheRowViewModel oldRow = eco.Caches.Caches[0];
+
+        eco.SetDevDriveUnavailable("Drive status is unavailable.");
+        await WaitUntilAsync(() => eco.Caches.Caches.Count == 5
+            && !ReferenceEquals(eco.Caches.Caches[0], oldRow));
+
+        Assert.IsFalse(eco.Caches.HasDevDrive);
+        Assert.IsTrue(eco.Caches.HasDetectedCaches);
+        Assert.IsTrue(eco.Caches.Caches.All(row => !row.CanMove));
+        Assert.IsTrue(eco.Suite.ShowSystemDriveBaseline);
+        Assert.AreEqual("Drive status is unavailable.", eco.Caches.DevDriveNoticeMessage);
+    }
+
+    [TestMethod]
     public async Task MovingAToolUpdatesItsCard_AndTheTopSummary_Live()
     {
         EcosystemsViewModel eco = BuildEcosystems(out FakeEnvironmentWriter env, out _);
@@ -184,7 +223,7 @@ public sealed class EcosystemsViewModelTests
 
         public FakeCacheService(IReadOnlyList<PackageCacheInfo> caches) => _caches = caches;
 
-        public IReadOnlyList<PackageCacheInfo> GetPackageCaches(char devDriveLetter) => _caches;
+        public IReadOnlyList<PackageCacheInfo> GetPackageCaches(char? devDriveLetter) => _caches;
 
         public Task<ulong> CalculateSizeAsync(PackageCacheInfo cache, TimeSpan timeBudget, CancellationToken cancellationToken = default) =>
             Task.FromResult(cache.Detected ? 24UL * 1024 * 1024 : 0UL);

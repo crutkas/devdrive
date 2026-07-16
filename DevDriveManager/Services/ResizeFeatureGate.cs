@@ -8,9 +8,8 @@ namespace DevDriveManager.Services;
 /// elevation.
 /// </summary>
 /// <remarks>
-/// Backed by an <see cref="AppContext"/> switch so it can be flipped for deliberate, manual, opt-in
-/// validation without recompiling, yet defaults to <c>false</c> whenever the switch is absent. Nothing
-/// in the shipping UI or any automated test sets it.
+/// Backed by an <see cref="AppContext"/> switch that defaults to <c>false</c>. Deliberate self-hosting
+/// builds set it through <c>/p:EnableRealResizeExecute=true</c>; normal builds and automated tests do not.
 /// </remarks>
 public static class ResizeFeatureGate
 {

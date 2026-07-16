@@ -6,13 +6,27 @@
     <RootNamespace>DevDriveManager</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <Platforms>x64;ARM64</Platforms>
-    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">win-$([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString().ToLowerInvariant())</RuntimeIdentifier>
+    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == '' and '$(Platform)' == 'ARM64'">win-arm64</RuntimeIdentifier>
+    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">win-x64</RuntimeIdentifier>
+    <!--
+      Deployment is self-contained by policy: end users must not need either a system-wide .NET runtime
+      or the Windows App SDK framework package. The elevated helper shares these bundled runtime files
+      from the app install directory.
+    -->
+    <SelfContained>true</SelfContained>
+    <PublishSelfContained>true</PublishSelfContained>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
     <PublishProfile Condition="Exists('Properties\PublishProfiles\win-$(Platform).pubxml')">win-$(Platform).pubxml</PublishProfile>
     <UseWinUI>true</UseWinUI>
     <WinUISDKReferences>false</WinUISDKReferences>
     <EnableMsixTooling>true</EnableMsixTooling>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <!--
+      Destructive resize execution stays off for normal builds. Self-hosting builds may opt in with
+      /p:EnableRealResizeExecute=true, which writes the existing AppContext switch into runtimeconfig.
+    -->
+    <EnableRealResizeExecute Condition="'$(EnableRealResizeExecute)' == ''">false</EnableRealResizeExecute>
     <!--
       WUI2010 (nested x:Bind path may crash on a null segment) is suppressed *intentionally*.
       Pages bind to section sub-ViewModels (ViewModel.Suite/PackageCaches/DriveHealth.*). Every
@@ -30,6 +44,10 @@
     -->
     <NoWarn>$(NoWarn);WUI2010;WUI2011</NoWarn>
   </PropertyGroup>
+
+  <ItemGroup Condition="'$(EnableRealResizeExecute)' == 'true'">
+    <RuntimeHostConfigurationOption Include="DevDriveManager.EnableRealResizeExecute" Value="true" />
+  </ItemGroup>
 
   <ItemGroup>
     <Content Include="Assets\SplashScreen.scale-200.png" />
@@ -106,8 +124,8 @@
 
   <!--
     Stage the elevated helper next to DevDriveManager.exe so it is present in the MSIX install dir and
-    resolvable via the app's base directory. The helper builds self-contained, but its install dir IS
-    our install dir (which already carries the .NET runtime), so we copy ONLY the helper's own 4 files —
+    resolvable via the app's base directory. The helper builds self-contained, and its install dir IS
+    our install dir (which carries the bundled .NET runtime), so we copy ONLY the helper's own 4 files —
     NOT a duplicate runtime — keeping the package lean. These are declared as STATIC Content (evaluated
     once) — NOT inside a BeforeTargets="AssignTargetPaths" target — because that target re-runs each time
     AssignTargetPaths is invoked during a packaged build (build + appx payload), which re-added the
@@ -117,7 +135,6 @@
   -->
   <PropertyGroup>
     <_FilterProbeRid Condition="'$(_FilterProbePlatform)' == 'ARM64'">win-arm64</_FilterProbeRid>
-    <_FilterProbeRid Condition="'$(_FilterProbePlatform)' == 'x86'">win-x86</_FilterProbeRid>
     <_FilterProbeRid Condition="'$(_FilterProbeRid)' == ''">win-x64</_FilterProbeRid>
     <_FilterProbeOutDir>$(MSBuildThisFileDirectory)..\DevDriveManager.FilterProbe\bin\$(_FilterProbePlatform)\$(Configuration)\net10.0\$(_FilterProbeRid)\</_FilterProbeOutDir>
   </PropertyGroup>
@@ -143,7 +160,16 @@
   <PropertyGroup>
     <PublishReadyToRun Condition="'$(Configuration)' == 'Debug'">False</PublishReadyToRun>
     <PublishReadyToRun Condition="'$(Configuration)' != 'Debug'">True</PublishReadyToRun>
-    <PublishTrimmed Condition="'$(Configuration)' == 'Debug'">False</PublishTrimmed>
-    <PublishTrimmed Condition="'$(Configuration)' != 'Debug'">True</PublishTrimmed>
+    <!-- Core persistence/elevation contracts still use reflection-based System.Text.Json. -->
+    <PublishTrimmed>False</PublishTrimmed>
   </PropertyGroup>
+
+  <Target Name="ValidateSelfContainedDeployment"
+          BeforeTargets="Build;Publish"
+          Condition="'$(DesignTimeBuild)' != 'true'">
+    <Error Condition="'$(SelfContained)' != 'true' or '$(PublishSelfContained)' != 'true'"
+           Text="DevDriveManager must be built and published self-contained; end users cannot be required to install .NET." />
+    <Error Condition="'$(WindowsAppSDKSelfContained)' != 'true'"
+           Text="DevDriveManager must bundle the Windows App SDK runtime." />
+  </Target>
 </Project>

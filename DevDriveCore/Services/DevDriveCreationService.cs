@@ -78,7 +78,7 @@ public sealed class DevDriveCreationService : IDevDriveCreationService
         ArgumentNullException.ThrowIfNull(plan);
 
         // PURE compute. Deliberately no Resize-Partition / New-Partition / Format-Volume call, no
-        // IOCTL_DISK_SET_DRIVE_LAYOUT_EX — the resize path is preview-only in this build.
+        // IOCTL_DISK_SET_DRIVE_LAYOUT_EX — this method is always a preview; execution uses IVolumeResizer.
         ulong shrink = plan.SizeBytes;
         char source = plan.SourceVolumeLetter ?? 'C';
         ulong newSize = plan.SourceVolumeSizeBytes > shrink ? plan.SourceVolumeSizeBytes - shrink : 0UL;

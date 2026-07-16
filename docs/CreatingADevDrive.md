@@ -84,7 +84,11 @@ a **real, read-only feasibility check** for it.
 - **Execute is real but OFF BY DEFAULT.** The destructive shrink→repartition→format path is gated behind
   `ResizeFeatureGate.EnableRealResizeExecute` (an `AppContext` switch that defaults to **false**), an
   explicit confirm, **UAC elevation**, and in‑helper guards (`ResizeGuard` refuses system / EFI / recovery
-  / removable / RAW volumes and enforces the 50 GiB minimum + alignment). The default UI never reaches it.
+  / removable / RAW volumes and enforces the 50 GiB minimum + alignment). A deliberate self-hosting build
+  enables the switch with `-p:EnableRealResizeExecute=true`; normal builds remain preview-only.
+- **Execution re-checks live state.** Immediately before shrink, the elevated helper re-queries the source
+  partition, disk identity, filesystem, supported minimum size, reclaimable bytes, and target drive
+  letter. If they changed after preview, execution stops before `Resize-Partition`.
 - Repartitioning your system drive is **destructive and not trivially reversible** — the confirm copy
   says so plainly.
 
@@ -93,6 +97,10 @@ The execute path uses only **public Storage cmdlets** (no internal engines):
 1. Shrink the source (e.g. `C:`) with `Resize-Partition`.
 2. Carve a new partition of the freed size with `New-Partition` and assign the chosen drive letter.
 3. Format the new letter as ReFS with the Dev Drive flag (`Format-Volume -DevDrive`; requires admin).
+
+These are separate operations, not one atomic transaction. If partition creation or formatting fails
+after shrink, inspect Disk Management and do not retry until the layout is understood. Real execution is
+therefore restricted to the disposable-VM self-hosting lane in [Testing.md](Testing.md#7-real-partition-self-hosting).
 
 ---
 

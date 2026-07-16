@@ -24,17 +24,20 @@ public partial class EcosystemsViewModel : ObservableObject
 {
     private char _devLetter = 'G';
     private char _systemLetter = 'C';
+    private string _systemRoot = "C:\\";
+    private bool _hasDevDrive;
 
     public EcosystemsViewModel(PackageCachesViewModel caches, PerformanceSuiteViewModel suite)
     {
         Caches = caches ?? throw new ArgumentNullException(nameof(caches));
         Suite = suite ?? throw new ArgumentNullException(nameof(suite));
         Caches.CachesChanged += OnCachesChanged;
+        Suite.ConfigurationChanged += OnSuiteConfigurationChanged;
     }
 
     /// <summary>Convenience factory composing the real package-cache and benchmark view-models.</summary>
-    public static EcosystemsViewModel CreateDefault() =>
-        new(PackageCachesViewModel.CreateDefault(), PerformanceSuiteViewModel.CreateDefault());
+    public static EcosystemsViewModel CreateDefault(Func<Action, bool>? dispatchToUi = null) =>
+        new(PackageCachesViewModel.CreateDefault(), PerformanceSuiteViewModel.CreateDefault(dispatchToUi));
 
     /// <summary>The reused package-cache view-model (detection + reversible move + Map/remap).</summary>
     public PackageCachesViewModel Caches { get; }
@@ -49,16 +52,42 @@ public partial class EcosystemsViewModel : ObservableObject
     [ObservableProperty]
     public partial string SummaryText { get; set; } = "Scanning your developer tools\u2026";
 
-    /// <summary>Populates both engines for the detected Dev Drive, then builds the ecosystem cards.</summary>
-    public void Initialize(string systemRoot, string devRoot, char devLetter, char systemLetter)
+    /// <summary>Always initializes cache discovery and system-drive benchmarks; a Dev Drive adds comparison.</summary>
+    public void Initialize(string systemRoot, string? devRoot, char? devLetter, char systemLetter)
     {
-        _devLetter = devLetter;
+        _systemRoot = systemRoot;
+        _hasDevDrive = devLetter.HasValue;
+        if (devLetter is char letter)
+        {
+            _devLetter = char.ToUpperInvariant(letter);
+        }
+
         _systemLetter = systemLetter;
 
-        // Seed the benchmark rows FIRST (Initialize re-seeds BuildsGroup.Rows), so the cards can capture the
-        // freshly-built workload rows when CachesChanged fires from the Caches.Initialize below.
+        // Seed benchmark rows first so cards capture the current baseline/comparison rows when caches load.
         Suite.Initialize(systemRoot, devRoot, devLetter, systemLetter);
         Caches.Initialize(systemRoot, devRoot, devLetter, systemLetter);
+    }
+
+    /// <summary>Suspends targets while drive state refreshes and immediately disables stale cache actions.</summary>
+    public void SuspendDriveDependentActions(string cacheNoticeMessage)
+    {
+        _hasDevDrive = false;
+        Suite.SuspendForDriveRefresh();
+        Caches.SetDevDriveUnavailable(cacheNoticeMessage);
+    }
+
+    /// <summary>Falls back to system-drive benchmarks while preserving the read-only cache inventory.</summary>
+    public void SetDevDriveUnavailable(string cacheNoticeMessage)
+    {
+        _hasDevDrive = false;
+        Suite.Initialize(_systemRoot, devRoot: null, devLetter: null, systemLetter: _systemLetter);
+        Caches.Initialize(
+            _systemRoot,
+            devRoot: null,
+            devLetter: null,
+            systemLetter: _systemLetter,
+            unavailableNoticeMessage: cacheNoticeMessage);
     }
 
     /// <summary>Applies the authoritative per-volume performance verdict to the suite's conditional UI.</summary>
@@ -68,6 +97,14 @@ public partial class EcosystemsViewModel : ObservableObject
     public void DismissPerformanceModeCaption() => Suite.DismissPerformanceModeCaption();
 
     private void OnCachesChanged(object? sender, EventArgs e) => BuildCards();
+
+    private void OnSuiteConfigurationChanged(object? sender, EventArgs e)
+    {
+        if (Cards.Count > 0)
+        {
+            BuildCards();
+        }
+    }
 
     private void BuildCards()
     {
@@ -90,7 +127,8 @@ public partial class EcosystemsViewModel : ObservableObject
                     r => string.Equals(r.RequiredTool, definition.BenchmarkRequiredTool, StringComparison.OrdinalIgnoreCase))
                 : null;
 
-            var card = new EcosystemCardViewModel(definition, members, benchmark, _devLetter, _systemLetter);
+            var card = new EcosystemCardViewModel(
+                definition, members, benchmark, _devLetter, _systemLetter, _hasDevDrive);
             card.PropertyChanged += OnCardPropertyChanged;
             Cards.Add(card);
         }
@@ -149,7 +187,11 @@ public partial class EcosystemsViewModel : ObservableObject
         int onDev = Cards.Count(c => c.OnDevDriveCount > 0);
 
         SummaryText = detected == 0
-            ? "No package caches detected yet \u2014 map any tool you use to start tracking it."
-            : $"{onDev} of {detected} ecosystems on your Dev Drive.";
+            ? _hasDevDrive
+                ? "No package caches detected yet \u2014 map any tool you use to start tracking it."
+                : "No package caches detected on this PC."
+            : _hasDevDrive
+                ? $"{onDev} of {detected} ecosystems on your Dev Drive."
+                : $"{detected} ecosystems detected on this PC.";
     }
 }

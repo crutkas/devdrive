@@ -22,8 +22,27 @@
                 <TextBlock
                     Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                     Style="{StaticResource BodyTextBlockStyle}"
-                    Text="Real build workloads, run on demand — compare your system drive against your Dev Drive. No need to babysit; run them when you want a number." />
+                    Text="{x:Bind ViewModel.Suite.Subtitle, Mode=OneWay}"
+                    TextWrapping="Wrap" />
             </StackPanel>
+
+            <InfoBar
+                AutomationProperties.AutomationId="SystemDriveBaselineNotice"
+                IsClosable="False"
+                IsOpen="True"
+                Message="These timings remain useful now and become the comparison baseline after you add a Dev Drive."
+                Severity="Informational"
+                Title="Running on the system drive"
+                Visibility="{x:Bind local:UiHelpers.BoolToVisibility(ViewModel.Suite.ShowSystemDriveBaseline), Mode=OneWay}" />
+
+            <InfoBar
+                AutomationProperties.AutomationId="BenchmarksRefreshing"
+                IsClosable="False"
+                IsOpen="True"
+                Message="Benchmark commands will return when the refresh completes."
+                Severity="Informational"
+                Title="Checking drive status"
+                Visibility="{x:Bind local:UiHelpers.InvertBoolToVisibility(ViewModel.Suite.IsAvailable), Mode=OneWay}" />
 
             <!--  ── Hero: run-all + streaming headline ──  -->
             <Border
@@ -49,7 +68,7 @@
                             VerticalAlignment="Center"
                             AutomationProperties.AutomationId="EcosystemsSummary"
                             Style="{StaticResource BodyStrongTextBlockStyle}"
-                            Text="{x:Bind ViewModel.Ecosystems.SummaryText, Mode=OneWay}"
+                            Text="{x:Bind ViewModel.Suite.SummaryText, Mode=OneWay}"
                             TextWrapping="Wrap" />
                         <StackPanel
                             Grid.Column="2"
@@ -173,7 +192,7 @@
                                             Foreground="{x:Bind local:UiHelpers.RatioBrush(Benchmark.DeltaIsFavorable), Mode=OneWay}"
                                             Style="{StaticResource SubtitleTextBlockStyle}"
                                             Text="{x:Bind Benchmark.DeltaText, Mode=OneWay}"
-                                            Visibility="{x:Bind local:UiHelpers.BoolToVisibility(Benchmark.IsDone), Mode=OneWay}" />
+                                            Visibility="{x:Bind local:UiHelpers.BoolToVisibility(Benchmark.ShowComparisonResult), Mode=OneWay}" />
                                         <Button
                                             Grid.Column="3"
                                             AutomationProperties.AutomationId="{x:Bind Benchmark.RunButtonAutomationId, Mode=OneTime}"
@@ -193,6 +212,15 @@
                                         Text="{x:Bind Benchmark.RunStatusText, Mode=OneWay}"
                                         TextWrapping="Wrap"
                                         Visibility="{x:Bind local:UiHelpers.BoolToVisibility(Benchmark.IsRunning), Mode=OneWay}" />
+
+                                    <!--  Required CLI availability  -->
+                                    <TextBlock
+                                        AutomationProperties.AutomationId="{x:Bind Benchmark.ToolAvailabilityAutomationId, Mode=OneTime}"
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                        Style="{StaticResource CaptionTextBlockStyle}"
+                                        Text="{x:Bind Benchmark.ToolAvailabilityText, Mode=OneWay}"
+                                        TextWrapping="Wrap"
+                                        Visibility="{x:Bind local:UiHelpers.BoolToVisibility(Benchmark.ShowToolAvailability), Mode=OneWay}" />
 
                                     <!--  Done: side-by-side C:/Dev bars (slower drive = longer bar; accent = Dev Drive)  -->
                                     <StackPanel
@@ -228,7 +256,9 @@
                                                 Style="{StaticResource CaptionTextBlockStyle}"
                                                 Text="{x:Bind Benchmark.SystemValueText, Mode=OneWay}" />
                                         </Grid>
-                                        <Grid ColumnSpacing="8">
+                                        <Grid
+                                            ColumnSpacing="8"
+                                            Visibility="{x:Bind local:UiHelpers.BoolToVisibility(Benchmark.HasComparison), Mode=OneTime}">
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="28" />
                                                 <ColumnDefinition Width="320" />

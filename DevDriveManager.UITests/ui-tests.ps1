@@ -22,11 +22,12 @@
     the suite restores "System default" at the end.
 
     Usage:
-      # Launch the app first (winui-dev-workflow BuildAndRun.ps1) and note its PID, then:
+      # Set DDM_UITEST_SAFE_MUTATIONS=1 at user scope, launch the app, verify the visible safe-mode
+      # indicator, and note its PID. This script exits with code 2 if the seam is absent.
       .\ui-tests.ps1 -AppPid <PID>
 
-    Exit code 0 = all passed, 1 = one or more failures. Results also written to
-    test-results.json next to this script.
+    Exit code 0 = all passed, 1 = one or more failures, 2 = safe mutation mode is absent.
+    Results are also written to test-results.json next to this script.
 #>
 param([Parameter(Mandatory)][int]$AppPid)
 # NOTE: do NOT name the parameter $Pid — it is read-only in PowerShell.
@@ -84,6 +85,13 @@ function Select-Combo([string]$comboId, [string]$itemId) {
 
 New-Item -ItemType Directory -Force -Path "screenshots" | Out-Null
 Write-Host "DevDriveManager UI tests (NavigationView shell) — app PID $AppPid`n"
+
+# Hard safety gate: do not merely record this as a failed test and continue into mutation scenarios.
+winapp ui wait-for "SafeMutationModeIndicator" -a $AppPid -t 4000 2>$null | Out-Null
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "Safe mutation mode is not active. Refusing to run UI tests that can confirm machine mutations."
+    exit 2
+}
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  (1) Shell + navigation rail render

@@ -13,9 +13,9 @@
     confirmation, and UAC elevation; before it runs, ResizeGuard re-validates the plan against a fresh
     read-only disk snapshot. See Program.cs for the full safety model.
 
-    Framework-dependent net10.0 win-x64. It ships INSIDE the MSIX next to DevDriveManager.exe (see the
-    copy target in DevDriveManager.csproj), so when launched it resolves the .NET runtime that the main
-    app already carries in that same directory.
+    Self-contained net10.0 win-x64/win-arm64. It ships INSIDE the MSIX next to DevDriveManager.exe (see
+    the copy target in DevDriveManager.csproj), so when launched it resolves the .NET runtime that the
+    main app carries in that same directory.
   -->
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
@@ -59,6 +59,7 @@
     <Compile Include="..\DevDriveCore\Models\ResizeFeasibility.cs" Link="Shared\ResizeFeasibility.cs" />
     <Compile Include="..\DevDriveCore\Models\ResizeExecuteOutcome.cs" Link="Shared\ResizeExecuteOutcome.cs" />
     <Compile Include="..\DevDriveCore\Services\ResizeGuard.cs" Link="Shared\ResizeGuard.cs" />
+    <Compile Include="..\DevDriveCore\Services\ResizePowerShellScript.cs" Link="Shared\ResizePowerShellScript.cs" />
   </ItemGroup>
 
 </Project>

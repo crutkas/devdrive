@@ -24,6 +24,8 @@ In-depth docs live in [`docs/`](docs/README.md):
 | [docs/CreatingADevDrive.md](docs/CreatingADevDrive.md) | Creating a Dev Drive — VHDX vs. resize, every option, and what is **real vs. simulated**. |
 | [docs/PackageCacheMoves.md](docs/PackageCacheMoves.md) | Moving package caches and the **documented fallbacks** for every failure path (rollback, idempotency, Move back). |
 | [docs/SpeedTest.md](docs/SpeedTest.md) | The performance tests — what each test measures, why, and how missing tools are flagged. |
+| [docs/Testing.md](docs/Testing.md) | Test-machine setup, package/tool detection, safe UI automation, and partition self-hosting. |
+| [docs/KnownIssues.md](docs/KnownIssues.md) | Confirmed self-hosting and release-readiness issues. |
 
 ---
 
@@ -95,6 +97,9 @@ PATH (`IProcessRunner` / `IPathProbe`).
 Prerequisites: .NET SDK 10, Windows App SDK workload, Developer Mode on. (WinUI apps must target
 **x64** or **ARM64** — never AnyCPU.)
 
+These are development prerequisites only. Deployment is self-contained: the packaged app bundles both
+the .NET runtime and Windows App SDK runtime, so an end user does not install either runtime separately.
+
 ```powershell
 # Build the whole solution (Debug)
 dotnet build DevDriveManager.slnx -c Debug
@@ -108,6 +113,27 @@ winapp run DevDriveManager\bin\x64\Debug\net10.0-windows10.0.26100.0\win-x64\App
 dotnet test DevDriveCore.Tests\DevDriveCore.Tests.csproj -c Debug
 ```
 
+Create release packages from a dedicated publish directory, not a previously generated `bin\...\AppX`
+loose layout:
+
+```powershell
+$platform = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "ARM64" } else { "x64" }
+$rid = if ($platform -eq "ARM64") { "win-arm64" } else { "win-x64" }
+$publish = Join-Path $PWD "artifacts\publish\$rid"
+
+dotnet publish .\DevDriveManager\DevDriveManager.csproj `
+    -c Release -p:Platform=$platform -r $rid --self-contained true -o $publish
+
+winapp package $publish `
+    --manifest .\DevDriveManager\Package.appxmanifest `
+    --exe DevDriveManager.exe `
+    --output ".\artifacts\DevDriveManager-$platform.msix"
+```
+
+The publish output already contains both runtimes, so no runtime download or separate framework
+installer is part of deployment. Add the appropriate certificate options to `winapp package` for signed
+distribution.
+
 The unit-test suite includes `[TestCategory("Integration")]` tests that exercise the real
 `SystemFileSystem` / `DiskBenchmark` against unique temp directories (always cleaned up). They never
 touch user data. To skip them:
@@ -118,15 +144,25 @@ dotnet test DevDriveCore.Tests\DevDriveCore.Tests.csproj --filter "TestCategory!
 
 ---
 
-## Guarantees
+For deliberate partition self-hosting, build with
+`-p:EnableRealResizeExecute=true`; normal builds remain preview-only. Follow
+[docs/Testing.md](docs/Testing.md#7-real-partition-self-hosting) and use a disposable VM.
 
-- The solution builds clean (Debug): **0 warnings, 0 errors**, with a full unit + WinApp UI test suite.
-- **Every machine-changing action is preview → explicit confirm → per-user (no admin) → reversible.**
-  Detection and benchmarks are read-only / scratch-only.
-- The experimental **resize C:** execute path is **gated off by default** (`ResizeFeatureGate`), behind an
-  explicit confirm + UAC + in-helper safety guards; the default UI never reaches it.
+---
+
+## Current guarantees and limits
+
+- The solution builds clean in the validated native platform and the core suite runs without machine
+  mutation.
+- Package-cache mutations are preview → explicit confirm → per-user (no admin) → reversible. Detection
+  and benchmarks are read-only / scratch-only. Disk partitioning is the documented exception: it
+  requires admin and is not automatically reversible.
+- Real resize execution is **gated off by default** (`ResizeFeatureGate`). An explicit self-hosting build
+  can enable it; preview, second confirmation, UAC, and in-helper live safety checks still apply.
 - **Tests never touch your data:** every test runs against in-memory fakes or unique throwaway temp
   directories (all VHD tests mock `INativeVhdApi`); the UI suite uses a safe-mutation seam.
+- The current UI suite is machine-profile-specific; general self-hosting blockers are tracked in
+  [docs/KnownIssues.md](docs/KnownIssues.md).
 
 ---
 

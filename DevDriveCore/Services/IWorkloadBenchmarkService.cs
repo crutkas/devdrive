@@ -26,9 +26,9 @@ public sealed record WorkloadBenchmarkOptions
 }
 
 /// <summary>
-/// Orchestrates the real developer-workload comparison: gates each benchmark on the tools installed
-/// on this machine, captures pre-flight context, runs every available benchmark as a cold first build
-/// N times per drive (discard-first, median), and folds the rows into a <see cref="WorkloadComparison"/>.
+/// Orchestrates real developer workloads as either a system-drive baseline or a system/Dev Drive
+/// comparison. It gates each benchmark on installed tools, captures pre-flight context, runs cold first
+/// builds (discard-first, median), and folds the rows into a <see cref="WorkloadComparison"/>.
 /// </summary>
 public interface IWorkloadBenchmarkService
 {
@@ -43,6 +43,15 @@ public interface IWorkloadBenchmarkService
         string systemDriveRoot,
         string devDriveRoot,
         char devDriveLetter,
+        IProgress<WorkloadMetric>? progress = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Runs the same real workloads only on the system drive, producing useful baseline timings without
+    /// fabricating a Dev Drive comparison. A later comparison run can be evaluated against this baseline.
+    /// </summary>
+    Task<WorkloadComparison> RunSystemDriveAsync(
+        string systemDriveRoot,
         IProgress<WorkloadMetric>? progress = null,
         CancellationToken cancellationToken = default);
 
@@ -68,6 +77,14 @@ public interface IWorkloadBenchmarkService
         string systemDriveRoot,
         string devDriveRoot,
         char devDriveLetter,
+        int iterations = 0,
+        IProgress<WorkloadRunProgress>? progress = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Runs one real workload only on the system drive and returns its baseline timing.</summary>
+    Task<WorkloadMetric> RunSingleSystemDriveAsync(
+        string requiredTool,
+        string systemDriveRoot,
         int iterations = 0,
         IProgress<WorkloadRunProgress>? progress = null,
         CancellationToken cancellationToken = default);

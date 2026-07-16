@@ -32,35 +32,79 @@ namespace DevDriveManager.ViewModels;
 /// </remarks>
 public partial class PerformanceSuiteViewModel : ObservableObject
 {
+    private static readonly string[] BenchmarkTools = ["git", "npm", "dotnet", "cargo"];
+
     private readonly IWorkloadBenchmarkService _workload;
+    private readonly IInstalledToolDetector? _toolDetector;
+    private readonly Func<Action, bool> _dispatchToUi;
 
     private string _systemRoot = "C:\\";
-    private string _devRoot = "G:\\";
-    private char _devLetter = 'G';
+    private string _devRoot = string.Empty;
+    private char _devLetter = 'C';
     private char _systemLetter = 'C';
+    private BenchmarkDriveConfiguration? _pendingConfiguration;
 
     private CancellationTokenSource? _cts;
+    private CancellationTokenSource? _toolDetectionCts;
+    private IReadOnlyDictionary<string, InstalledToolInfo>? _toolSnapshot;
+    private bool _toolAvailabilityReady;
+    private bool _toolDetectionFailed;
+    private int _toolDetectionGeneration;
     private PerfSuiteAggregator _aggregator = new(0);
 
-    public PerformanceSuiteViewModel(IWorkloadBenchmarkService workload)
+    public PerformanceSuiteViewModel(
+        IWorkloadBenchmarkService workload,
+        IInstalledToolDetector? toolDetector = null,
+        Func<Action, bool>? dispatchToUi = null)
     {
-        _workload = workload;
+        _workload = workload ?? throw new ArgumentNullException(nameof(workload));
+        _toolDetector = toolDetector;
+        _dispatchToUi = dispatchToUi ?? (action =>
+        {
+            action();
+            return true;
+        });
+        _toolAvailabilityReady = toolDetector is null;
 
         BuildsGroup = new PerfSuiteGroupViewModel("builds", "\uE756", "Real-world builds \u00B7 how your builds run today \u00B7 wall-clock seconds (lower is better)");
 
         SeedFixedRows();
+        ApplyToolAvailabilityToRows();
 
         Groups = new ObservableCollection<PerfSuiteGroupViewModel> { BuildsGroup };
     }
 
     /// <summary>Convenience factory wiring the real workload engine.</summary>
-    public static PerformanceSuiteViewModel CreateDefault() =>
-        new(WorkloadBenchmarkService.CreateDefault());
+    public static PerformanceSuiteViewModel CreateDefault(Func<Action, bool>? dispatchToUi = null)
+    {
+        IInstalledToolDetector detector = InstalledToolDetector.CreateDefault();
+        return new PerformanceSuiteViewModel(
+            WorkloadBenchmarkService.CreateDefault(detector),
+            detector,
+            dispatchToUi);
+    }
 
     /// <summary>The suite's only benchmark group (Real-world builds); the page renders it, then the upside panel.</summary>
     public ObservableCollection<PerfSuiteGroupViewModel> Groups { get; }
 
     public PerfSuiteGroupViewModel BuildsGroup { get; }
+
+    public event EventHandler? ConfigurationChanged;
+
+    /// <summary>Current read-only tool probe, exposed internally so headless tests can await initialization.</summary>
+    internal Task ToolDetectionTask { get; private set; } = Task.CompletedTask;
+
+    /// <summary>True when benchmark results include a Dev Drive comparison leg.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowSystemDriveBaseline))]
+    public partial bool HasDevDrive { get; set; }
+
+    /// <summary>False only while drive state is being refreshed and benchmark targets are intentionally suspended.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowSystemDriveBaseline))]
+    public partial bool IsAvailable { get; set; } = true;
+
+    public bool ShowSystemDriveBaseline => IsAvailable && !HasDevDrive;
 
     /// <summary>Suite-header Segoe Fluent glyph (speed gauge).</summary>
     public string SuiteGlyph => "\uE9D9";
@@ -73,8 +117,11 @@ public partial class PerformanceSuiteViewModel : ObservableObject
 
     [ObservableProperty]
     public partial string Subtitle { get; set; } =
-        "Compares your Dev Drive against your system drive across real developer builds. " +
-        "Cold first build, everything on the test drive \u00B7 first run discarded \u00B7 median of the timed runs \u00B7 lower time is better.";
+        "Measures real developer builds on your system drive now; add a Dev Drive later for a side-by-side comparison. " +
+        "Cold first build \u00B7 first run discarded \u00B7 median of the timed runs \u00B7 lower time is better.";
+
+    [ObservableProperty]
+    public partial string SummaryText { get; set; } = "Run real workloads on C: to establish a system-drive baseline.";
 
     /// <summary>
     /// One calm, honest line explaining why raw disk-throughput rows aren't shown — so users don't wonder
@@ -203,21 +250,26 @@ public partial class PerformanceSuiteViewModel : ObservableObject
     /// <summary>The single demoted caveat caption — Drive health keeps the authoritative enable control.</summary>
     public string PerformanceModeCaptionMessage { get; } = PerformanceModeAdvisor.ManageInDriveHealthCaption;
 
-    /// <summary>Supplies the drive roots/letters once detection has identified the Dev Drive.</summary>
-    public void Initialize(string systemRoot, string devRoot, char devLetter, char systemLetter)
+    /// <summary>Configures a system-drive baseline, with an optional Dev Drive comparison leg.</summary>
+    public void Initialize(string systemRoot, string? devRoot, char? devLetter, char systemLetter)
     {
-        _systemRoot = systemRoot;
-        _devRoot = devRoot;
-        _devLetter = devLetter;
-        _systemLetter = systemLetter;
+        var configuration = new BenchmarkDriveConfiguration(systemRoot, devRoot, devLetter, systemLetter);
+        if (IsRunning)
+        {
+            _pendingConfiguration = configuration;
+            SuspendForDriveRefresh();
+            return;
+        }
 
-        Subtitle =
-            $"Compares your Dev Drive ({devLetter}:) against your system drive ({systemLetter}:) across real " +
-            "developer builds. Cold first build, everything on the test drive \u00B7 first run discarded \u00B7 " +
-            "median of the timed runs \u00B7 lower time is better.";
-        SystemLegend = $"{systemLetter}: \u2014 system drive (NTFS, real-time antivirus)";
-        DevLegend = $"{devLetter}: \u2014 Dev Drive (ReFS)";
-        RelabelRows();
+        ApplyConfiguration(configuration);
+    }
+
+    /// <summary>Temporarily disables benchmark commands while drive state is being refreshed.</summary>
+    public void SuspendForDriveRefresh()
+    {
+        _cts?.Cancel();
+        CancelToolDetection();
+        IsAvailable = false;
     }
 
     /// <summary>
@@ -255,7 +307,11 @@ public partial class PerformanceSuiteViewModel : ObservableObject
 
     // ---- Commands -----------------------------------------------------------------------------
 
-    private bool CanRunSuite() => !IsRunning;
+    private bool CanRunSuite() =>
+        IsAvailable
+        && !IsRunning
+        && _toolAvailabilityReady
+        && BuildsGroup.Rows.Any(row => row.IsToolAvailable);
 
     private bool CanCancel() => IsRunning;
 
@@ -266,6 +322,8 @@ public partial class PerformanceSuiteViewModel : ObservableObject
     private void Cancel() => _cts?.Cancel();
 
     partial void OnIsRunningChanged(bool value) => NotifyRunStatesChanged();
+
+    partial void OnIsAvailableChanged(bool value) => NotifyRunStatesChanged();
 
     private void NotifyRunStatesChanged()
     {
@@ -287,7 +345,7 @@ public partial class PerformanceSuiteViewModel : ObservableObject
 
     private async Task ExecuteRunAsync(IReadOnlyList<PerfSuiteGroupViewModel> groups)
     {
-        if (IsRunning || groups.Count == 0)
+        if (!IsAvailable || IsRunning || groups.Count == 0)
         {
             return;
         }
@@ -336,6 +394,7 @@ public partial class PerformanceSuiteViewModel : ObservableObject
                 group.IsRunning = false;
             }
 
+            ApplyPendingConfiguration();
             NotifyRunStatesChanged();
         }
     }
@@ -369,7 +428,15 @@ public partial class PerformanceSuiteViewModel : ObservableObject
         var progress = new Progress<WorkloadMetric>(metric => OnBuildMetric(group, metric));
         try
         {
-            await _workload.RunAsync(_systemRoot, _devRoot, _devLetter, progress, token);
+            if (HasDevDrive)
+            {
+                await _workload.RunAsync(_systemRoot, _devRoot, _devLetter, progress, token);
+            }
+            else
+            {
+                await _workload.RunSystemDriveAsync(_systemRoot, progress, token);
+            }
+
             MarkUnfinishedSkipped(group, "no result");
         }
         catch (OperationCanceledException)
@@ -407,7 +474,7 @@ public partial class PerformanceSuiteViewModel : ObservableObject
     /// </summary>
     private async Task RunRowAsync(PerfSuiteRowViewModel row)
     {
-        if (IsRunning)
+        if (!IsAvailable || IsRunning)
         {
             return;
         }
@@ -435,8 +502,11 @@ public partial class PerformanceSuiteViewModel : ObservableObject
         var progress = new Progress<WorkloadRunProgress>(p => OnRowProgress(row, p));
         try
         {
-            WorkloadMetric metric = await _workload.RunSingleAsync(
-                row.RequiredTool, _systemRoot, _devRoot, _devLetter, iterations: 3, progress, token);
+            WorkloadMetric metric = HasDevDrive
+                ? await _workload.RunSingleAsync(
+                    row.RequiredTool, _systemRoot, _devRoot, _devLetter, iterations: 3, progress, token)
+                : await _workload.RunSingleSystemDriveAsync(
+                    row.RequiredTool, _systemRoot, iterations: 3, progress, token);
             row.ApplyWorkload(metric);
             Aggregate(row);
         }
@@ -456,6 +526,7 @@ public partial class PerformanceSuiteViewModel : ObservableObject
             RunStatusText = string.Empty;
             _cts?.Dispose();
             _cts = null;
+            ApplyPendingConfiguration();
             NotifyRunStatesChanged();
         }
     }
@@ -498,8 +569,12 @@ public partial class PerformanceSuiteViewModel : ObservableObject
     {
         RunProgressValue = _aggregator.Finished;
         RunProgressMax = Math.Max(1, _aggregator.Total);
-        HeadlineValue = _aggregator.HeadlineValue;
-        HeadlineCaption = _aggregator.HeadlineCaption;
+        HeadlineValue = HasDevDrive
+            ? _aggregator.HeadlineValue
+            : $"{_aggregator.Finished}/{_aggregator.Total}";
+        HeadlineCaption = HasDevDrive
+            ? _aggregator.HeadlineCaption
+            : "system-drive baseline workloads complete";
         HasHeadline = _aggregator.Finished > 0;
     }
 
@@ -525,39 +600,44 @@ public partial class PerformanceSuiteViewModel : ObservableObject
         }
     }
 
-    private void SetRunStatus(PerfSuiteRowViewModel row) =>
-        RunStatusText = $"Running {row.Name} on {_devLetter}:\u2026";
+    private void SetRunStatus(PerfSuiteRowViewModel row)
+    {
+        char drive = HasDevDrive ? _devLetter : _systemLetter;
+        RunStatusText = $"Running {row.Name} on {drive}:\u2026";
+    }
 
     // ---- Row scaffolding ----------------------------------------------------------------------
 
     private void SeedFixedRows()
     {
-        const string BuildMethodology =
-            "Cold first build, everything (package cache + source + output) on the test drive \u00B7 " +
-            "3 timed runs per drive \u00B7 first run discarded \u00B7 median of the remaining 2.";
+        string BuildMethodology = HasDevDrive
+            ? "Cold first build, everything (package cache + source + output) on the test drive \u00B7 " +
+              "3 timed runs per drive \u00B7 first run discarded \u00B7 median of the remaining 2."
+            : "Cold first build on the system drive, with package cache + source + output co-located \u00B7 " +
+              "3 timed runs \u00B7 first run discarded \u00B7 median of the remaining 2.";
 
-        BuildsGroup.Rows.Add(new PerfSuiteRowViewModel("git-clone", "git clone", "Clones a 15,000-file repository from a local copy (no network)", _systemLetter, _devLetter, run: RunRowAsync, canRun: CanRunSuite)
+        BuildsGroup.Rows.Add(new PerfSuiteRowViewModel("git-clone", "git clone", "Clones a 15,000-file repository from a local copy (no network)", _systemLetter, _devLetter, run: RunRowAsync, canRun: CanRunSuite, hasComparison: HasDevDrive)
         {
             RequiredTool = "git",
             DetailsWhat = "Generates a 15,000-file repository (300 folders \u00D7 50 small source files), commits it locally, then clones it onto the drive under test. No network.",
             DetailsCommand = "git clone --no-hardlinks <local bare repo> <target on the test drive>",
             DetailsMethodology = BuildMethodology,
         });
-        BuildsGroup.Rows.Add(new PerfSuiteRowViewModel("npm-ci", "npm ci", "Clean-installs microsoft/vscode-eslint's committed package-lock.json (~213 packages) with npm ci, offline", _systemLetter, _devLetter, run: RunRowAsync, canRun: CanRunSuite)
+        BuildsGroup.Rows.Add(new PerfSuiteRowViewModel("npm-ci", "npm ci", "Clean-installs microsoft/vscode-eslint's committed package-lock.json (~213 packages) with npm ci, offline", _systemLetter, _devLetter, run: RunRowAsync, canRun: CanRunSuite, hasComparison: HasDevDrive)
         {
             RequiredTool = "npm",
             DetailsWhat = "Clean-installs Microsoft's vscode-eslint \u2014 microsoft/vscode-eslint at tag release/3.0.24 \u2014 from its committed package-lock.json (~213 real, transitive packages). The package cache is freshly copied onto the drive under test each run (a cold first install), then installed offline.",
             DetailsCommand = "copy npm cache onto the test drive  \u2192  npm ci --offline --no-audit --no-fund --cache <cache on the test drive>",
             DetailsMethodology = BuildMethodology,
         });
-        BuildsGroup.Rows.Add(new PerfSuiteRowViewModel("dotnet-build", "dotnet build", "Builds Microsoft's System.Reactive (Rx.NET) for net6.0, offline", _systemLetter, _devLetter, run: RunRowAsync, canRun: CanRunSuite)
+        BuildsGroup.Rows.Add(new PerfSuiteRowViewModel("dotnet-build", "dotnet build", "Builds Microsoft's System.Reactive (Rx.NET) for net6.0, offline", _systemLetter, _devLetter, run: RunRowAsync, canRun: CanRunSuite, hasComparison: HasDevDrive)
         {
             RequiredTool = "dotnet",
             DetailsWhat = "Builds Microsoft's System.Reactive (Rx.NET) \u2014 dotnet/reactive at tag rxnet-v6.1.0 \u2014 for net6.0. The NuGet cache is freshly copied onto the drive under test each run (a cold first build); an untimed offline restore re-points it there, then only the compile is timed.",
             DetailsCommand = "copy NuGet cache onto the test drive  \u2192  dotnet restore --source <offline> (untimed, re-points to the test-drive cache)  \u2192  dotnet build System.Reactive.csproj -f net6.0 -c Release --no-restore",
             DetailsMethodology = BuildMethodology,
         });
-        BuildsGroup.Rows.Add(new PerfSuiteRowViewModel("cargo-build", "cargo build", "Builds Microsoft's Edit (the Rust console text editor), offline", _systemLetter, _devLetter, run: RunRowAsync, canRun: CanRunSuite)
+        BuildsGroup.Rows.Add(new PerfSuiteRowViewModel("cargo-build", "cargo build", "Builds Microsoft's Edit (the Rust console text editor), offline", _systemLetter, _devLetter, run: RunRowAsync, canRun: CanRunSuite, hasComparison: HasDevDrive)
         {
             RequiredTool = "cargo",
             DetailsWhat = "Compiles Microsoft's Edit \u2014 the Rust console text editor, microsoft/edit at tag v2.0.0 \u2014 into a fresh target/. The cargo registry cache is freshly copied onto the drive under test each run (a cold first build), then compiled offline.",
@@ -571,7 +651,211 @@ public partial class PerformanceSuiteViewModel : ObservableObject
         // Drive letters are known only after Initialize; rebuild the fixed rows so their "C:"/"G:" labels match.
         BuildsGroup.Rows.Clear();
         SeedFixedRows();
+        ApplyToolAvailabilityToRows();
     }
+
+    private void ApplyConfiguration(BenchmarkDriveConfiguration configuration)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(configuration.SystemRoot);
+        bool hasComparison = configuration.DevRoot is not null && configuration.DevLetter.HasValue;
+
+        IsAvailable = false;
+        PrepareToolDetection();
+        _systemRoot = configuration.SystemRoot;
+        _systemLetter = char.ToUpperInvariant(configuration.SystemLetter);
+        _devRoot = configuration.DevRoot ?? string.Empty;
+        _devLetter = configuration.DevLetter is char devLetter
+            ? char.ToUpperInvariant(devLetter)
+            : _systemLetter;
+        HasDevDrive = hasComparison;
+
+        if (hasComparison)
+        {
+            Subtitle =
+                $"Compares your Dev Drive ({_devLetter}:) against your system drive ({_systemLetter}:) across real " +
+                "developer builds. Cold first build, everything on the test drive \u00B7 first run discarded \u00B7 " +
+                "median of the timed runs \u00B7 lower time is better.";
+            SummaryText =
+                $"Run real workloads on {_systemLetter}: and {_devLetter}: for a side-by-side comparison.";
+            DevLegend = $"{_devLetter}: \u2014 Dev Drive (ReFS)";
+        }
+        else
+        {
+            Subtitle =
+                $"Measures real developer builds on your system drive ({_systemLetter}:) now; add a Dev Drive later " +
+                "for a side-by-side comparison. Cold first build \u00B7 first run discarded \u00B7 median of the timed " +
+                "runs \u00B7 lower time is better.";
+            SummaryText =
+                $"Run real workloads on {_systemLetter}: to establish a system-drive baseline.";
+            DevLegend = string.Empty;
+        }
+
+        SystemLegend = $"{_systemLetter}: \u2014 system drive (NTFS, real-time antivirus)";
+        ResetRunResultState();
+        RelabelRows();
+        _pendingConfiguration = null;
+        IsAvailable = true;
+        ConfigurationChanged?.Invoke(this, EventArgs.Empty);
+        StartToolDetection();
+    }
+
+    private void PrepareToolDetection()
+    {
+        if (_toolDetector is null)
+        {
+            _toolAvailabilityReady = true;
+            return;
+        }
+
+        CancelToolDetection();
+        _toolSnapshot = null;
+        _toolAvailabilityReady = false;
+        _toolDetectionFailed = false;
+    }
+
+    private void StartToolDetection()
+    {
+        if (_toolDetector is null)
+        {
+            ToolDetectionTask = Task.CompletedTask;
+            NotifyRunStatesChanged();
+            return;
+        }
+
+        var cts = new CancellationTokenSource();
+        _toolDetectionCts = cts;
+        int generation = ++_toolDetectionGeneration;
+        ToolDetectionTask = DetectToolsAsync(generation, cts);
+        NotifyRunStatesChanged();
+    }
+
+    private async Task DetectToolsAsync(int generation, CancellationTokenSource cts)
+    {
+        try
+        {
+            IReadOnlyList<InstalledToolInfo> tools = await Task.Run(
+                () => DetectBenchmarkTools(cts.Token),
+                cts.Token).ConfigureAwait(false);
+
+            PublishToolDetection(generation, () =>
+            {
+                _toolSnapshot = tools.ToDictionary(tool => tool.Name, StringComparer.OrdinalIgnoreCase);
+                _toolAvailabilityReady = true;
+                _toolDetectionFailed = false;
+                ApplyToolAvailabilityToRows();
+                NotifyRunStatesChanged();
+            });
+        }
+        catch (OperationCanceledException) when (cts.IsCancellationRequested)
+        {
+            // A newer drive configuration owns the rows and starts a fresh probe.
+        }
+        catch (Exception)
+        {
+            PublishToolDetection(generation, () =>
+            {
+                _toolSnapshot = null;
+                _toolAvailabilityReady = true;
+                _toolDetectionFailed = true;
+                ApplyToolAvailabilityToRows();
+                NotifyRunStatesChanged();
+            });
+        }
+        finally
+        {
+            if (ReferenceEquals(_toolDetectionCts, cts))
+            {
+                _toolDetectionCts = null;
+            }
+
+            cts.Dispose();
+        }
+    }
+
+    private void PublishToolDetection(int generation, Action update)
+    {
+        _dispatchToUi(() =>
+        {
+            if (generation == _toolDetectionGeneration)
+            {
+                update();
+            }
+        });
+    }
+
+    private IReadOnlyList<InstalledToolInfo> DetectBenchmarkTools(CancellationToken cancellationToken)
+    {
+        var tools = new List<InstalledToolInfo>(BenchmarkTools.Length);
+        foreach (string toolName in BenchmarkTools)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            tools.Add(_toolDetector!.Detect(toolName, cancellationToken));
+        }
+
+        return tools;
+    }
+
+    private void ApplyToolAvailabilityToRows()
+    {
+        foreach (PerfSuiteRowViewModel row in BuildsGroup.Rows)
+        {
+            if (_toolDetector is null)
+            {
+                continue;
+            }
+
+            if (_toolDetectionFailed)
+            {
+                row.MarkToolDetectionFailed();
+                continue;
+            }
+
+            if (!_toolAvailabilityReady || _toolSnapshot is null)
+            {
+                row.ApplyToolAvailability(tool: null);
+                continue;
+            }
+
+            _toolSnapshot.TryGetValue(row.RequiredTool, out InstalledToolInfo? tool);
+            row.ApplyToolAvailability(tool ?? new InstalledToolInfo
+            {
+                Name = row.RequiredTool,
+                Found = false,
+            });
+        }
+    }
+
+    private void CancelToolDetection()
+    {
+        _toolDetectionGeneration++;
+        _toolDetectionCts?.Cancel();
+        _toolDetectionCts = null;
+    }
+
+    private void ApplyPendingConfiguration()
+    {
+        if (_pendingConfiguration is BenchmarkDriveConfiguration configuration)
+        {
+            ApplyConfiguration(configuration);
+        }
+    }
+
+    private void ResetRunResultState()
+    {
+        _aggregator = new PerfSuiteAggregator(0);
+        RunProgressValue = 0;
+        RunProgressMax = 1;
+        RunStatusText = string.Empty;
+        HasHeadline = false;
+        HeadlineValue = string.Empty;
+        HeadlineCaption = string.Empty;
+    }
+
+    private sealed record BenchmarkDriveConfiguration(
+        string SystemRoot,
+        string? DevRoot,
+        char? DevLetter,
+        char SystemLetter);
 
     private static PerfSuiteRowViewModel? FindRow(PerfSuiteGroupViewModel group, string id) =>
         group.Rows.FirstOrDefault(r => string.Equals(r.Id, id, StringComparison.Ordinal));

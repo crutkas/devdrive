@@ -32,12 +32,11 @@ namespace DevDriveCore.Platform;
 /// check would reject the user-side output path.
 /// </para>
 /// <para>
-/// <b>SAFETY:</b> returns <c>null</c> on UAC-declined (<see cref="Win32Exception"/>), a missing helper,
-/// any failure, or a <see cref="ResizeMode.WhatIf"/> timeout. For a <see cref="ResizeMode.Execute"/>
-/// timeout the destructive child is <b>NOT</b> killed (cancelling a shrink/format mid-flight can corrupt
-/// the volume) — instead a "state unknown — check Disk Management" outcome is returned so the UI never
-/// claims nothing changed. The destructive mode is only ever reached when the caller passes it
-/// deliberately; <see cref="ResizeMode.WhatIf"/> is the read-only default.
+/// <b>SAFETY:</b> returns <c>null</c> when the helper was not started (for example, UAC was declined or
+/// the helper is missing) and for failed <see cref="ResizeMode.WhatIf"/> calls. Once an execute helper
+/// starts, a timeout, nonzero exit, missing output, or unreadable output becomes a "state unknown — check
+/// Disk Management" outcome, so the UI never falsely claims nothing changed. A timed-out destructive
+/// child is <b>NOT</b> killed because cancelling a shrink/format mid-flight can corrupt the volume.
 /// </para>
 /// </remarks>
 public sealed class ElevatedResizeBroker : IElevatedResizeBroker
@@ -76,12 +75,12 @@ public sealed class ElevatedResizeBroker : IElevatedResizeBroker
 
         string tempDir = Path.GetTempPath();
         string outPath = Path.Combine(tempDir, $"ddm-resize-{Guid.NewGuid():N}.json");
-        string modeFlag = request.Mode == ResizeMode.Execute ? "--execute" : "--whatif";
 
         // F3: the plan is base64-encoded onto the command line (no plan FILE → no plan-file TOCTOU).
         string planB64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(request.PlanJson));
 
         bool leaveOutputForChild = false;
+        bool processStarted = false;
         try
         {
             var psi = new ProcessStartInfo
@@ -91,7 +90,7 @@ public sealed class ElevatedResizeBroker : IElevatedResizeBroker
                 UseShellExecute = true,
                 Verb = "runas",
                 WindowStyle = ProcessWindowStyle.Hidden,
-                Arguments = $"resize {modeFlag} --plan {planB64} --out \"{outPath}\" --allowed-root \"{tempDir}\"",
+                Arguments = BuildArguments(request.Mode, planB64, outPath, tempDir),
             };
 
             using Process? process = Process.Start(psi);
@@ -100,6 +99,7 @@ public sealed class ElevatedResizeBroker : IElevatedResizeBroker
                 return null;
             }
 
+            processStarted = true;
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeoutCts.CancelAfter(_timeout);
             try
@@ -114,7 +114,11 @@ public sealed class ElevatedResizeBroker : IElevatedResizeBroker
                     // aborting partway can corrupt the volume. Leave it running and report state-unknown so
                     // the UI tells the user to check Disk Management rather than "Nothing was changed".
                     leaveOutputForChild = true;
-                    return StateUnknownJson(request);
+                    return StateUnknownJson(
+                        request,
+                        "The resize did not confirm completion within the time limit and was NOT cancelled " +
+                        "(cancelling a shrink/format mid-operation can corrupt the disk). State is unknown — " +
+                        "check Disk Management.");
                 }
 
                 // WhatIf is read-only — safe to kill on timeout/cancel.
@@ -122,21 +126,38 @@ public sealed class ElevatedResizeBroker : IElevatedResizeBroker
                 return null;
             }
 
-            if (!File.Exists(outPath))
+            string? resultJson = null;
+            if (process.ExitCode == 0 && File.Exists(outPath))
             {
-                return null;
+                CancellationToken readToken =
+                    request.Mode == ResizeMode.Execute ? CancellationToken.None : cancellationToken;
+                resultJson = await File.ReadAllTextAsync(outPath, readToken).ConfigureAwait(false);
             }
 
-            return await File.ReadAllTextAsync(outPath, cancellationToken).ConfigureAwait(false);
+            return ClassifyCompletedInvocation(request, process.ExitCode, resultJson);
         }
-        catch (Win32Exception)
+        catch (Win32Exception) when (!processStarted)
         {
             // UAC declined (ERROR_CANCELLED) or the shell couldn't elevate.
             return null;
         }
+        catch (OperationCanceledException)
+        {
+            return request.Mode == ResizeMode.Execute && processStarted
+                ? StateUnknownJson(
+                    request,
+                    "The elevated resize request was interrupted after the helper started. State is unknown — " +
+                    "check Disk Management before retrying.")
+                : null;
+        }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
         {
-            return null;
+            return request.Mode == ResizeMode.Execute && processStarted
+                ? StateUnknownJson(
+                    request,
+                    $"The elevated resize helper stopped without a trustworthy result ({ex.Message}). " +
+                    "State is unknown — check Disk Management before retrying.")
+                : null;
         }
         finally
         {
@@ -149,9 +170,41 @@ public sealed class ElevatedResizeBroker : IElevatedResizeBroker
         }
     }
 
-    // F7: a self-describing "state unknown" outcome for an execute that didn't confirm completion in time.
-    // Executed=true (a mutation had begun) so the UI never reports "Nothing was changed".
-    private static string StateUnknownJson(ResizeBrokerRequest request)
+    internal static string BuildArguments(
+        ResizeMode mode,
+        string planBase64,
+        string outputPath,
+        string allowedRoot)
+    {
+        string modeFlag = mode == ResizeMode.Execute ? "--execute" : "--whatif";
+        string normalizedRoot = Path.TrimEndingDirectorySeparator(allowedRoot);
+        return $"resize {modeFlag} --plan {planBase64} --out \"{outputPath}\" " +
+               $"--allowed-root \"{normalizedRoot}\"";
+    }
+
+    internal static string? ClassifyCompletedInvocation(
+        ResizeBrokerRequest request,
+        int exitCode,
+        string? resultJson)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (exitCode == 0 && !string.IsNullOrWhiteSpace(resultJson))
+        {
+            return resultJson;
+        }
+
+        return request.Mode == ResizeMode.Execute
+            ? StateUnknownJson(
+                request,
+                $"The elevated resize helper exited with code {exitCode} without a trustworthy result. " +
+                "State is unknown — check Disk Management before retrying.")
+            : null;
+    }
+
+    // A self-describing "state unknown" outcome for an execute helper that was launched but did not
+    // return a trustworthy result. Executed=true so the UI never reports "Nothing was changed".
+    private static string StateUnknownJson(ResizeBrokerRequest request, string message)
     {
         char source = 'C';
         char target = 'D';
@@ -173,9 +226,7 @@ public sealed class ElevatedResizeBroker : IElevatedResizeBroker
         {
             Success = false,
             Executed = true,
-            Message = "The resize did not confirm completion within the time limit and was NOT cancelled " +
-                      "(cancelling a shrink/format mid-operation can corrupt the disk). State is unknown — " +
-                      "check Disk Management.",
+            Message = message,
             SourceVolumeLetter = source,
             NewDriveLetter = target,
         };

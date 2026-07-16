@@ -80,6 +80,20 @@ public sealed class PackageCacheServiceTests
     }
 
     [TestMethod]
+    public void GetPackageCaches_WithoutDevDrive_StillDetectsCacheWithoutDevClassification()
+    {
+        FakeEnvironmentProvider env = StandardEnvironment().Set("npm_config_cache", @"G:\packages\npm");
+        var fs = new FakeFileSystemProbe(new[] { @"G:\packages\npm" });
+        var service = new PackageCacheService(env, fs);
+
+        PackageCacheInfo npm = Npm(service.GetPackageCaches(null));
+
+        Assert.IsTrue(npm.Detected);
+        Assert.AreEqual('G', npm.DriveLetter);
+        Assert.IsFalse(npm.OnDevDrive);
+    }
+
+    [TestMethod]
     public void GetPackageCaches_EnvironmentOverrideWithVariables_IsExpanded()
     {
         FakeEnvironmentProvider env = StandardEnvironment().Set("npm_config_cache", @"%UserProfile%\custom-npm");

@@ -1,8 +1,8 @@
 namespace DevDriveCore.Models;
 
 /// <summary>
-/// One row of the real-developer-workload comparison: the same operation (e.g. <c>git clone</c>)
-/// timed on the system drive and the Dev Drive. Unlike <see cref="SpeedMetric"/> (which is
+/// One row of a real developer workload: the operation (e.g. <c>git clone</c>) is always timed on the
+/// system drive and, when available, on the Dev Drive. Unlike <see cref="SpeedMetric"/> (which is
 /// higher-is-better MB/s / IOPS), these are <b>wall-clock seconds</b> — <em>lower is better</em> — so
 /// the win ratio is <see cref="Speedup"/> = system ÷ dev (a value above <c>1.0</c> means the Dev Drive
 /// finished faster).
@@ -29,7 +29,7 @@ public sealed record WorkloadMetric
     /// <summary>Median wall-clock seconds on the system drive (the measured runs, after discarding the first).</summary>
     public double SystemSeconds { get; init; }
 
-    /// <summary>Median wall-clock seconds on the Dev Drive (the measured runs, after discarding the first).</summary>
+    /// <summary>Median wall-clock seconds on the Dev Drive, or 0 for a system-drive-only baseline.</summary>
     public double DevSeconds { get; init; }
 
     /// <summary>Every system-drive run time (including the discarded first run) — surfaced for transparency.</summary>

@@ -65,6 +65,21 @@ public sealed class PreflightProbe : IPreflightProbe
         };
     }
 
+    /// <inheritdoc />
+    public PreflightInfo CaptureSystemDrive(string systemRoot, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(systemRoot);
+        cancellationToken.ThrowIfCancellationRequested();
+        char systemLetter = char.ToUpperInvariant(systemRoot[0]);
+
+        return new PreflightInfo
+        {
+            StorageClass = ProbeStorageClass(systemLetter),
+            MachineSummary = FormatMachineSummary(_cpuNameProvider(), Environment.ProcessorCount, _osDescriptionProvider()),
+            SystemFreeBytes = _freeBytesProbe(systemRoot),
+        };
+    }
+
     private bool? ProbePerformanceMode()
     {
         try

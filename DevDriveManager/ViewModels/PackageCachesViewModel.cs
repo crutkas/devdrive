@@ -37,6 +37,7 @@ public partial class PackageCachesViewModel : ObservableObject
     // supersedes them, so a re-Initialize() can't fault a mid-flight pass (collection modified) or write
     // stale data onto freshly rebuilt rows.
     private int _loadGeneration;
+    private int _moveAllConfirmationGeneration = -1;
 
     public PackageCachesViewModel(IPackageCacheService service, PackageCacheMoveCoordinator moveCoordinator, Func<string, bool>? folderExists = null)
     {
@@ -57,15 +58,49 @@ public partial class PackageCachesViewModel : ObservableObject
     /// <summary>Raised after <see cref="Caches"/> is (re)populated, so an aggregator can regroup the rows.</summary>
     public event EventHandler? CachesChanged;
 
+    /// <summary>Raised synchronously when old rows are cleared so page projections cannot retain stale actions.</summary>
+    public event EventHandler? InventoryReset;
+
     [ObservableProperty]
     public partial bool IsCalculating { get; set; }
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ShowMoveAllButton))]
+    [NotifyPropertyChangedFor(nameof(ShowAllCachesOnDevDrive))]
+    [NotifyPropertyChangedFor(nameof(ShowDashboardCacheList))]
+    [NotifyCanExecuteChangedFor(nameof(MoveAllCommand))]
     public partial bool HasCachesOnSystemDrive { get; set; }
+
+    /// <summary>True when package-cache move targets are available on this PC.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowMoveAllButton))]
+    [NotifyPropertyChangedFor(nameof(ShowNoDevDriveNotice))]
+    [NotifyPropertyChangedFor(nameof(ShowAllCachesOnDevDrive))]
+    [NotifyPropertyChangedFor(nameof(ShowDashboardCacheList))]
+    [NotifyCanExecuteChangedFor(nameof(MoveAllCommand))]
+    [NotifyCanExecuteChangedFor(nameof(ConfirmMoveAllCommand))]
+    public partial bool HasDevDrive { get; set; }
+
+    /// <summary>True when at least one catalogued cache exists on this PC, independent of move capability.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowAllCachesOnDevDrive))]
+    [NotifyPropertyChangedFor(nameof(ShowDashboardCacheList))]
+    public partial bool HasDetectedCaches { get; set; }
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowDashboardCacheList))]
+    public partial bool HasCachesOutsideDevDrive { get; set; }
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowAllCachesOnDevDrive))]
+    public partial bool AllDetectedCachesOnDevDrive { get; set; }
 
     [ObservableProperty]
     public partial string WarningMessage { get; set; } = string.Empty;
+
+    [ObservableProperty]
+    public partial string DevDriveNoticeMessage { get; set; } =
+        "No Dev Drive found. Cache locations and sizes are still listed below; create a Dev Drive to enable move actions.";
 
     [ObservableProperty]
     public partial string MoveAllButtonText { get; set; } = "Move all";
@@ -75,6 +110,8 @@ public partial class PackageCachesViewModel : ObservableObject
     /// <summary>True while the inline "Move all" confirm panel is open.</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ShowMoveAllButton))]
+    [NotifyCanExecuteChangedFor(nameof(MoveAllCommand))]
+    [NotifyCanExecuteChangedFor(nameof(ConfirmMoveAllCommand))]
     public partial bool IsConfirmingMoveAll { get; set; }
 
     /// <summary>True once the user confirmed — shows the safe, preview-only "nothing changed" result.</summary>
@@ -90,29 +127,74 @@ public partial class PackageCachesViewModel : ObservableObject
     public partial string MoveAllResultText { get; set; } = string.Empty;
 
     /// <summary>Show the "Move all" button when there is something to move and its confirm panel is closed.</summary>
-    public bool ShowMoveAllButton => HasCachesOnSystemDrive && !IsConfirmingMoveAll;
+    public bool ShowMoveAllButton => HasDevDrive && HasCachesOnSystemDrive && !IsConfirmingMoveAll;
 
-    /// <summary>Populates the rows for the detected Dev Drive and kicks off async detection + sizing.</summary>
-    public void Initialize(string systemRoot, string devRoot, char devLetter, char systemLetter)
+    /// <summary>Shows neutral guidance instead of a false Dev Drive all-clear state.</summary>
+    public bool ShowNoDevDriveNotice => !HasDevDrive;
+
+    /// <summary>Shows the success state only when a Dev Drive and at least one detected cache both exist.</summary>
+    public bool ShowAllCachesOnDevDrive =>
+        HasDevDrive && HasDetectedCaches && AllDetectedCachesOnDevDrive;
+
+    /// <summary>The Dashboard previews movable caches, or all detected caches when no Dev Drive exists.</summary>
+    public bool ShowDashboardCacheList => HasDevDrive ? HasCachesOutsideDevDrive : HasDetectedCaches;
+
+    /// <summary>Detects caches even when no Dev Drive exists, then sizes them asynchronously.</summary>
+    public void Initialize(
+        string systemRoot,
+        string? devRoot,
+        char? devLetter,
+        char systemLetter,
+        string? unavailableNoticeMessage = null)
     {
-        _devLetter = devLetter;
-        _systemLetter = systemLetter;
+        ResetForDriveTransition();
+        DisableCurrentRowActions();
+        HasDevDrive = devLetter.HasValue;
+        if (devLetter is char letter)
+        {
+            _devLetter = char.ToUpperInvariant(letter);
+        }
+
+        _systemLetter = char.ToUpperInvariant(systemLetter);
+        DevDriveNoticeMessage = HasDevDrive
+            ? string.Empty
+            : unavailableNoticeMessage ??
+              "No Dev Drive found. Cache locations and sizes are still listed below; create a Dev Drive to enable move actions.";
 
         Caches.Clear();
+        InventoryReset?.Invoke(this, EventArgs.Empty);
+        HasDetectedCaches = false;
+        HasCachesOnSystemDrive = false;
+        HasCachesOutsideDevDrive = false;
+        AllDetectedCachesOnDevDrive = false;
+        WarningMessage = "Scanning package caches\u2026";
+        MoveAllButtonText = "Move all";
+        _ = LoadCachesAsync(devLetter);
+    }
+
+    /// <summary>Preserves the read-only inventory while immediately disabling stale drive-dependent actions.</summary>
+    public void SetDevDriveUnavailable(string noticeMessage)
+    {
+        ResetForDriveTransition();
+        DisableCurrentRowActions();
+        HasDevDrive = false;
+        DevDriveNoticeMessage = noticeMessage;
         UpdateWarning();
-        _ = LoadCachesAsync();
+        CachesChanged?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>
     /// Resolves the caches off the UI thread (npm cache-path detection can spawn a short-lived process)
     /// and then populates the rows, sizing and move-back state. Read-only: detection never moves anything.
     /// </summary>
-    private async Task LoadCachesAsync()
+    private async Task LoadCachesAsync(char? devDriveLetter)
     {
         int generation = ++_loadGeneration;
-        char devLetter = _devLetter;
+        char displayDevLetter = devDriveLetter is char letter ? char.ToUpperInvariant(letter) : _devLetter;
         char systemLetter = _systemLetter;
-        IReadOnlyList<PackageCacheInfo> infos = await Task.Run(() => _service.GetPackageCaches(devLetter));
+        bool hasDevDrive = devDriveLetter.HasValue;
+        IReadOnlyList<PackageCacheInfo> infos =
+            await Task.Run(() => _service.GetPackageCaches(devDriveLetter));
 
         if (generation != _loadGeneration)
         {
@@ -123,9 +205,9 @@ public partial class PackageCachesViewModel : ObservableObject
         foreach (PackageCacheInfo info in infos)
         {
             Caches.Add(new PackageCacheRowViewModel(
-                info, devLetter, systemLetter,
+                info, displayDevLetter, systemLetter,
                 OnMoveRequested, OnConfirmMoveRequested, OnMoveBackRequested, OnCancelActiveMoveRequested,
-                OnMapRequested, OnRemapRequested, _folderExists));
+                OnMapRequested, OnRemapRequested, _folderExists, hasDevDrive));
         }
 
         UpdateWarning();
@@ -221,6 +303,30 @@ public partial class PackageCachesViewModel : ObservableObject
 
     private void UpdateWarning()
     {
+        List<PackageCacheRowViewModel> detected = Caches
+            .Where(c => c.Info.Detected || c.IsMapped || c.IsSet)
+            .ToList();
+        int detectedCount = detected.Count;
+        HasDetectedCaches = detectedCount > 0;
+        List<PackageCacheRowViewModel> outsideDev = detected
+            .Where(c => !c.IsOnDevDrive)
+            .ToList();
+        HasCachesOutsideDevDrive = HasDevDrive && outsideDev.Count > 0;
+        AllDetectedCachesOnDevDrive = HasDevDrive && detectedCount > 0 && outsideDev.Count == 0;
+
+        if (!HasDevDrive)
+        {
+            HasCachesOnSystemDrive = false;
+            WarningMessage = detectedCount switch
+            {
+                0 => "No package caches detected on this PC.",
+                1 => "1 package cache detected on this PC.",
+                _ => $"{detectedCount} package caches detected on this PC.",
+            };
+            MoveAllButtonText = "Move all";
+            return;
+        }
+
         // F2: filter on the LIVE per-row CanMove (detected && currently on the system drive). Unlike the
         // immutable Info.OnDevDrive snapshot, CanMove is flipped to false by ApplyMoveOutcome the moment a
         // cache moves, so a moved cache drops out of the warning, the sum, and the "Move all" count at once.
@@ -236,10 +342,38 @@ public partial class PackageCachesViewModel : ObservableObject
 
         HasCachesOnSystemDrive = onSystem.Count > 0;
         string sumText = ByteSizeFormatter.Format(sum);
-        WarningMessage =
-            $"{sumText} of package caches are on {_systemLetter}:. Moving them to your Dev Drive " +
-            $"frees space on {_systemLetter}: and speeds up installs and restores.";
+        WarningMessage = onSystem.Count > 0
+            ? $"{sumText} of package caches are on {_systemLetter}:. Moving them to your Dev Drive " +
+              $"frees space on {_systemLetter}: and speeds up installs and restores."
+            : AllDetectedCachesOnDevDrive
+                ? $"All {detectedCount} detected package caches are on {_devLetter}:."
+                : outsideDev.Count == 1
+                    ? $"1 detected package cache is outside {_devLetter}:."
+                    : outsideDev.Count > 1
+                        ? $"{outsideDev.Count} detected package caches are outside {_devLetter}:."
+                        : "No package caches detected on this PC.";
         MoveAllButtonText = $"Move all ({sumText})";
+    }
+
+    private void ResetForDriveTransition()
+    {
+        _loadGeneration++;
+        _moveCts?.Cancel();
+        _moveAllConfirmationGeneration = -1;
+        IsConfirmingMoveAll = false;
+        ShowMoveAllResult = false;
+        MoveAllConfirmBodyText = string.Empty;
+        MoveAllResultText = string.Empty;
+        IsCalculating = false;
+        ConfirmMoveAllCommand.NotifyCanExecuteChanged();
+    }
+
+    private void DisableCurrentRowActions()
+    {
+        foreach (PackageCacheRowViewModel row in Caches)
+        {
+            row.DisableDevDriveActions();
+        }
     }
 
     private void OnMoveRequested(PackageCacheRowViewModel row)
@@ -417,7 +551,10 @@ public partial class PackageCachesViewModel : ObservableObject
     /// </summary>
     private void OnCancelActiveMoveRequested(PackageCacheRowViewModel row) => _moveCts?.Cancel();
 
-    [RelayCommand]
+    private bool CanStartMoveAll() =>
+        HasDevDrive && HasCachesOnSystemDrive && !IsConfirmingMoveAll;
+
+    [RelayCommand(CanExecute = nameof(CanStartMoveAll))]
     private void MoveAll()
     {
         // F2: live CanMove predicate (same as UpdateWarning / ConfirmMoveAll) so the count matches the warning.
@@ -426,6 +563,7 @@ public partial class PackageCachesViewModel : ObservableObject
             .ToList();
         if (onSystem.Count == 0)
         {
+            _moveAllConfirmationGeneration = -1;
             return;
         }
 
@@ -441,6 +579,7 @@ public partial class PackageCachesViewModel : ObservableObject
             "tool's per-user variable. Originals are kept in place, so every move is reversible. Runs one at a " +
             "time in the background; one failure won't stop the rest.";
         ShowMoveAllResult = false;
+        _moveAllConfirmationGeneration = _loadGeneration;
         IsConfirmingMoveAll = true;
     }
 
@@ -449,14 +588,21 @@ public partial class PackageCachesViewModel : ObservableObject
     /// engine path, with continue-on-error (one failure doesn't abort the rest) and a combined result
     /// that reports which tools failed.
     /// </summary>
-    [RelayCommand]
+    private bool CanConfirmMoveAll() =>
+        HasDevDrive
+        && IsConfirmingMoveAll
+        && _moveAllConfirmationGeneration == _loadGeneration;
+
+    [RelayCommand(CanExecute = nameof(CanConfirmMoveAll))]
     private async Task ConfirmMoveAll()
     {
+        int confirmationGeneration = _moveAllConfirmationGeneration;
         IsConfirmingMoveAll = false;
         ShowMoveAllResult = false;
 
-        if (_movingRow is not null)
+        if (!HasDevDrive || confirmationGeneration != _loadGeneration || _movingRow is not null)
         {
+            _moveAllConfirmationGeneration = -1;
             return;
         }
 
@@ -519,13 +665,23 @@ public partial class PackageCachesViewModel : ObservableObject
             _movingRow = null;
         }
 
+        if (confirmationGeneration != _loadGeneration)
+        {
+            return;
+        }
+
         CacheMoveAllOutcome combined = CacheMoveAllOutcome.From(outcomes);
         MoveAllResultText = combined.CombinedText;
         ShowMoveAllResult = true;
+        _moveAllConfirmationGeneration = -1;
         UpdateWarning();
     }
 
     /// <summary>Cancel closes the prompt and changes nothing.</summary>
     [RelayCommand]
-    private void CancelMoveAll() => IsConfirmingMoveAll = false;
+    private void CancelMoveAll()
+    {
+        _moveAllConfirmationGeneration = -1;
+        IsConfirmingMoveAll = false;
+    }
 }

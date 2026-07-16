@@ -168,6 +168,22 @@ public sealed class PerfSuiteRowViewModelTests
     }
 
     [TestMethod]
+    public void MissingRequiredTool_DisablesRunAndSurfacesReason()
+    {
+        PerfSuiteRowViewModel row = new("cargo-build", "cargo build", "builds Edit", 'C', 'G')
+        {
+            RequiredTool = "cargo",
+        };
+
+        row.ApplyToolAvailability(new InstalledToolInfo { Name = "cargo", Found = false });
+
+        Assert.IsFalse(row.RunCommand.CanExecute(null));
+        Assert.IsTrue(row.ShowToolAvailability);
+        StringAssert.Contains(row.ToolAvailabilityText, "cargo");
+        StringAssert.Contains(row.ToolAvailabilityText, "PATH");
+    }
+
+    [TestMethod]
     public void DetailsCopy_AbsentByDefault_HasDetailsFalse()
     {
         PerfSuiteRowViewModel row = NewRow();
@@ -284,7 +300,9 @@ public sealed class PerformanceSuiteViewModelTests
     private static PerformanceSuiteViewModel CreateSut(out IWorkloadBenchmarkService workload)
     {
         workload = Substitute.For<IWorkloadBenchmarkService>();
-        return new PerformanceSuiteViewModel(workload);
+        var sut = new PerformanceSuiteViewModel(workload);
+        sut.Initialize(@"C:\", @"G:\", 'G', 'C');
+        return sut;
     }
 
     // Stubs the single-row engine so a per-row Run resolves to a fixed metric regardless of arguments.
@@ -309,6 +327,137 @@ public sealed class PerformanceSuiteViewModelTests
         Assert.IsFalse(sut.IsRunning);
         Assert.IsTrue(sut.RunAllCommand.CanExecute(null));
         Assert.IsFalse(sut.CancelCommand.CanExecute(null));
+    }
+
+    [TestMethod]
+    public async Task WithoutDevDrive_RunCommandsProduceSystemDriveBaseline()
+    {
+        IWorkloadBenchmarkService workload = Substitute.For<IWorkloadBenchmarkService>();
+        workload.RunSingleSystemDriveAsync(
+            Arg.Any<string>(), Arg.Any<string>(), Arg.Any<int>(),
+            Arg.Any<IProgress<WorkloadRunProgress>?>(), Arg.Any<CancellationToken>())
+            .Returns(new WorkloadMetric
+            {
+                Name = "dotnet build",
+                SystemSeconds = 8d,
+                SystemRuns = new[] { 9d, 8d, 8d },
+            });
+        var sut = new PerformanceSuiteViewModel(workload);
+        sut.Initialize(@"C:\", devRoot: null, devLetter: null, systemLetter: 'C');
+        PerfSuiteRowViewModel row = sut.BuildsGroup.Rows.Single(r => r.Id == "dotnet-build");
+
+        Assert.IsFalse(sut.HasDevDrive);
+        Assert.IsTrue(sut.ShowSystemDriveBaseline);
+        Assert.IsTrue(sut.RunAllCommand.CanExecute(null));
+        Assert.IsTrue(sut.BuildsGroup.Rows.All(candidate => candidate.RunCommand.CanExecute(null)));
+        Assert.IsFalse(row.HasComparison);
+
+        await row.RunCommand.ExecuteAsync(null);
+
+        Assert.IsTrue(row.IsDone);
+        Assert.AreEqual("8.00 s", row.SystemValueText);
+        Assert.AreEqual(string.Empty, row.DevValueText);
+        Assert.IsFalse(row.ShowComparisonResult);
+        await workload.Received(1).RunSingleSystemDriveAsync(
+            "dotnet", @"C:\", 3,
+            Arg.Any<IProgress<WorkloadRunProgress>?>(), Arg.Any<CancellationToken>());
+    }
+
+    [TestMethod]
+    public async Task InstalledToolProbe_DisablesOnlyUnavailableWorkloads()
+    {
+        IWorkloadBenchmarkService workload = Substitute.For<IWorkloadBenchmarkService>();
+        IInstalledToolDetector detector = Substitute.For<IInstalledToolDetector>();
+        detector.Detect("git", Arg.Any<CancellationToken>())
+            .Returns(new InstalledToolInfo { Name = "git", Found = true, Version = "2.53.0" });
+        detector.Detect("npm", Arg.Any<CancellationToken>())
+            .Returns(new InstalledToolInfo { Name = "npm", Found = false });
+        detector.Detect("dotnet", Arg.Any<CancellationToken>())
+            .Returns(new InstalledToolInfo { Name = "dotnet", Found = true, Version = "10.0.0" });
+        detector.Detect("cargo", Arg.Any<CancellationToken>())
+            .Returns(new InstalledToolInfo { Name = "cargo", Found = false });
+        var sut = new PerformanceSuiteViewModel(workload, detector);
+
+        sut.Initialize(@"C:\", devRoot: null, devLetter: null, systemLetter: 'C');
+        await sut.ToolDetectionTask;
+
+        Assert.IsTrue(sut.BuildsGroup.Rows.Single(row => row.RequiredTool == "git").RunCommand.CanExecute(null));
+        Assert.IsFalse(sut.BuildsGroup.Rows.Single(row => row.RequiredTool == "npm").RunCommand.CanExecute(null));
+        Assert.IsTrue(sut.BuildsGroup.Rows.Single(row => row.RequiredTool == "dotnet").RunCommand.CanExecute(null));
+        Assert.IsFalse(sut.BuildsGroup.Rows.Single(row => row.RequiredTool == "cargo").RunCommand.CanExecute(null));
+        Assert.IsTrue(sut.RunAllCommand.CanExecute(null), "Run all remains useful when at least one workload is installed.");
+        StringAssert.Contains(
+            sut.BuildsGroup.Rows.Single(row => row.RequiredTool == "npm").ToolAvailabilityText,
+            "not installed");
+    }
+
+    [TestMethod]
+    public async Task InstalledToolProbe_DisablesRunAllWhenNoWorkloadCanRun()
+    {
+        IWorkloadBenchmarkService workload = Substitute.For<IWorkloadBenchmarkService>();
+        IInstalledToolDetector detector = Substitute.For<IInstalledToolDetector>();
+        detector.Detect(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(call => new InstalledToolInfo { Name = call.ArgAt<string>(0), Found = false });
+        var sut = new PerformanceSuiteViewModel(workload, detector);
+
+        sut.Initialize(@"C:\", devRoot: null, devLetter: null, systemLetter: 'C');
+        await sut.ToolDetectionTask;
+
+        Assert.IsFalse(sut.RunAllCommand.CanExecute(null));
+        Assert.IsTrue(sut.BuildsGroup.Rows.All(row => !row.RunCommand.CanExecute(null)));
+        Assert.IsTrue(sut.BuildsGroup.Rows.All(row => row.ShowToolAvailability));
+    }
+
+    [TestMethod]
+    public async Task InstalledToolProbe_PublishesRowChangesThroughUiDispatcher()
+    {
+        IWorkloadBenchmarkService workload = Substitute.For<IWorkloadBenchmarkService>();
+        IInstalledToolDetector detector = Substitute.For<IInstalledToolDetector>();
+        detector.Detect(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(call => new InstalledToolInfo { Name = call.ArgAt<string>(0), Found = true });
+        var pendingUiUpdates = new Queue<Action>();
+        var sut = new PerformanceSuiteViewModel(
+            workload,
+            detector,
+            action =>
+            {
+                pendingUiUpdates.Enqueue(action);
+                return true;
+            });
+
+        sut.Initialize(@"C:\", devRoot: null, devLetter: null, systemLetter: 'C');
+        await sut.ToolDetectionTask;
+
+        Assert.HasCount(1, pendingUiUpdates);
+        Assert.IsTrue(sut.BuildsGroup.Rows.All(row => !row.RunCommand.CanExecute(null)));
+
+        pendingUiUpdates.Dequeue()();
+
+        Assert.IsTrue(sut.BuildsGroup.Rows.All(row => row.RunCommand.CanExecute(null)));
+        Assert.IsTrue(sut.RunAllCommand.CanExecute(null));
+    }
+
+    [TestMethod]
+    public async Task Reconfiguration_ClearsOldHeadlineAndPublishesNewRows()
+    {
+        PerformanceSuiteViewModel sut = CreateSut(out IWorkloadBenchmarkService workload);
+        StubSingle(workload, new WorkloadMetric
+        {
+            Name = "dotnet build",
+            SystemSeconds = 8d,
+            DevSeconds = 4d,
+        });
+        await sut.BuildsGroup.Rows.Single(r => r.Id == "dotnet-build").RunCommand.ExecuteAsync(null);
+        Assert.IsTrue(sut.HasHeadline);
+        int configurationChanges = 0;
+        sut.ConfigurationChanged += (_, _) => configurationChanges++;
+
+        sut.Initialize(@"C:\", devRoot: null, devLetter: null, systemLetter: 'C');
+
+        Assert.IsFalse(sut.HasHeadline);
+        Assert.AreEqual(string.Empty, sut.HeadlineValue);
+        Assert.AreEqual(1, configurationChanges);
+        Assert.IsTrue(sut.BuildsGroup.Rows.All(row => !row.HasComparison));
     }
 
     [TestMethod]

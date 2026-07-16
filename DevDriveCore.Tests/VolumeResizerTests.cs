@@ -128,14 +128,27 @@ public sealed class VolumeResizerTests
     [TestMethod]
     [DataRow("garbage")]
     [DataRow("{ broken")]
-    public async Task ExecuteAsync_UnparseableResponse_ReportsNotExecuted(string response)
+    public async Task ExecuteAsync_UnparseableResponse_ReportsStateUnknown(string response)
     {
         var resizer = new VolumeResizer(new RecordingBroker(response));
 
         ResizeExecuteOutcome outcome = await resizer.ExecuteAsync(Plan());
 
-        Assert.IsFalse(outcome.Executed, "An unparseable helper response must NEVER report a real mutation.");
+        Assert.IsTrue(outcome.Executed, "An unparseable execute response must conservatively report unknown state.");
         Assert.IsFalse(outcome.Success);
+        StringAssert.Contains(outcome.Message, "State is unknown", StringComparison.OrdinalIgnoreCase);
+    }
+
+    [TestMethod]
+    public async Task ExecuteAsync_IncompleteResponse_ReportsStateUnknown()
+    {
+        var resizer = new VolumeResizer(new RecordingBroker("{}"));
+
+        ResizeExecuteOutcome outcome = await resizer.ExecuteAsync(Plan());
+
+        Assert.IsTrue(outcome.Executed);
+        Assert.IsFalse(outcome.Success);
+        StringAssert.Contains(outcome.Message, "State is unknown", StringComparison.OrdinalIgnoreCase);
     }
 
     // ---- guards --------------------------------------------------------------------------------

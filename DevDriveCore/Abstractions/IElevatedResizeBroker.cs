@@ -20,8 +20,9 @@ namespace DevDriveCore.Abstractions;
 public interface IElevatedResizeBroker
 {
     /// <summary>
-    /// Invokes the elevated helper for <paramref name="request"/> and returns the raw result JSON, or
-    /// <c>null</c> when the helper was unavailable, UAC was declined, it timed out, or it failed.
+    /// Invokes the elevated helper for <paramref name="request"/> and returns the raw result JSON.
+    /// Returns <c>null</c> when the helper was not started (for example, it was unavailable or UAC was
+    /// declined). Execute failures after launch return a state-unknown result instead.
     /// </summary>
     Task<string?> InvokeAsync(ResizeBrokerRequest request, CancellationToken cancellationToken = default);
 }

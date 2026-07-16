@@ -44,6 +44,7 @@ public partial class PackageCacheRowViewModel : ObservableObject
     private readonly Func<string, bool> _folderExists;
     private readonly char _devLetter;
     private readonly char _systemWhere;
+    private bool _hasDevDrive;
 
     public PackageCacheRowViewModel(
         PackageCacheInfo info,
@@ -55,7 +56,8 @@ public partial class PackageCacheRowViewModel : ObservableObject
         Action<PackageCacheRowViewModel> onCancelActiveMove,
         Action<PackageCacheRowViewModel> onMapRequested,
         Action<PackageCacheRowViewModel> onRemapRequested,
-        Func<string, bool>? folderExists = null)
+        Func<string, bool>? folderExists = null,
+        bool hasDevDrive = true)
     {
         Info = info;
         _onMove = onMove;
@@ -67,6 +69,7 @@ public partial class PackageCacheRowViewModel : ObservableObject
         _folderExists = folderExists ?? Directory.Exists;
         _devLetter = devLetter;
         _systemWhere = info.DriveLetter ?? systemLetter;
+        _hasDevDrive = hasDevDrive;
 
         Header = info.Name;
         Description = $"{info.PathTemplate} \u2192 sets {info.EnvironmentVariable}";
@@ -93,7 +96,7 @@ public partial class PackageCacheRowViewModel : ObservableObject
             SizeText = "calculating\u2026";
         }
 
-        CanMove = info.Detected && !info.OnDevDrive;
+        CanMove = hasDevDrive && info.Detected && !info.OnDevDrive;
         IsSet = info.Detected && info.OnDevDrive;
         IsNotFound = !info.Detected;
 
@@ -134,11 +137,13 @@ public partial class PackageCacheRowViewModel : ObservableObject
     /// <summary>True when the cache exists and is NOT on the Dev Drive (so it can be moved).</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ShowMoveButton))]
+    [NotifyCanExecuteChangedFor(nameof(MoveCommand))]
     public partial bool CanMove { get; set; }
 
     /// <summary>True when the cache is already on the Dev Drive (show the "set" check).</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ShowMapBlock))]
+    [NotifyPropertyChangedFor(nameof(IsOnDevDrive))]
     public partial bool IsSet { get; set; }
 
     /// <summary>True when the cache directory does not exist.</summary>
@@ -244,7 +249,7 @@ public partial class PackageCacheRowViewModel : ObservableObject
     public bool ShowMoveButton => CanMove && !IsConfirmingMove && !IsMoving;
 
     /// <summary>Show "Move back" when a reversible move exists and nothing is in flight.</summary>
-    public bool ShowMoveBackButton => CanMoveBack && !IsConfirmingMove && !IsMoving;
+    public bool ShowMoveBackButton => _hasDevDrive && CanMoveBack && !IsConfirmingMove && !IsMoving;
 
     // ---- "Map path" / "Move & remap" for an UNDETECTED tool --------------------------------------
 
@@ -254,26 +259,62 @@ public partial class PackageCacheRowViewModel : ObservableObject
     /// <summary>User-editable folder this tool's cache lives at (for Map / Move &amp; remap). Two-way bound.</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanMoveAndRemap))]
+    [NotifyPropertyChangedFor(nameof(IsMappedToDevDrive))]
+    [NotifyPropertyChangedFor(nameof(IsOnDevDrive))]
     [NotifyCanExecuteChangedFor(nameof(MoveAndRemapCommand))]
     public partial string MapPath { get; set; } = string.Empty;
 
     /// <summary>True once the variable has been pointed at a user-chosen folder (no copy) for this tool.</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ShowMapBlock))]
+    [NotifyPropertyChangedFor(nameof(IsMappedToDevDrive))]
+    [NotifyPropertyChangedFor(nameof(IsOnDevDrive))]
     public partial bool IsMapped { get; set; }
+
+    public bool IsMappedToDevDrive
+    {
+        get
+        {
+            string? root = Path.GetPathRoot(MapPath);
+            return IsMapped
+                && !string.IsNullOrEmpty(root)
+                && char.ToUpperInvariant(root[0]) == char.ToUpperInvariant(_devLetter);
+        }
+    }
+
+    /// <summary>Current live location, including user-mapped paths rather than only the detection snapshot.</summary>
+    public bool IsOnDevDrive => IsSet || IsMappedToDevDrive;
 
     /// <summary>
     /// Show the "tell us where it lives" block (Browse / Map path / Move &amp; remap) for an undetected
     /// tool that is not yet mapped or moved and has nothing in flight — instead of a dead "Not found".
     /// </summary>
-    public bool ShowMapBlock => IsNotFound && !IsSet && !IsMapped && !IsConfirmingMove && !IsMoving;
+    public bool ShowMapBlock => _hasDevDrive && IsNotFound && !IsSet && !IsMapped && !IsConfirmingMove && !IsMoving;
 
     /// <summary>
     /// "Move &amp; remap" is only valid when the chosen folder actually EXISTS — you cannot move a cache
     /// that isn't there. (Map path only repoints the variable, so it stays valid for a not-yet-created
     /// folder.) Re-evaluated live as <see cref="MapPath"/> changes (typed or browsed).
     /// </summary>
-    public bool CanMoveAndRemap => !string.IsNullOrWhiteSpace(MapPath) && _folderExists(MapPath);
+    public bool CanMoveAndRemap => _hasDevDrive && !string.IsNullOrWhiteSpace(MapPath) && _folderExists(MapPath);
+
+    private bool HasDevDriveActions => _hasDevDrive;
+
+    /// <summary>Immediately invalidates every mutation affordance when drive availability changes.</summary>
+    public void DisableDevDriveActions()
+    {
+        _hasDevDrive = false;
+        CanMove = false;
+        CanMoveBack = false;
+        IsConfirmingMove = false;
+        OnPropertyChanged(nameof(ShowMoveBackButton));
+        OnPropertyChanged(nameof(ShowMapBlock));
+        OnPropertyChanged(nameof(CanMoveAndRemap));
+        ConfirmMoveCommand.NotifyCanExecuteChanged();
+        MoveBackCommand.NotifyCanExecuteChanged();
+        MapPathActionCommand.NotifyCanExecuteChanged();
+        MoveAndRemapCommand.NotifyCanExecuteChanged();
+    }
 
     /// <summary>Parent call: open the inline confirm with the supplied (real, reversible) body copy.</summary>
     public void BeginMoveConfirm(string body)
@@ -332,7 +373,7 @@ public partial class PackageCacheRowViewModel : ObservableObject
         {
             StatusKind = "system";
             StatusText = $"On {_systemWhere}:";
-            CanMove = true;
+            CanMove = _hasDevDrive;
             IsSet = false;
             CanMoveBack = false;
             AutomationName = $"{Header}, {StatusText}";
@@ -348,11 +389,11 @@ public partial class PackageCacheRowViewModel : ObservableObject
 
         if (outcome.Status == CacheMoveStatus.Mapped)
         {
-            IsMapped = true;
             // The chosen folder may live on C: or the Dev Drive — colour the pill honestly by where it is,
             // never grey for an active/tracked state.
             bool onDev = outcome.TargetPath.Length > 0
                 && char.ToUpperInvariant(outcome.TargetPath[0]) == char.ToUpperInvariant(_devLetter);
+            IsMapped = true;
             StatusKind = onDev ? "dev" : "system";
             StatusText = onDev ? $"On {_devLetter}:" : "Mapped";
             CanMoveBack = outcome.CanMoveBack;
@@ -360,11 +401,11 @@ public partial class PackageCacheRowViewModel : ObservableObject
         }
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanMove))]
     private void Move() => _onMove(this);
 
     /// <summary>Confirm now performs the REAL reversible move (owned/serialised by the parent).</summary>
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(HasDevDriveActions))]
     private void ConfirmMove() => _onConfirmMove(this);
 
     /// <summary>Cancel closes the prompt and changes nothing.</summary>
@@ -376,11 +417,11 @@ public partial class PackageCacheRowViewModel : ObservableObject
     private void CancelActiveMove() => _onCancelActiveMove(this);
 
     /// <summary>Reverses a prior move: restores the env var + removes the Dev Drive copy (owned by the parent).</summary>
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(HasDevDriveActions))]
     private void MoveBack() => _onMoveBack(this);
 
     /// <summary>Map path: point the variable at <see cref="MapPath"/> without copying (owned by the parent).</summary>
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(HasDevDriveActions))]
     private void MapPathAction() => _onMapRequested(this);
 
     /// <summary>Move &amp; remap: move <see cref="MapPath"/> to the Dev Drive AND repoint the variable (owned by the parent).</summary>
