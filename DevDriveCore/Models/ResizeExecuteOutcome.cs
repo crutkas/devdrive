@@ -6,16 +6,20 @@ namespace DevDriveCore.Models;
 /// succeeded.
 /// </summary>
 /// <remarks>
-/// <b>SAFETY:</b> <see cref="Executed"/> is <c>false</c> whenever the guards rejected the plan, the
-/// helper was unavailable, the user declined elevation, or the destructive path was otherwise not
-/// reached &#8212; i.e. when NOTHING was touched. <see cref="Success"/> implies <see cref="Executed"/>.
+/// <b>SAFETY:</b> <see cref="Executed"/> is <c>false</c> only when the result can guarantee that the
+/// destructive path was not reached. It is also <c>true</c> for an uncertain result after the helper was
+/// launched, so callers never encourage a retry when a mutation cannot be ruled out.
+/// <see cref="Success"/> implies <see cref="Executed"/>.
 /// </remarks>
 public sealed record ResizeExecuteOutcome
 {
     /// <summary>True only when the full resize sequence completed successfully.</summary>
     public bool Success { get; init; }
 
-    /// <summary>True when the real, destructive sequence actually ran. <c>false</c> means nothing was changed.</summary>
+    /// <summary>
+    /// True when the destructive sequence ran or cannot safely be ruled out. <c>false</c> guarantees
+    /// that nothing was changed.
+    /// </summary>
     public bool Executed { get; init; }
 
     /// <summary>Human-readable result or failure message.</summary>

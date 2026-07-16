@@ -228,7 +228,7 @@ static ResizeExecuteOutcome ExecuteResize(ResizePlan plan, DiskLayoutSnapshot sn
         };
     }
 
-    string script = BuildExecuteScript(plan, feasibility, snapshot.DiskNumber);
+    string script = ResizePowerShellScript.BuildExecute(plan, feasibility, snapshot.DiskNumber);
 
     // Safety valve: DDM_RESIZE_DRYRUN=1 exercises the whole pipeline WITHOUT running the commands.
     if (IsDryRun())
@@ -271,11 +271,15 @@ static ResizeExecuteOutcome ExecuteResize(ResizePlan plan, DiskLayoutSnapshot sn
     bool ok = exitCode == 0;
     if (!ok)
     {
+        bool mutationMayHaveStarted = ResizePowerShellScript.MutationMayHaveStarted(exitCode, stderr);
+        string detail = Trim(ResizePowerShellScript.RemoveMutationMarker(stderr));
         return new ResizeExecuteOutcome
         {
             Success = false,
-            Executed = true,
-            Message = $"Resize failed: {Trim(stderr)}",
+            Executed = mutationMayHaveStarted,
+            Message = mutationMayHaveStarted
+                ? $"Resize failed after disk changes may have begun: {detail}"
+                : $"The live resize preflight failed: {detail} Nothing was changed.",
             SourceVolumeLetter = source,
             NewDriveLetter = target,
             DevDriveBytes = feasibility.AlignedShrinkBytes,
@@ -365,7 +369,7 @@ static DiskLayoutSnapshot QueryDiskLayout(char letter)
         return unresolved;
     }
 
-    (int exitCode, string stdout, string _) = RunPowerShell(BuildSnapshotScript(letter));
+    (int exitCode, string stdout, string _) = RunPowerShell(ResizePowerShellScript.BuildSnapshot(letter));
     if (exitCode != 0 || string.IsNullOrWhiteSpace(stdout))
     {
         return unresolved;
@@ -381,69 +385,6 @@ static DiskLayoutSnapshot QueryDiskLayout(char letter)
     {
         return unresolved;
     }
-}
-
-// READ-ONLY PowerShell that emits a DiskLayoutSnapshot as JSON. `letter` is validated A–Z before it is
-// interpolated, so it can't carry script. Every cmdlet is a Get-* query — it mutates nothing.
-static string BuildSnapshotScript(char letter)
-{
-    string l = letter.ToString();
-    return $$"""
-$ErrorActionPreference='Stop'
-try {
-  $p = Get-Partition -DriveLetter '{{l}}' -ErrorAction Stop
-  $d = Get-Disk -Number $p.DiskNumber -ErrorAction Stop
-  $v = Get-Volume -DriveLetter '{{l}}' -ErrorAction Stop
-  $s = Get-PartitionSupportedSize -DriveLetter '{{l}}' -ErrorAction Stop
-  [pscustomobject]@{
-    SourceResolved=$true
-    SourceVolumeLetter='{{l}}'
-    FileSystem=[string]$v.FileSystem
-    PartitionType=[string]$p.Type
-    GptType=[string]$p.GptType
-    IsSystemPartition=[bool]$p.IsSystem
-    IsActivePartition=[bool]$p.IsActive
-    PartitionSizeBytes=[uint64]$p.Size
-    SupportedSizeMinBytes=[uint64]$s.SizeMin
-    SupportedSizeMaxBytes=[uint64]$s.SizeMax
-    DiskNumber=[int]$d.Number
-    PartitionStyle=[string]$d.PartitionStyle
-    IsDiskOffline=[bool]$d.IsOffline
-    IsDiskReadOnly=[bool]$d.IsReadOnly
-    IsRemovable=[bool]($d.BusType -in @('USB','SD','MMC'))
-    BusType=[string]$d.BusType
-    PartitionAlignmentBytes=[uint64]0
-    DriveLettersInUse=[string]((Get-Volume | Where-Object { $_.DriveLetter } | ForEach-Object { $_.DriveLetter }) -join '')
-  } | ConvertTo-Json -Compress
-} catch {
-  [pscustomobject]@{ SourceResolved=$false; SourceVolumeLetter='{{l}}'; FileSystem='' } | ConvertTo-Json -Compress
-}
-""";
-}
-
-// The real destructive sequence. Built always (so the pipeline is testable), executed only by the
-// non-dry-run --execute path. Letters are validated A–Z; the label is sanitized to a safe charset.
-static string BuildExecuteScript(ResizePlan plan, ResizeFeasibility feasibility, int diskNumber)
-{
-    char source = char.ToUpperInvariant(plan.SourceVolumeLetter);
-    char target = char.ToUpperInvariant(plan.NewDriveLetter);
-    ulong newSourceSize = feasibility.SourceSizeBytesAfter;
-    ulong devDriveSize = feasibility.AlignedShrinkBytes;
-    string label = SanitizeLabel(plan.Label);
-    // F6: re-check the target letter at the LAST moment, elevated, in case the snapshot went stale between
-    // the read-only probe and execution. F5: carve an explicit -Size partition pinned to the freed region
-    // (NOT -UseMaximumSize, which would swallow every free extent on the disk), then read BACK the actual
-    // carved letter + size and emit them as JSON so the helper reports reality, not the requested value.
-    return $$"""
-$ErrorActionPreference='Stop'
-if (Get-Volume -DriveLetter '{{target}}' -ErrorAction SilentlyContinue) { throw "Drive letter {{target}}: is already in use." }
-Resize-Partition -DriveLetter '{{source}}' -Size {{newSourceSize}}
-$null = New-Partition -DiskNumber {{diskNumber}} -Size {{devDriveSize}} -DriveLetter '{{target}}'
-Format-Volume -DriveLetter '{{target}}' -DevDrive -FileSystem ReFS -NewFileSystemLabel '{{label}}' -Confirm:$false | Out-Null
-$fp = Get-Partition -DriveLetter '{{target}}' -ErrorAction Stop
-$fv = Get-Volume -DriveLetter '{{target}}' -ErrorAction Stop
-[pscustomobject]@{ FinalDriveLetter=[string]$fp.DriveLetter; FinalPartitionSizeBytes=[uint64]$fp.Size; FinalFileSystem=[string]$fv.FileSystem } | ConvertTo-Json -Compress
-""";
 }
 
 // ---- process helpers (fully-qualified from System32 — this helper runs ELEVATED) -------------------
@@ -532,13 +473,17 @@ static (int ExitCode, string Stdout, string Stderr) RunPowerShell(string script,
 static string ResolveSystem32Exe(string exe)
 {
     string candidate = Path.Combine(Environment.SystemDirectory, exe);
-    return File.Exists(candidate) ? candidate : exe;
+    return File.Exists(candidate)
+        ? candidate
+        : throw new FileNotFoundException($"Required system executable was not found: {candidate}", candidate);
 }
 
 static string ResolvePowerShellPath()
 {
     string candidate = Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe");
-    return File.Exists(candidate) ? candidate : "powershell.exe";
+    return File.Exists(candidate)
+        ? candidate
+        : throw new FileNotFoundException($"Windows PowerShell was not found: {candidate}", candidate);
 }
 
 static bool IsDryRun() =>
@@ -564,7 +509,10 @@ static bool WriteJson(string outputPath, object value)
 {
     try
     {
-        File.WriteAllText(outputPath, JsonSerializer.Serialize(value, ResizeJson.WriteOptions));
+        string json = JsonSerializer.Serialize(value, ResizeJson.WriteOptions);
+        using var stream = new FileStream(outputPath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+        using var writer = new StreamWriter(stream, Encoding.UTF8);
+        writer.Write(json);
         return true;
     }
     catch (Exception ex)
@@ -584,31 +532,6 @@ static string? NormalizeDriveLetter(string raw)
 
     char c = char.ToUpperInvariant(raw.Trim()[0]);
     return c is >= 'A' and <= 'Z' ? c.ToString() : null;
-}
-
-// Trims a label to a safe filesystem-friendly charset before it is interpolated into a format command.
-static string SanitizeLabel(string? label)
-{
-    if (string.IsNullOrWhiteSpace(label))
-    {
-        return "DevDrive";
-    }
-
-    var sb = new StringBuilder();
-    foreach (char c in label.Trim())
-    {
-        if (char.IsLetterOrDigit(c) || c is '-' or '_' or ' ')
-        {
-            sb.Append(c);
-        }
-
-        if (sb.Length >= 32)
-        {
-            break;
-        }
-    }
-
-    return sb.Length == 0 ? "DevDrive" : sb.ToString();
 }
 
 static string Trim(string? value) =>
@@ -688,7 +611,8 @@ static bool IsReparsePoint(string path)
     }
     catch
     {
-        // Unknown → not treated as a reparse point; the prefix + app-owned-root checks still gate the path.
+        // Fail closed when an existing path cannot be inspected.
+        return true;
     }
 
     return false;

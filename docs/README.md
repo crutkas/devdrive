@@ -15,6 +15,8 @@ truth; every claim below is grounded in a named file you can open and verify.
 | [CreatingADevDrive.md](CreatingADevDrive.md) | **Creating a Dev Drive** — the two code paths (new VHDX vs. resize an existing volume), all of the options, and exactly what is *real* vs. *simulated*. |
 | [PackageCacheMoves.md](PackageCacheMoves.md) | **Moving package caches** onto the Dev Drive — the catalogue, the copy‑then‑commit mechanism, and the **documented fallbacks** for every failure path (rollback, idempotency, Move back). |
 | [SpeedTest.md](SpeedTest.md) | **The performance tests** — what each test measures, why, the methodology, and how missing tools are flagged. |
+| [Testing.md](Testing.md) | **Test-machine setup and self-hosting** — build lanes, tool/cache population, safe UI automation, and the opt-in real-partition workflow. |
+| [KnownIssues.md](KnownIssues.md) | **Current readiness blockers** — severity, evidence, and the next action for each confirmed issue. |
 
 ## The through‑line (how this is built)
 

@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+using System.IO;
 using DevDriveManager.ViewModels;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
@@ -52,6 +52,11 @@ public sealed partial class CreateDevDrivePage : Page
 
     private void GoBack()
     {
+        if (ViewModel.IsBusy)
+        {
+            return;
+        }
+
         if (Frame?.CanGoBack == true)
         {
             Frame.GoBack();
@@ -119,18 +124,17 @@ public sealed partial class CreateDevDrivePage : Page
 
     private async void OnBrowseVhdPathRequested()
     {
-        var picker = new FileSavePicker
+        var picker = new FolderPicker
         {
             SuggestedStartLocation = PickerLocationId.ComputerFolder,
-            SuggestedFileName = "DevDrive",
         };
-        picker.FileTypeChoices.Add("Virtual disk", new List<string> { ".vhdx" });
+        picker.FileTypeFilter.Add("*");
         WinRT.Interop.InitializeWithWindow.Initialize(picker, App.WindowHandle);
 
-        StorageFile? file = await picker.PickSaveFileAsync();
-        if (file is not null)
+        StorageFolder? folder = await picker.PickSingleFolderAsync();
+        if (folder is not null)
         {
-            ViewModel.VhdFilePath = file.Path;
+            ViewModel.VhdFilePath = Path.Combine(folder.Path, "DevDrive.vhdx");
         }
     }
 }

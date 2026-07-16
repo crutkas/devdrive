@@ -22,6 +22,7 @@
                     AutomationProperties.AutomationId="BackButton"
                     AutomationProperties.Name="Back"
                     Click="OnBackClick"
+                    IsEnabled="{x:Bind local:CreateDevDrivePage.Not(ViewModel.IsBusy), Mode=OneWay}"
                     ToolTipService.ToolTip="Back">
                     <FontIcon FontSize="16" Glyph="&#xE72B;" />
                 </Button>
@@ -34,6 +35,7 @@
             <!--  ===== FORM (hidden once the operation completes) =====  -->
             <StackPanel
                 x:Name="FormPanel"
+                IsHitTestVisible="{x:Bind local:CreateDevDrivePage.Not(ViewModel.IsBusy), Mode=OneWay}"
                 Spacing="14"
                 Visibility="{x:Bind local:CreateDevDrivePage.InvertBoolToVisibility(ViewModel.IsComplete), Mode=OneWay}">
 
@@ -41,9 +43,14 @@
                     AutomationProperties.AutomationId="GuardrailsInfoBar"
                     IsClosable="False"
                     IsOpen="True"
-                    Message="Nothing changes until you confirm. Creating a VHDX is real; resizing a volume is preview-only."
+                    Message="{x:Bind ViewModel.GuardrailsMessage, Mode=OneTime}"
                     Severity="Informational"
                     Title="Guarded preview" />
+
+                <ProgressBar
+                    AutomationProperties.AutomationId="CreationProgress"
+                    IsIndeterminate="True"
+                    Visibility="{x:Bind local:CreateDevDrivePage.BoolToVisibility(ViewModel.IsBusy), Mode=OneWay}" />
 
                 <InfoBar
                     AutomationProperties.AutomationId="ErrorInfoBar"
@@ -261,7 +268,7 @@
                 </StackPanel>
             </StackPanel>
 
-            <!--  ===== Post-create onboarding (shown once complete) =====  -->
+            <!--  ===== Preview/result surface =====  -->
             <Border
                 Padding="24"
                 Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
@@ -279,8 +286,8 @@
                             TextWrapping="Wrap" />
                     </StackPanel>
 
-                    <!--  Gated destructive action: collapsed by default (CanApplyRealResize is false unless the
-                          default-off ResizeFeatureGate flag is on AND a real preview passed).  -->
+                    <!--  Gated destructive action: collapsed unless a self-hosting build enables the
+                          ResizeFeatureGate and a real preview passes.  -->
                     <Button
                         HorizontalAlignment="Stretch"
                         HorizontalContentAlignment="Left"
@@ -292,13 +299,22 @@
                             <TextBlock
                                 Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                 Style="{StaticResource CaptionTextBlockStyle}"
-                                Text="Really shrinks the system drive and creates the Dev Drive. Not trivially reversible."
+                                Text="Really shrinks the selected volume and creates the Dev Drive. Not trivially reversible."
                                 TextWrapping="Wrap" />
                         </StackPanel>
                     </Button>
 
-                    <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Next steps" />
-                    <StackPanel Spacing="8">
+                    <Button
+                        HorizontalAlignment="Left"
+                        AutomationProperties.AutomationId="ChangeCreateOptionsButton"
+                        Command="{x:Bind ViewModel.ReturnToFormCommand}"
+                        Content="Change options"
+                        Visibility="{x:Bind local:CreateDevDrivePage.BoolToVisibility(ViewModel.CanReturnToForm), Mode=OneWay}" />
+
+                    <StackPanel
+                        Spacing="8"
+                        Visibility="{x:Bind local:CreateDevDrivePage.BoolToVisibility(ViewModel.HasUsableDevDrive), Mode=OneWay}">
+                        <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Next steps" />
                         <Button
                             HorizontalAlignment="Stretch"
                             HorizontalContentAlignment="Left"
@@ -331,7 +347,7 @@
                         HorizontalAlignment="Right"
                         AutomationProperties.AutomationId="GoToManagementButton"
                         Command="{x:Bind ViewModel.BackToManagementCommand}"
-                        Content="Go to Dev Drive management"
+                        Content="Done"
                         Style="{StaticResource AccentButtonStyle}" />
                 </StackPanel>
             </Border>

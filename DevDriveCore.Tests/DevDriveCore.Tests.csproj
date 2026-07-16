@@ -18,6 +18,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <Platforms>x64;ARM64</Platforms>
+    <!-- Do not skip the implicit AnyCPU CLI configuration; bare `dotnet test` must execute the suite. -->
+    <SkipInvalidConfigurations>false</SkipInvalidConfigurations>
     <IsPackable>false</IsPackable>
   </PropertyGroup>
 

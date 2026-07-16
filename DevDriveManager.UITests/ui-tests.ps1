@@ -23,7 +23,8 @@
       (f) accessibility -> every app-authored interactive control exposes an AutomationId.
 
     Usage:
-      # Launch the app first (winui-dev-workflow BuildAndRun.ps1) and note its PID, then:
+      # Set DDM_UITEST_SAFE_MUTATIONS=1 at user scope, launch the app, verify the visible safe-mode
+      # indicator, and note its PID. This script exits with code 2 if the seam is absent.
       .\ui-tests.ps1 -AppPid <PID>
 
     Exit code 0 = all passed, 1 = one or more failures. Results also written to
@@ -63,6 +64,11 @@ function Get-Name([string]$id) {
     return [string]$json.properties.Name
 }
 
+# Returns the number of elements whose text matches $text.
+function Get-MatchCount([string]$text) {
+    return [int](winapp ui search "$text" -a $AppPid --json 2>$null | ConvertFrom-Json).matchCount
+}
+
 # Read an element's on-screen TOP (Y) from its BoundingRectangle, for ordering assertions. Tolerant of
 # the rectangle being a string ("x,y,w,h" / "X=..,Y=..") or an object. Returns $null when unavailable.
 function Get-Top([string]$id) {
@@ -82,6 +88,13 @@ function Get-Top([string]$id) {
 }
 
 Write-Host "DevDriveManager UI tests — app PID $AppPid`n"
+
+# Hard safety gate: do not merely record this as a failed test and continue into mutation scenarios.
+winapp ui wait-for "SafeMutationModeIndicator" -a $AppPid -t 4000 2>$null | Out-Null
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "Safe mutation mode is not active. Refusing to run UI tests that can confirm machine mutations."
+    exit 2
+}
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  (a) The volumes list renders — assert the realized item rows are present.
@@ -213,11 +226,6 @@ Test-UI "Drive health: perf-mode line reads 'On (async)' (never 'Off' / 'turn on
 #  (the page's single ScrollViewer gives the repeaters infinite measure), so they are
 #  in the UIA tree regardless of scroll position — no scrolling needed to assert them.
 # ═════════════════════════════════════════════════════════════════════════════
-
-# Returns the number of elements whose text matches $text (used for header/text assertions).
-function Get-MatchCount([string]$text) {
-    return [int](winapp ui search "$text" -a $AppPid --json 2>$null | ConvertFrom-Json).matchCount
-}
 
 # ── Section headers (in mock order). These are plain TextBlocks, always realized. ──
 Test-UI "Section header: Performance"        { if ((Get-MatchCount 'Performance') -lt 1)       { throw "header 'Performance' not found" } }

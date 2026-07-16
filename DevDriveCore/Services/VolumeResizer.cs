@@ -89,14 +89,40 @@ public sealed class VolumeResizer : IVolumeResizer
 
         try
         {
-            return JsonSerializer.Deserialize<ResizeExecuteOutcome>(resultJson, JsonOptions)
-                ?? NotExecuted(plan, "Couldn't parse the resize result. Nothing was changed.");
+            ResizeExecuteOutcome? outcome =
+                JsonSerializer.Deserialize<ResizeExecuteOutcome>(resultJson, JsonOptions);
+            return IsTrustworthy(outcome)
+                ? outcome!
+                : StateUnknown(plan, "The elevated helper returned an incomplete resize result.");
         }
         catch (JsonException)
         {
-            return NotExecuted(plan, "Couldn't parse the resize result. Nothing was changed.");
+            return StateUnknown(plan, "The elevated helper returned an unreadable resize result.");
         }
     }
+
+    private static bool IsTrustworthy(ResizeExecuteOutcome? outcome) =>
+        outcome is not null &&
+        !string.IsNullOrWhiteSpace(outcome.Message) &&
+        IsDriveLetter(outcome.SourceVolumeLetter) &&
+        IsDriveLetter(outcome.NewDriveLetter) &&
+        (!outcome.Success || outcome.Executed);
+
+    private static bool IsDriveLetter(char letter)
+    {
+        char normalized = char.ToUpperInvariant(letter);
+        return normalized is >= 'A' and <= 'Z';
+    }
+
+    private static ResizeExecuteOutcome StateUnknown(ResizePlan plan, string reason) => new()
+    {
+        Success = false,
+        Executed = true,
+        Message = $"{reason} State is unknown — check Disk Management before retrying.",
+        SourceVolumeLetter = char.ToUpperInvariant(plan.SourceVolumeLetter),
+        NewDriveLetter = char.ToUpperInvariant(plan.NewDriveLetter),
+        DevDriveBytes = plan.ShrinkBytes,
+    };
 
     private static ResizeExecuteOutcome NotExecuted(ResizePlan plan, string message) => new()
     {
