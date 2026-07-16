@@ -1,5 +1,4 @@
 using System.ComponentModel;
-using System.IO;
 using System.Text;
 using CommunityToolkit.Mvvm.ComponentModel;
 using DevDriveCore;
@@ -25,19 +24,22 @@ public partial class EcosystemCardViewModel : ObservableObject
     private readonly EcosystemDefinition _definition;
     private readonly char _devLetter;
     private readonly char _systemLetter;
+    private readonly bool _hasDevDrive;
 
     public EcosystemCardViewModel(
         EcosystemDefinition definition,
         IReadOnlyList<PackageCacheRowViewModel> rows,
         PerfSuiteRowViewModel? benchmark,
         char devLetter,
-        char systemLetter)
+        char systemLetter,
+        bool hasDevDrive = true)
     {
         _definition = definition ?? throw new ArgumentNullException(nameof(definition));
         Rows = rows ?? Array.Empty<PackageCacheRowViewModel>();
         Benchmark = _definition.HasBenchmark ? benchmark : null;
         _devLetter = devLetter;
         _systemLetter = systemLetter;
+        _hasDevDrive = hasDevDrive;
 
         ToolsLine = _definition.Subtitle ?? string.Join(" \u00B7 ", _definition.ToolNames);
         AutomationId = $"Ecosystem_{Token(_definition.Name)}";
@@ -125,15 +127,16 @@ public partial class EcosystemCardViewModel : ObservableObject
     {
         int movedToDev = Rows.Count(r => r.IsSet);
         int onSystemMovable = Rows.Count(r => r.CanMove);
-        int mappedOnDev = Rows.Count(r => r.IsMapped && MappedOnDevDrive(r));
+        int detectedOnSystem = Rows.Count(r => r.Info.Detected && !r.IsSet && !r.IsMapped);
+        int mappedOnDev = Rows.Count(r => r.IsMapped && r.IsMappedToDevDrive);
         int mappedOnSystem = Rows.Count(r => r.IsMapped) - mappedOnDev;
 
         // "On the Dev Drive" = moved there OR mapped to a folder that lives on it; "on the system drive" =
         // still-movable on C: OR mapped to a non-Dev folder. (A mapped row is NOT inherently on the Dev
         // Drive — it points wherever the user chose.)
         int onDev = movedToDev + mappedOnDev;
-        int onSystem = onSystemMovable + mappedOnSystem;
-        int tracked = onDev + onSystem;
+        int onSystem = detectedOnSystem + mappedOnSystem;
+        int tracked = Rows.Count(r => r.Info.Detected || r.IsSet || r.IsMapped);
 
         ulong movableBytes = 0UL;
         foreach (PackageCacheRowViewModel row in Rows.Where(r => r.CanMove))
@@ -174,14 +177,6 @@ public partial class EcosystemCardViewModel : ObservableObject
         StatusSummary = BuildStatusSummary(onDev, onSystem, mappedOnDev + mappedOnSystem, tracked);
     }
 
-    /// <summary>True when a mapped row's chosen folder lives on the Dev Drive (so it counts as "on Dev").</summary>
-    private bool MappedOnDevDrive(PackageCacheRowViewModel row)
-    {
-        string? root = Path.GetPathRoot(row.MapPath);
-        return !string.IsNullOrEmpty(root)
-            && char.ToUpperInvariant(root[0]) == char.ToUpperInvariant(_devLetter);
-    }
-
     private string BuildStatusSummary(int onDev, int onSystem, int mapped, int tracked)
     {
         // Single-tool ecosystems (.NET, Rust, Java, Go, C++, Dart) read better described directly than as
@@ -195,7 +190,9 @@ public partial class EcosystemCardViewModel : ObservableObject
 
             if (onSystem > 0)
             {
-                return $"On {_systemLetter}: \u2014 movable to your Dev Drive.";
+                return _hasDevDrive
+                    ? $"On {_systemLetter}: \u2014 movable to your Dev Drive."
+                    : "Detected on this PC.";
             }
 
             if (mapped > 0)
@@ -203,12 +200,21 @@ public partial class EcosystemCardViewModel : ObservableObject
                 return "Mapped to the folder you chose.";
             }
 
-            return "Not detected on this PC \u2014 map it if you use it.";
+            return _hasDevDrive
+                ? "Not detected on this PC \u2014 map it if you use it."
+                : "Not detected on this PC.";
         }
 
         if (tracked == 0)
         {
-            return "Not detected on this PC \u2014 map any you use.";
+            return _hasDevDrive
+                ? "Not detected on this PC \u2014 map any you use."
+                : "Not detected on this PC.";
+        }
+
+        if (!_hasDevDrive)
+        {
+            return $"{tracked} tools detected on this PC.";
         }
 
         string fraction = $"{onDev} of {tracked} tools on your Dev Drive";

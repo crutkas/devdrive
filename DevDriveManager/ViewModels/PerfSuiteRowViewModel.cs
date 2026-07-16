@@ -20,6 +20,7 @@ public partial class PerfSuiteRowViewModel : ObservableObject
     private readonly char _systemLetter;
     private readonly char _devLetter;
     private readonly double _maxBarWidth;
+    private readonly Func<bool> _canRun;
 
     public PerfSuiteRowViewModel(
         string id,
@@ -29,7 +30,8 @@ public partial class PerfSuiteRowViewModel : ObservableObject
         char devLetter,
         double maxBarWidth = 300d,
         Func<PerfSuiteRowViewModel, Task>? run = null,
-        Func<bool>? canRun = null)
+        Func<bool>? canRun = null,
+        bool hasComparison = true)
     {
         Id = id;
         Name = name;
@@ -37,9 +39,13 @@ public partial class PerfSuiteRowViewModel : ObservableObject
         _systemLetter = systemLetter;
         _devLetter = devLetter;
         _maxBarWidth = maxBarWidth;
+        _canRun = canRun ?? (() => true);
+        HasComparison = hasComparison;
         SystemDriveLabel = $"{systemLetter}:";
         DevDriveLabel = $"{devLetter}:";
-        RunCommand = new AsyncRelayCommand(() => (run ?? (_ => Task.CompletedTask))(this), canRun ?? (() => true));
+        RunCommand = new AsyncRelayCommand(
+            () => (run ?? (_ => Task.CompletedTask))(this),
+            () => IsToolAvailable && _canRun());
         Reset();
     }
 
@@ -63,6 +69,25 @@ public partial class PerfSuiteRowViewModel : ObservableObject
 
     /// <summary>The tool a cache row benchmarks (e.g. "npm", "dotnet", "cargo"); empty for build rows.</summary>
     public string RequiredTool { get; init; } = string.Empty;
+
+    /// <summary>True after the required executable has been checked on this PC.</summary>
+    [ObservableProperty]
+    public partial bool IsToolAvailabilityKnown { get; set; } = true;
+
+    /// <summary>True when the required executable can be launched by the benchmark service.</summary>
+    [ObservableProperty]
+    public partial bool IsToolAvailable { get; set; } = true;
+
+    /// <summary>Visible while tool detection is pending or when the required executable is unavailable.</summary>
+    [ObservableProperty]
+    public partial bool ShowToolAvailability { get; set; }
+
+    /// <summary>Plain-language explanation for a pending or unavailable benchmark tool.</summary>
+    [ObservableProperty]
+    public partial string ToolAvailabilityText { get; set; } = string.Empty;
+
+    /// <summary>AutomationId for the required-tool availability message.</summary>
+    public string ToolAvailabilityAutomationId => $"ToolAvailability_{Id}";
 
     /// <summary>AutomationId for this row's "Details" affordance (per-row, stable, e.g. "RowDetails_npm-ci").</summary>
     public string DetailsAutomationId => $"RowDetails_{Id}";
@@ -91,6 +116,47 @@ public partial class PerfSuiteRowViewModel : ObservableObject
     /// <summary>"G:" label for the Dev Drive bar line.</summary>
     public string DevDriveLabel { get; }
 
+    /// <summary>True when this run includes a Dev Drive leg rather than a system-drive-only baseline.</summary>
+    public bool HasComparison { get; }
+
+    public bool ShowComparisonResult => HasComparison && IsDone;
+
+    /// <summary>Applies a read-only executable probe to this row and refreshes its Run command.</summary>
+    public void ApplyToolAvailability(InstalledToolInfo? tool)
+    {
+        IsToolAvailabilityKnown = tool is not null;
+        IsToolAvailable = tool?.Found == true;
+        ToolAvailabilityText = tool is null
+            ? $"Checking whether {RequiredTool} is installed\u2026"
+            : tool.Found
+                ? string.Empty
+                : $"Unavailable \u2014 {RequiredTool} is not installed or not on PATH.";
+        ShowToolAvailability = !IsToolAvailable;
+        if (IsQueued)
+        {
+            AutomationName = IsToolAvailable
+                ? $"{Name}: queued."
+                : $"{Name}: {ToolAvailabilityText}";
+        }
+
+        RunCommand.NotifyCanExecuteChanged();
+    }
+
+    /// <summary>Surfaces a failed executable probe without presenting the workload as runnable.</summary>
+    public void MarkToolDetectionFailed()
+    {
+        IsToolAvailabilityKnown = false;
+        IsToolAvailable = false;
+        ToolAvailabilityText = $"Unavailable \u2014 the app could not verify that {RequiredTool} is installed.";
+        ShowToolAvailability = true;
+        if (IsQueued)
+        {
+            AutomationName = $"{Name}: {ToolAvailabilityText}";
+        }
+
+        RunCommand.NotifyCanExecuteChanged();
+    }
+
     /// <summary>Dev-vs-system speedup for this row (0 when skipped or not computable) — fed to the headline.</summary>
     public double Speedup { get; private set; }
 
@@ -103,6 +169,7 @@ public partial class PerfSuiteRowViewModel : ObservableObject
     public partial bool IsRunning { get; set; }
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowComparisonResult))]
     public partial bool IsDone { get; set; }
 
     [ObservableProperty]
@@ -182,7 +249,10 @@ public partial class PerfSuiteRowViewModel : ObservableObject
         PhaseBreakdownText = string.Empty;
         HasPhaseBreakdown = false;
         Speedup = 0d;
-        AutomationName = $"{Name}: queued.";
+        ShowToolAvailability = !IsToolAvailable;
+        AutomationName = IsToolAvailable
+            ? $"{Name}: queued."
+            : $"{Name}: {ToolAvailabilityText}";
     }
 
     /// <summary>Moves the row into its running state with a status word (e.g. "running" or "run 2/3").</summary>
@@ -192,6 +262,7 @@ public partial class PerfSuiteRowViewModel : ObservableObject
         IsDone = false;
         IsSkipped = false;
         IsRunning = true;
+        ShowToolAvailability = false;
         SetRunStatus(status);
     }
 
@@ -212,7 +283,7 @@ public partial class PerfSuiteRowViewModel : ObservableObject
         }
 
         string systemValue = FormatSeconds(metric.SystemSeconds);
-        string devValue = FormatSeconds(metric.DevSeconds);
+        string devValue = HasComparison ? FormatSeconds(metric.DevSeconds) : string.Empty;
 
         // Surface the individual per-run times (incl. the discarded first) so the spread is visible in
         // the Details flyout — not just the reported median. The plain-language Sub is left untouched.
@@ -222,7 +293,14 @@ public partial class PerfSuiteRowViewModel : ObservableObject
         PhaseBreakdownText = FormatPhaseBreakdown(metric);
         HasPhaseBreakdown = metric.TotalSeconds > 0d;
 
-        ApplyResult(metric.SystemSeconds, metric.DevSeconds, higherIsBetter: false, systemValue, devValue);
+        if (HasComparison)
+        {
+            ApplyResult(metric.SystemSeconds, metric.DevSeconds, higherIsBetter: false, systemValue, devValue);
+        }
+        else
+        {
+            ApplyBaselineResult(systemValue);
+        }
     }
 
     /// <summary>
@@ -269,6 +347,7 @@ public partial class PerfSuiteRowViewModel : ObservableObject
         IsDone = false;
         IsSkipped = true;
         Speedup = 0d;
+        ShowToolAvailability = false;
         SkipReasonText = $"Skipped \u2014 {reason}";
         AutomationName = $"{Name}: skipped. {reason}.";
     }
@@ -293,6 +372,22 @@ public partial class PerfSuiteRowViewModel : ObservableObject
         AutomationName =
             $"{Name}: {systemValueText} on {SystemDriveLabel} versus {devValueText} on {DevDriveLabel}, " +
             $"{(DeltaIsFavorable ? $"{DeltaText} faster on the Dev Drive" : "no Dev Drive advantage")}.";
+    }
+
+    private void ApplyBaselineResult(string systemValueText)
+    {
+        Speedup = 0d;
+        SystemValueText = systemValueText;
+        DevValueText = string.Empty;
+        SystemBarWidth = _maxBarWidth;
+        DevBarWidth = 0d;
+        DeltaText = string.Empty;
+        DeltaIsFavorable = false;
+        IsQueued = false;
+        IsRunning = false;
+        IsSkipped = false;
+        IsDone = true;
+        AutomationName = $"{Name}: system-drive baseline {systemValueText} on {SystemDriveLabel}.";
     }
 
     private double BarWidth(double fraction)

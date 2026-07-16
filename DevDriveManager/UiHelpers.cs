@@ -66,6 +66,22 @@ public static class UiHelpers
     public static Brush? RatioBrush(bool isFavorable) =>
         Resource(isFavorable ? "SystemFillColorSuccessBrush" : "TextFillColorSecondaryBrush");
 
+    /// <summary>Cache overview accent: informational without a Dev Drive, caution when movable, success otherwise.</summary>
+    public static Brush? CacheOverviewBrush(
+        bool hasDevDrive,
+        bool hasCachesOnSystemDrive,
+        bool hasDetectedCaches,
+        bool allDetectedCachesOnDevDrive) =>
+        Resource(!hasDevDrive
+            ? "AccentTextFillColorPrimaryBrush"
+            : hasCachesOnSystemDrive
+                ? "SystemFillColorCautionBrush"
+                : hasDetectedCaches
+                    ? allDetectedCachesOnDevDrive
+                        ? "SystemFillColorSuccessBrush"
+                        : "SystemFillColorCautionBrush"
+                    : "TextFillColorSecondaryBrush");
+
     /// <summary>
     /// Alternating-row ("banded") background so the eye flows across a multi-row grid. The base row uses
     /// the standard card fill; the alternate row uses the secondary card fill — one subtle, theme-correct

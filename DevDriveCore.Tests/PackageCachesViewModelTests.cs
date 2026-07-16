@@ -77,6 +77,61 @@ public sealed class PackageCachesViewModelTests
         Assert.AreEqual(@"G:\packages\nuget", env.GetUserVariable(NuGetEnvVar));
     }
 
+    [TestMethod]
+    public async Task NoDevDrive_KeepsDetectedCachesVisibleAndDisablesMoveActions()
+    {
+        (PackageCachesViewModel vm, _) = BuildViewModel();
+
+        vm.Initialize(@"C:\", devRoot: null, devLetter: null, systemLetter: 'C');
+        await WaitUntilAsync(() => vm.Caches.Count == 2 && vm.Caches.All(c => c.SizeBytes > 0));
+
+        Assert.IsFalse(vm.HasDevDrive);
+        Assert.IsTrue(vm.HasDetectedCaches);
+        Assert.IsTrue(vm.ShowNoDevDriveNotice);
+        Assert.IsTrue(vm.ShowDashboardCacheList);
+        Assert.IsFalse(vm.ShowAllCachesOnDevDrive);
+        Assert.IsFalse(vm.ShowMoveAllButton);
+        Assert.IsTrue(vm.Caches.All(c => !c.CanMove && !c.ShowMoveButton && !c.ShowMoveBackButton));
+        Assert.AreEqual("2 package caches detected on this PC.", vm.WarningMessage);
+        Assert.AreEqual(NpmSource, vm.Caches.Single(c => c.Header == "npm").ResolvedPath);
+    }
+
+    [TestMethod]
+    public async Task LosingDevDrive_ImmediatelyInvalidatesExistingMoveCommands()
+    {
+        (PackageCachesViewModel vm, _) = BuildViewModel();
+        vm.Initialize(@"C:\", @"G:\", 'G', 'C');
+        await WaitUntilAsync(() => vm.Caches.Count == 2 && vm.Caches.All(c => c.CanMove));
+        PackageCacheRowViewModel oldRow = vm.Caches[0];
+        int resetCount = 0;
+        vm.InventoryReset += (_, _) => resetCount++;
+
+        vm.Initialize(@"C:\", devRoot: null, devLetter: null, systemLetter: 'C');
+
+        Assert.IsFalse(oldRow.CanMove);
+        Assert.IsFalse(oldRow.MoveCommand.CanExecute(null));
+        Assert.IsFalse(oldRow.ConfirmMoveCommand.CanExecute(null));
+        Assert.AreEqual(1, resetCount);
+    }
+
+    [TestMethod]
+    public async Task DriveTransition_CancelsStaleMoveAllConfirmation()
+    {
+        (PackageCachesViewModel vm, _) = BuildViewModel();
+        vm.Initialize(@"C:\", @"G:\", 'G', 'C');
+        await WaitUntilAsync(() => vm.Caches.Count == 2 && vm.Caches.All(c => c.CanMove));
+
+        vm.MoveAllCommand.Execute(null);
+        Assert.IsTrue(vm.IsConfirmingMoveAll);
+        Assert.IsTrue(vm.ConfirmMoveAllCommand.CanExecute(null));
+
+        vm.SetDevDriveUnavailable("Checking drive status.");
+
+        Assert.IsFalse(vm.IsConfirmingMoveAll);
+        Assert.IsFalse(vm.ConfirmMoveAllCommand.CanExecute(null));
+        Assert.AreEqual(string.Empty, vm.MoveAllConfirmBodyText);
+    }
+
     // ---- helpers -----------------------------------------------------------------------------------
 
     private static (PackageCachesViewModel Vm, FakeEnvironmentWriter Env) BuildViewModel()
@@ -148,7 +203,7 @@ public sealed class PackageCachesViewModelTests
             _sizePerCache = sizePerCache;
         }
 
-        public IReadOnlyList<PackageCacheInfo> GetPackageCaches(char devDriveLetter) => _caches;
+        public IReadOnlyList<PackageCacheInfo> GetPackageCaches(char? devDriveLetter) => _caches;
 
         public Task<ulong> CalculateSizeAsync(PackageCacheInfo cache, TimeSpan timeBudget, CancellationToken cancellationToken = default) =>
             Task.FromResult(cache.Detected ? _sizePerCache : 0UL);

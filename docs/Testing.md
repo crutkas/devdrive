@@ -128,8 +128,15 @@ Four workloads exist:
 - `cargo build`: `microsoft/edit` at `v2.0.0`.
 
 The last three need GitHub/package-network access during preparation. Measured runs use copied,
-per-drive caches and run offline. Allow several GiB of free scratch space on both compared drives and do
-not run unrelated disk-heavy work during a benchmark.
+per-drive caches and run offline. Without a Dev Drive, the page runs a system-drive-only baseline and
+shows the measured wall-clock times without a comparison ratio. When a Dev Drive is available, the same
+workloads run on both drives. Allow several GiB of free scratch space on every measured drive and do not
+run unrelated disk-heavy work during a benchmark.
+
+The benchmark page separately probes the required command-line executables (`git`, `npm`, `dotnet`, and
+`cargo`). A missing executable disables that workload and shows why; **Run all tests** skips unavailable
+workloads. Package-cache discovery is intentionally separate: a tool can be installed before it has
+created a cache, and a stale cache can remain after a tool is removed.
 
 ## 6. Safe UI automation
 

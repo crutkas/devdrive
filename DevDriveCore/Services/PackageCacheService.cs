@@ -48,9 +48,9 @@ public sealed class PackageCacheService : IPackageCacheService
         new(new SystemEnvironmentProvider(), new FileSystemProbe(), catalog: null, npmProcessRunner: new ProcessRunner(6_000));
 
     /// <inheritdoc />
-    public IReadOnlyList<PackageCacheInfo> GetPackageCaches(char devDriveLetter)
+    public IReadOnlyList<PackageCacheInfo> GetPackageCaches(char? devDriveLetter)
     {
-        char dev = char.ToUpperInvariant(devDriveLetter);
+        char? dev = devDriveLetter is char letter ? char.ToUpperInvariant(letter) : null;
         var result = new List<PackageCacheInfo>(_catalog.Count);
         foreach (PackageCacheDefinition definition in _catalog)
         {
@@ -88,7 +88,7 @@ public sealed class PackageCacheService : IPackageCacheService
         };
     }
 
-    private PackageCacheInfo Resolve(PackageCacheDefinition definition, char dev)
+    private PackageCacheInfo Resolve(PackageCacheDefinition definition, char? dev)
     {
         string rawPath;
         string? environmentValue;
@@ -113,7 +113,9 @@ public sealed class PackageCacheService : IPackageCacheService
         string resolved = PathHelpers.NormalizeFullPath(expanded);
         char? drive = PathHelpers.DriveLetterOf(resolved);
         bool detected = _fileSystem.DirectoryExists(resolved);
-        bool onDev = drive is char d && char.ToUpperInvariant(d) == dev;
+        bool onDev = dev is char devLetter
+            && drive is char driveLetter
+            && char.ToUpperInvariant(driveLetter) == devLetter;
 
         return new PackageCacheInfo
         {

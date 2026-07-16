@@ -40,6 +40,8 @@ public sealed class WorkloadBenchmarkServiceTests
         var probe = Substitute.For<IPreflightProbe>();
         probe.Capture(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<char>(), Arg.Any<CancellationToken>())
             .Returns(info ?? new PreflightInfo());
+        probe.CaptureSystemDrive(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(info ?? new PreflightInfo());
         return probe;
     }
 
@@ -83,6 +85,24 @@ public sealed class WorkloadBenchmarkServiceTests
         Assert.AreEqual(1, git.CleanupCount);
         CollectionAssert.AreEqual(
             Enumerable.Repeat(SystemRoot, 5).Concat(Enumerable.Repeat(DevRoot, 5)).ToList(),
+            git.MeasuredRoots);
+    }
+
+    [TestMethod]
+    public async Task RunSystemDriveAsync_MeasuresOnlySystemDriveAndBuildsBaselineRows()
+    {
+        var git = new FakeWorkloadBenchmark("git clone", "git", SystemRoot, systemSeconds: 4d, devSeconds: 2d);
+        var service = Service(new IWorkloadBenchmark[] { git }, Detector(("git", true)), iterations: 3);
+
+        WorkloadComparison baseline = await service.RunSystemDriveAsync(SystemRoot);
+
+        WorkloadMetric metric = baseline.Metrics.Single();
+        Assert.IsFalse(metric.Skipped);
+        Assert.AreEqual(4d, metric.SystemSeconds, 1e-9);
+        Assert.AreEqual(0d, metric.DevSeconds, 1e-9);
+        Assert.AreEqual(0d, baseline.HeadlineSpeedup, 1e-9);
+        CollectionAssert.AreEqual(
+            new[] { SystemRoot, SystemRoot, SystemRoot },
             git.MeasuredRoots);
     }
 
@@ -318,6 +338,23 @@ public sealed class WorkloadBenchmarkServiceTests
             reports.Skip(1).Select(r => (r.Stage, r.Run)).ToList());
 
         Assert.IsTrue(reports.All(r => r.TotalRuns == 3));
+    }
+
+    [TestMethod]
+    public async Task RunSingleSystemDriveAsync_ReportsOnlySystemDriveProgress()
+    {
+        var cargo = new FakeWorkloadBenchmark("cargo build", "cargo", SystemRoot, systemSeconds: 6d, devSeconds: 2d);
+        var service = Service(new IWorkloadBenchmark[] { cargo }, Detector(("cargo", true)));
+        var progress = new RecordingProgress<WorkloadRunProgress>();
+
+        WorkloadMetric metric = await service.RunSingleSystemDriveAsync(
+            "cargo", SystemRoot, iterations: 3, progress: progress);
+
+        Assert.AreEqual(6d, metric.SystemSeconds, 1e-9);
+        Assert.AreEqual(0d, metric.DevSeconds, 1e-9);
+        Assert.HasCount(4, progress.Reports);
+        Assert.AreEqual(WorkloadRunStage.Preparing, progress.Reports[0].Stage);
+        Assert.IsTrue(progress.Reports.Skip(1).All(r => r.Stage == WorkloadRunStage.SystemDrive));
     }
 
     [TestMethod]

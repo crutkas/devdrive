@@ -32,9 +32,20 @@ public partial class MainPageViewModel : ObservableObject
     {
         _service = service;
 
-        Ecosystems = EcosystemsViewModel.CreateDefault();
+        Ecosystems = EcosystemsViewModel.CreateDefault(DispatchToUi);
         DriveHealth = new DriveHealthViewModel();
         Trust = new TrustFiltersViewModel(new ElevatedFilterProbe(), _service.GetDefenderPerformanceMode);
+    }
+
+    private static bool DispatchToUi(Action action)
+    {
+        if (App.DispatcherQueue.HasThreadAccess)
+        {
+            action();
+            return true;
+        }
+
+        return App.DispatcherQueue.TryEnqueue(() => action());
     }
 
     /// <summary>Raised when the user invokes "Create Dev Drive" (the page navigates to the stub).</summary>
@@ -113,6 +124,8 @@ public partial class MainPageViewModel : ObservableObject
         }
 
         IsLoading = true;
+        Ecosystems.SuspendDriveDependentActions(
+            "Checking drive status. Cache locations remain visible; move actions will return after the refresh completes.");
         try
         {
             // All platform work happens on a background thread; the await resumes on the UI thread.
@@ -164,6 +177,8 @@ public partial class MainPageViewModel : ObservableObject
             StatusMessage =
                 "Something went wrong querying this PC's volumes. Reload to try again. " +
                 $"Details: {ex.Message}";
+            Ecosystems.SetDevDriveUnavailable(
+                "Drive status is unavailable. Cache locations remain visible; reload to enable move actions.");
         }
         finally
         {
@@ -193,23 +208,20 @@ public partial class MainPageViewModel : ObservableObject
     /// </summary>
     public void OnPerformanceModeEnabled() => Trust.OnPerformanceModeEnabled();
 
-    /// <summary>Wires the section sub-ViewModels to the detected Dev Drive (no-op when none exists).</summary>
+    /// <summary>Initializes read-only cache discovery on every PC and Dev Drive-dependent sections when available.</summary>
     private void InitializeSections(
         IReadOnlyList<VolumeInfo> volumes, char? devLetter, DevDriveTrustInfo? trust, EffectivePerformanceMode effective)
     {
-        if (devLetter is not char dl)
-        {
-            return;
-        }
-
         string systemRoot = Path.GetPathRoot(Environment.SystemDirectory) ?? "C:\\";
         char systemLetter = systemRoot.Length > 0 ? char.ToUpperInvariant(systemRoot[0]) : 'C';
-        string devRoot = $"{dl}:\\";
+        string? devRoot = devLetter is char dl ? $"{dl}:\\" : null;
 
-        Ecosystems.Initialize(systemRoot, devRoot, dl, systemLetter);
+        Ecosystems.Initialize(systemRoot, devRoot, devLetter, systemLetter);
         Ecosystems.ApplyPerformanceMode(effective);
 
-        VolumeInfo? devVolume = volumes.FirstOrDefault(v => v.DriveLetter == dl);
+        VolumeInfo? devVolume = devLetter is char driveLetter
+            ? volumes.FirstOrDefault(v => v.DriveLetter == driveLetter)
+            : null;
         if (devVolume is not null)
         {
             DriveHealth.Initialize(devVolume, trust, effective);

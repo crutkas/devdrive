@@ -50,12 +50,12 @@ public sealed class WorkloadBenchmarkService : IWorkloadBenchmarkService
     }
 
     /// <summary>Convenience factory wiring the real process runner, tool detector, pre-flight probe, and benchmarks.</summary>
-    public static WorkloadBenchmarkService CreateDefault()
+    public static WorkloadBenchmarkService CreateDefault(IInstalledToolDetector? detector = null)
     {
         var runner = new WorkloadProcessRunner();
         return new WorkloadBenchmarkService(
             WorkloadBenchmarkCatalog.CreateDefault(runner),
-            InstalledToolDetector.CreateDefault(),
+            detector ?? InstalledToolDetector.CreateDefault(),
             PreflightProbe.CreateDefault());
     }
 
@@ -72,6 +72,24 @@ public sealed class WorkloadBenchmarkService : IWorkloadBenchmarkService
 
         return await Task.Run(
             () => Run(systemDriveRoot, devDriveRoot, devDriveLetter, progress, cancellationToken),
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<WorkloadComparison> RunSystemDriveAsync(
+        string systemDriveRoot,
+        IProgress<WorkloadMetric>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(systemDriveRoot);
+
+        return await Task.Run(
+            () => Run(
+                systemDriveRoot,
+                devDriveRoot: null,
+                devDriveLetter: null,
+                progress: progress,
+                cancellationToken: cancellationToken),
             cancellationToken).ConfigureAwait(false);
     }
 
@@ -94,16 +112,41 @@ public sealed class WorkloadBenchmarkService : IWorkloadBenchmarkService
             cancellationToken).ConfigureAwait(false);
     }
 
+    /// <inheritdoc />
+    public async Task<WorkloadMetric> RunSingleSystemDriveAsync(
+        string requiredTool,
+        string systemDriveRoot,
+        int iterations = 0,
+        IProgress<WorkloadRunProgress>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(requiredTool);
+        ArgumentException.ThrowIfNullOrWhiteSpace(systemDriveRoot);
+
+        return await Task.Run(
+            () => RunSingle(
+                requiredTool,
+                systemDriveRoot,
+                devDriveRoot: null,
+                iterations: iterations,
+                progress: progress,
+                cancellationToken: cancellationToken),
+            cancellationToken).ConfigureAwait(false);
+    }
+
     private WorkloadComparison Run(
         string systemDriveRoot,
-        string devDriveRoot,
-        char devDriveLetter,
+        string? devDriveRoot,
+        char? devDriveLetter,
         IProgress<WorkloadMetric>? progress,
         CancellationToken cancellationToken)
     {
         int iterations = Math.Max(1, _options.Iterations);
 
-        PreflightInfo preflight = _preflight.Capture(systemDriveRoot, devDriveRoot, devDriveLetter, cancellationToken)
+        PreflightInfo preflight = devDriveRoot is not null && devDriveLetter is char letter
+            ? _preflight.Capture(systemDriveRoot, devDriveRoot, letter, cancellationToken)
+            : _preflight.CaptureSystemDrive(systemDriveRoot, cancellationToken);
+        preflight = preflight
             with { RunModeNote = DescribeRunMode(iterations) };
 
         // Detect installed tools once, then gate each benchmark on its required tool.
@@ -112,7 +155,7 @@ public sealed class WorkloadBenchmarkService : IWorkloadBenchmarkService
             StringComparer.OrdinalIgnoreCase);
 
         string seedRoot = _seedRootFactory();
-        var environment = new WorkloadEnvironment(systemDriveRoot, devDriveRoot, seedRoot);
+        var environment = new WorkloadEnvironment(systemDriveRoot, devDriveRoot ?? systemDriveRoot, seedRoot);
 
         var rows = new List<WorkloadMetric>(_benchmarks.Count);
         foreach (IWorkloadBenchmark benchmark in _benchmarks)
@@ -137,7 +180,7 @@ public sealed class WorkloadBenchmarkService : IWorkloadBenchmarkService
     private WorkloadMetric RunSingle(
         string requiredTool,
         string systemDriveRoot,
-        string devDriveRoot,
+        string? devDriveRoot,
         int iterations,
         IProgress<WorkloadRunProgress>? progress,
         CancellationToken cancellationToken)
@@ -166,7 +209,7 @@ public sealed class WorkloadBenchmarkService : IWorkloadBenchmarkService
         }
 
         string seedRoot = _seedRootFactory();
-        var environment = new WorkloadEnvironment(systemDriveRoot, devDriveRoot, seedRoot);
+        var environment = new WorkloadEnvironment(systemDriveRoot, devDriveRoot ?? systemDriveRoot, seedRoot);
 
         return RunBenchmark(benchmark, environment, systemDriveRoot, devDriveRoot, iters, progress, cancellationToken);
     }
@@ -175,7 +218,7 @@ public sealed class WorkloadBenchmarkService : IWorkloadBenchmarkService
         IWorkloadBenchmark benchmark,
         WorkloadEnvironment environment,
         string systemDriveRoot,
-        string devDriveRoot,
+        string? devDriveRoot,
         int iterations,
         IProgress<WorkloadRunProgress>? progress,
         CancellationToken cancellationToken)
@@ -192,7 +235,9 @@ public sealed class WorkloadBenchmarkService : IWorkloadBenchmarkService
             // times themselves. This is what makes a ~15s build take minutes — surfaced for transparency.
             var measureStopwatch = Stopwatch.StartNew();
             double[] systemRuns = MeasureDrive(benchmark, systemDriveRoot, iterations, WorkloadRunStage.SystemDrive, progress, cancellationToken);
-            double[] devRuns = MeasureDrive(benchmark, devDriveRoot, iterations, WorkloadRunStage.DevDrive, progress, cancellationToken);
+            double[] devRuns = devDriveRoot is null
+                ? Array.Empty<double>()
+                : MeasureDrive(benchmark, devDriveRoot, iterations, WorkloadRunStage.DevDrive, progress, cancellationToken);
             measureStopwatch.Stop();
 
             double buildSeconds = systemRuns.Sum() + devRuns.Sum();

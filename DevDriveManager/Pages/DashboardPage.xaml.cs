@@ -10,10 +10,9 @@ namespace DevDriveManager.Pages;
 
 /// <summary>
 /// The "Dashboard" landing page: deliberately calm. It surfaces only what's actionable — the package
-/// caches still on the system drive (with a one-click "Move all"), a compact Dev Drive health summary, and
-/// a soft pointer to on-demand benchmarks — plus the empty-state when there's no Dev Drive yet. Everything
-/// binds to the shared <see cref="App.Shared"/> view model; the banded "still on C:" preview is a filtered
-/// projection rebuilt as caches move.
+/// caches detected on the PC, a compact Dev Drive health summary, and a soft pointer to on-demand benchmarks.
+/// Cache discovery remains useful without a Dev Drive; move actions and drive-only summaries appear only
+/// when their prerequisite exists.
 /// </summary>
 public sealed partial class DashboardPage : Page
 {
@@ -21,7 +20,7 @@ public sealed partial class DashboardPage : Page
 
     public MainPageViewModel ViewModel => App.Shared;
 
-    /// <summary>The detected caches still on the system drive — a calm, banded preview of what "Move all" will do.</summary>
+    /// <summary>Movable caches, or the detected inventory when no Dev Drive exists.</summary>
     public ObservableCollection<PackageCacheRowViewModel> MovableCaches { get; } = new();
 
     public DashboardPage()
@@ -34,6 +33,7 @@ public sealed partial class DashboardPage : Page
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
         ViewModel.PackageCaches.CachesChanged += OnCachesChanged;
+        ViewModel.PackageCaches.InventoryReset += OnInventoryReset;
         HookRows();
         RebuildMovable();
     }
@@ -41,6 +41,7 @@ public sealed partial class DashboardPage : Page
     private void OnUnloaded(object sender, RoutedEventArgs e)
     {
         ViewModel.PackageCaches.CachesChanged -= OnCachesChanged;
+        ViewModel.PackageCaches.InventoryReset -= OnInventoryReset;
         foreach (PackageCacheRowViewModel row in _hooked)
         {
             row.PropertyChanged -= OnRowPropertyChanged;
@@ -55,11 +56,18 @@ public sealed partial class DashboardPage : Page
         RebuildMovable();
     }
 
+    private void OnInventoryReset(object? sender, System.EventArgs e)
+    {
+        HookRows();
+        RebuildMovable();
+    }
+
     private void OnRowPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName is nameof(PackageCacheRowViewModel.CanMove)
             or nameof(PackageCacheRowViewModel.IsSet)
-            or nameof(PackageCacheRowViewModel.IsMapped))
+            or nameof(PackageCacheRowViewModel.IsMapped)
+            or nameof(PackageCacheRowViewModel.IsMappedToDevDrive))
         {
             RebuildMovable();
         }
@@ -86,7 +94,11 @@ public sealed partial class DashboardPage : Page
     {
         MovableCaches.Clear();
         int index = 0;
-        foreach (PackageCacheRowViewModel row in ViewModel.PackageCaches.Caches.Where(r => r.CanMove))
+        IEnumerable<PackageCacheRowViewModel> visible = ViewModel.PackageCaches.HasDevDrive
+            ? ViewModel.PackageCaches.Caches.Where(
+                r => (r.Info.Detected || r.IsMapped || r.IsSet) && !r.IsOnDevDrive)
+            : ViewModel.PackageCaches.Caches.Where(r => r.Info.Detected);
+        foreach (PackageCacheRowViewModel row in visible)
         {
             row.BandAlt = (index++ % 2) == 1;
             MovableCaches.Add(row);

@@ -14,8 +14,8 @@ namespace DevDriveManager.Pages;
 /// The "Package caches" page. It owns nothing but presentation: every detected tool's cache row, the
 /// reversible move engine, and the "Move all" flow live on the shared <see cref="PackageCachesViewModel"/>.
 /// The page's job is to group the flat <see cref="PackageCachesViewModel.Caches"/> collection into three
-/// status bands — Needs action / On your Dev Drive / Not installed — and re-band each group so the eye can
-/// flow. Because a move changes a row's group, the page re-groups live as row state changes.
+/// status bands. Without a Dev Drive, detected caches remain visible in a neutral "Detected on this PC"
+/// band; with one, the same rows are split into Needs action / On your Dev Drive / Not installed.
 /// </summary>
 public sealed partial class PackageCachesPage : Page
 {
@@ -23,7 +23,7 @@ public sealed partial class PackageCachesPage : Page
 
     public PackageCachesViewModel Caches => App.Shared.PackageCaches;
 
-    /// <summary>Detected caches still on the system drive (movable now).</summary>
+    /// <summary>Movable caches, or all detected caches when this PC has no Dev Drive.</summary>
     public ObservableCollection<PackageCacheRowViewModel> NeedsAction { get; } = new();
 
     /// <summary>Caches already on the Dev Drive (or mapped to a folder the user chose).</summary>
@@ -42,6 +42,7 @@ public sealed partial class PackageCachesPage : Page
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
         Caches.CachesChanged += OnCachesChanged;
+        Caches.InventoryReset += OnInventoryReset;
         HookRows();
         Regroup();
     }
@@ -49,6 +50,7 @@ public sealed partial class PackageCachesPage : Page
     private void OnUnloaded(object sender, RoutedEventArgs e)
     {
         Caches.CachesChanged -= OnCachesChanged;
+        Caches.InventoryReset -= OnInventoryReset;
         foreach (PackageCacheRowViewModel row in _hooked)
         {
             row.PropertyChanged -= OnRowPropertyChanged;
@@ -63,13 +65,16 @@ public sealed partial class PackageCachesPage : Page
         Regroup();
     }
 
+    private void OnInventoryReset(object? sender, System.EventArgs e) => Regroup();
+
     private void OnRowPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         // Only the properties that change which group a row belongs to should trigger a re-band; a move's
         // progress ticks (MoveProgressPercent, etc.) must not churn the lists.
         if (e.PropertyName is nameof(PackageCacheRowViewModel.CanMove)
             or nameof(PackageCacheRowViewModel.IsSet)
-            or nameof(PackageCacheRowViewModel.IsMapped))
+            or nameof(PackageCacheRowViewModel.IsMapped)
+            or nameof(PackageCacheRowViewModel.IsMappedToDevDrive))
         {
             Regroup();
         }
@@ -100,13 +105,25 @@ public sealed partial class PackageCachesPage : Page
         OnDevDrive.Clear();
         NotInstalled.Clear();
 
+        bool detectionOnly = !Caches.HasDevDrive;
         foreach (PackageCacheRowViewModel row in Caches.Caches)
         {
-            if (row.IsSet || row.IsMapped)
+            if (detectionOnly)
+            {
+                if (row.Info.Detected || row.IsSet || row.IsMapped)
+                {
+                    NeedsAction.Add(row);
+                }
+                else
+                {
+                    NotInstalled.Add(row);
+                }
+            }
+            else if (row.IsOnDevDrive)
             {
                 OnDevDrive.Add(row);
             }
-            else if (row.CanMove)
+            else if (row.CanMove || row.IsMapped || row.Info.Detected)
             {
                 NeedsAction.Add(row);
             }
@@ -120,9 +137,17 @@ public sealed partial class PackageCachesPage : Page
         Band(OnDevDrive);
         Band(NotInstalled);
 
-        UpdateSection(NeedsActionSection, NeedsActionHeader, "Needs action", NeedsAction.Count);
+        UpdateSection(
+            NeedsActionSection,
+            NeedsActionHeader,
+            detectionOnly ? "Detected on this PC" : "Needs action",
+            NeedsAction.Count);
         UpdateSection(OnDevDriveSection, OnDevDriveHeader, "On your Dev Drive", OnDevDrive.Count);
-        UpdateSection(NotInstalledSection, NotInstalledHeader, "Not installed", NotInstalled.Count);
+        UpdateSection(
+            NotInstalledSection,
+            NotInstalledHeader,
+            detectionOnly ? "Not detected" : "Not installed",
+            NotInstalled.Count);
     }
 
     private static void Band(ObservableCollection<PackageCacheRowViewModel> rows)

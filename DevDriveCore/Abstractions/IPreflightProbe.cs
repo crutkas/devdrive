@@ -17,4 +17,7 @@ public interface IPreflightProbe
     /// Drive letter without a colon (e.g. <c>'G'</c>), used to find the backing physical disk.
     /// </summary>
     PreflightInfo Capture(string systemRoot, string devRoot, char devDriveLetter, CancellationToken cancellationToken = default);
+
+    /// <summary>Captures machine, storage, and free-space context for a system-drive-only baseline.</summary>
+    PreflightInfo CaptureSystemDrive(string systemRoot, CancellationToken cancellationToken = default);
 }

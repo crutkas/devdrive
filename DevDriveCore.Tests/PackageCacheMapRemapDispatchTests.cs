@@ -45,6 +45,10 @@ public sealed class PackageCacheMapRemapDispatchTests
         Assert.IsTrue(fs.FileExists(@"C:\dev\gomodcache\keep.txt"), "The user's folder is preserved.");
         Assert.IsFalse(row.ShowMapBlock, "Once mapped, the map block is replaced by the result.");
         Assert.IsTrue(row.CanMoveBack, "A mapped tool offers a reversible 'Move back'.");
+        Assert.IsFalse(row.IsOnDevDrive);
+        Assert.IsTrue(vm.HasCachesOutsideDevDrive);
+        Assert.IsFalse(vm.ShowAllCachesOnDevDrive);
+        StringAssert.Contains(vm.WarningMessage, "outside G:");
     }
 
     [TestMethod]
@@ -139,7 +143,7 @@ public sealed class PackageCacheMapRemapDispatchTests
 
         public SingleUndetectedCacheService(PackageCacheInfo info) => _info = info;
 
-        public IReadOnlyList<PackageCacheInfo> GetPackageCaches(char devDriveLetter) => new[] { _info };
+        public IReadOnlyList<PackageCacheInfo> GetPackageCaches(char? devDriveLetter) => new[] { _info };
 
         public Task<ulong> CalculateSizeAsync(PackageCacheInfo cache, TimeSpan timeBudget, CancellationToken cancellationToken = default) =>
             Task.FromResult(0UL);

@@ -217,7 +217,7 @@
                 <TextBlock
                     Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                     Style="{StaticResource BodyTextBlockStyle}"
-                    Text="Moving copies a tool's cache to your Dev Drive and repoints its per-user environment variable. Nothing is deleted and it's reversible at any time."
+                    Text="Review detected package caches and their current locations. With a Dev Drive, caches can be copied there and repointed without deleting the originals."
                     TextWrapping="Wrap" />
                 <HyperlinkButton
                     AutomationProperties.AutomationId="LearnWhatThisDoes"
@@ -244,8 +244,8 @@
                             Grid.Column="0"
                             VerticalAlignment="Center"
                             FontSize="22"
-                            Foreground="{ThemeResource SystemFillColorCautionBrush}"
-                            Glyph="&#xE7BA;" />
+                            Foreground="{x:Bind local:UiHelpers.CacheOverviewBrush(Caches.HasDevDrive, Caches.HasCachesOnSystemDrive, Caches.HasDetectedCaches, Caches.AllDetectedCachesOnDevDrive), Mode=OneWay}"
+                            Glyph="&#xE8B7;" />
                         <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
                             <TextBlock
                                 AutomationProperties.AutomationId="CachesWarning"
@@ -257,6 +257,12 @@
                                 Style="{StaticResource CaptionTextBlockStyle}"
                                 Text="One click moves every detected cache that's still on your system drive."
                                 Visibility="{x:Bind local:UiHelpers.BoolToVisibility(Caches.ShowMoveAllButton), Mode=OneWay}" />
+                            <TextBlock
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Style="{StaticResource CaptionTextBlockStyle}"
+                                Text="{x:Bind Caches.DevDriveNoticeMessage, Mode=OneWay}"
+                                TextWrapping="Wrap"
+                                Visibility="{x:Bind local:UiHelpers.BoolToVisibility(Caches.ShowNoDevDriveNotice), Mode=OneWay}" />
                         </StackPanel>
                         <Button
                             Grid.Column="2"
@@ -272,7 +278,7 @@
                     <StackPanel
                         Orientation="Horizontal"
                         Spacing="8"
-                        Visibility="{x:Bind local:UiHelpers.InvertBoolToVisibility(Caches.HasCachesOnSystemDrive), Mode=OneWay}">
+                        Visibility="{x:Bind local:UiHelpers.BoolToVisibility(Caches.ShowAllCachesOnDevDrive), Mode=OneWay}">
                         <FontIcon
                             FontSize="16"
                             Foreground="{ThemeResource SystemFillColorSuccessBrush}"
@@ -370,7 +376,14 @@
                     Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                     Style="{StaticResource CaptionTextBlockStyle}"
                     Text="We didn't find these tools. If you use one, point us at its cache folder to track it."
-                    TextWrapping="Wrap" />
+                    TextWrapping="Wrap"
+                    Visibility="{x:Bind local:UiHelpers.BoolToVisibility(Caches.HasDevDrive), Mode=OneWay}" />
+                <TextBlock
+                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                    Style="{StaticResource CaptionTextBlockStyle}"
+                    Text="We didn't find these tools on this PC."
+                    TextWrapping="Wrap"
+                    Visibility="{x:Bind local:UiHelpers.BoolToVisibility(Caches.ShowNoDevDriveNotice), Mode=OneWay}" />
                 <ItemsControl
                     AutomationProperties.AutomationId="NotInstalledList"
                     HorizontalContentAlignment="Stretch"

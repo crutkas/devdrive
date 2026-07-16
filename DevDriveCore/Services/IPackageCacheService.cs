@@ -11,10 +11,11 @@ public interface IPackageCacheService
 {
     /// <summary>
     /// Resolves every catalogued cache (env var → else default template), records whether it exists
-    /// and which drive it is on relative to <paramref name="devDriveLetter"/>. Fast: env reads + a
-    /// directory-exists probe per tool (no sizing).
+    /// and which drive it is on relative to <paramref name="devDriveLetter"/>. Pass <see langword="null"/>
+    /// when this PC has no Dev Drive; discovery still runs, but no cache is classified as on a Dev Drive.
+    /// Fast: env reads + a directory-exists probe per tool (no sizing).
     /// </summary>
-    IReadOnlyList<PackageCacheInfo> GetPackageCaches(char devDriveLetter);
+    IReadOnlyList<PackageCacheInfo> GetPackageCaches(char? devDriveLetter);
 
     /// <summary>
     /// Computes the on-disk size of a detected cache (best-effort, capped at <paramref name="timeBudget"/>).
