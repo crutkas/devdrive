@@ -29,13 +29,20 @@
     <EnableRealResizeExecute Condition="'$(EnableRealResizeExecute)' == ''">false</EnableRealResizeExecute>
     <!--
       WUI2010 (nested x:Bind path may crash on a null segment) is suppressed *intentionally*.
-      MainPage binds to section sub-ViewModels (ViewModel.Suite/PackageCaches/
-      DriveHealth.*). Every sub-VM is a get-only property assigned once in the
-      MainPageViewModel constructor and never reassigned or set null, so no path segment can be
-      null at binding time — the rule is a syntactic false positive for this composition. The
-      sub-VM split is deliberate (testability; each section is unit-tested in DevDriveCore.Tests).
+      Pages bind to section sub-ViewModels (ViewModel.Suite/PackageCaches/DriveHealth.*). Every
+      sub-VM is a get-only property assigned once in the MainPageViewModel constructor and never
+      reassigned or set null, so no path segment can be null at binding time — the rule is a
+      syntactic false positive for this composition. The sub-VM split is deliberate (testability;
+      each section is unit-tested in DevDriveCore.Tests).
+
+      WUI2011 (x:Bind defaults to OneTime) is suppressed *intentionally* for the same reason the
+      per-row item templates exist: each banded row (volumes, package caches, benchmark workloads)
+      binds immutable, load-time row data and per-row band/glyph brushes. Rows are never mutated in
+      place — a refresh rebuilds the whole collection (and an OS/theme change triggers a full
+      reload), so OneTime is the correct, intended mode. Bindings that DO update in place use an
+      explicit Mode=OneWay/TwoWay.
     -->
-    <NoWarn>$(NoWarn);WUI2010</NoWarn>
+    <NoWarn>$(NoWarn);WUI2010;WUI2011</NoWarn>
   </PropertyGroup>
 
   <ItemGroup Condition="'$(EnableRealResizeExecute)' == 'true'">

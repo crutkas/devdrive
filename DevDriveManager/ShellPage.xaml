@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Page
+    x:Class="DevDriveManager.ShellPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:local="using:DevDriveManager"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <NavigationView
+        x:Name="NavView"
+        AutomationProperties.AutomationId="ShellNavView"
+        IsBackButtonVisible="Collapsed"
+        IsSettingsVisible="True"
+        IsTabStop="False"
+        OpenPaneLength="248"
+        PaneDisplayMode="Left"
+        SelectionChanged="NavView_SelectionChanged">
+
+        <NavigationView.MenuItems>
+            <NavigationViewItem
+                AutomationProperties.AutomationId="NavDashboard"
+                Content="Dashboard"
+                Tag="dashboard">
+                <NavigationViewItem.Icon>
+                    <FontIcon Glyph="&#xE80F;" />
+                </NavigationViewItem.Icon>
+            </NavigationViewItem>
+            <NavigationViewItem
+                AutomationProperties.AutomationId="NavPackageCaches"
+                Content="Package caches"
+                Tag="caches">
+                <NavigationViewItem.Icon>
+                    <FontIcon Glyph="&#xE8B7;" />
+                </NavigationViewItem.Icon>
+            </NavigationViewItem>
+            <NavigationViewItem
+                AutomationProperties.AutomationId="NavBenchmarks"
+                Content="Benchmarks"
+                Tag="benchmarks">
+                <NavigationViewItem.Icon>
+                    <FontIcon Glyph="&#xE9D9;" />
+                </NavigationViewItem.Icon>
+            </NavigationViewItem>
+            <NavigationViewItem
+                AutomationProperties.AutomationId="NavDrives"
+                Content="Drives"
+                Tag="drives">
+                <NavigationViewItem.Icon>
+                    <FontIcon Glyph="&#xEDA2;" />
+                </NavigationViewItem.Icon>
+            </NavigationViewItem>
+
+            <NavigationViewItemSeparator />
+
+            <NavigationViewItem
+                AutomationProperties.AutomationId="NavCreate"
+                Content="Create Dev Drive"
+                Tag="create">
+                <NavigationViewItem.Icon>
+                    <FontIcon Glyph="&#xE710;" />
+                </NavigationViewItem.Icon>
+            </NavigationViewItem>
+        </NavigationView.MenuItems>
+
+        <Frame x:Name="ContentFrame" AutomationProperties.AutomationId="ShellContentFrame" />
+    </NavigationView>
+</Page>

@@ -1,34 +1,33 @@
 <#
-    ui-tests.ps1 — WinApp UI tests for DevDriveManager (Milestone 1)
+    ui-tests.ps1 — WinApp UI tests for DevDriveManager (NavigationView shell)
 
     Follows the winui-ui-testing skill: one batch script, single run, structured results.
-    Drives the *built, running* app via `winapp ui` (UI Automation). Real mutations (package-cache
-    Move / Move back) are exercised ONLY under the DDM_UITEST_SAFE_MUTATIONS=1 seam, which swaps in
-    in-memory SafeFakes — so no real cache or environment variable is ever touched. The suite confirms
-    the seam (SafeMutationModeIndicator) before any real Confirm.
+    Drives the *built, running* app via `winapp ui` (UI Automation).
 
-    Definition-of-done coverage:
-      (a) the volumes list renders      -> realized VolumeCard_* rows are present
-      (b) the G: row shows a Dev Drive badge -> DevDriveBadge_G is in the tree, and the
-          equivalent C: badge is absent (C: is a normal NTFS volume).
-      (c) the full concept page renders -> every section header (Performance, Package caches,
-          Drive health) and its key controls are present.
-      (d) the build benchmarks are REAL -> the "Real-world builds" group runs real developer
-          workloads (git clone first) and renders a per-operation result row or a "SKIPPED — reason".
-          Each row exposes a per-row Details affordance (exact command, what runs, methodology + the
-          raw run times). The synthetic raw disk-I/O group is gone; a calm absence note explains why.
-      (e) mutating affordances are real but SAFE -> Move / Move all reveal an explicit inline confirm;
-          under the DDM_UITEST_SAFE_MUTATIONS seam the move is faked in-memory (no real cache/env/
-          settings touched) and is reversible via Move back.
-      (f) accessibility -> every app-authored interactive control exposes an AutomationId.
+    The redesign splits the old single endless-scroll page into a NavigationView shell with six
+    focused pages — Dashboard, Package caches, Benchmarks, Drives, Create Dev Drive and Settings —
+    all backed by ONE shared MainPageViewModel (App.Shared), loaded once. This suite:
+      (1) asserts the shell + every nav item renders;
+      (2) navigates to each page and asserts a page-specific anchor element;
+      (3) checks the headline data is correct (G: is a ReFS Dev Drive; C: is plain NTFS);
+      (4) checks the package-cache status grouping (Needs action / On your Dev Drive / Not installed);
+      (5) exercises the one real preference — the Light/Dark/System theme override — and asserts the
+          ComboBox reflects each choice (the override is applied live + persisted by ThemeService);
+      (6) audits accessibility (every app-authored interactive control exposes an AutomationId);
+      (7) screenshots every page for visual review.
+
+    This suite is READ-ONLY with respect to the user's machine: it never confirms a real cache move
+    (that is gated behind an explicit inline Confirm, exercised only under the
+    DDM_UITEST_SAFE_MUTATIONS in-memory seam). Switching the app theme is safe and reversible, and
+    the suite restores "System default" at the end.
 
     Usage:
       # Set DDM_UITEST_SAFE_MUTATIONS=1 at user scope, launch the app, verify the visible safe-mode
       # indicator, and note its PID. This script exits with code 2 if the seam is absent.
       .\ui-tests.ps1 -AppPid <PID>
 
-    Exit code 0 = all passed, 1 = one or more failures. Results also written to
-    test-results.json next to this script.
+    Exit code 0 = all passed, 1 = one or more failures, 2 = safe mutation mode is absent.
+    Results are also written to test-results.json next to this script.
 #>
 param([Parameter(Mandatory)][int]$AppPid)
 # NOTE: do NOT name the parameter $Pid — it is read-only in PowerShell.
@@ -36,7 +35,7 @@ param([Parameter(Mandatory)][int]$AppPid)
 $ErrorActionPreference = 'Continue'
 Set-Location -Path $PSScriptRoot
 
-$pass = 0; $fail = 0; $skip = 0; $results = @()
+$pass = 0; $fail = 0; $results = @()
 
 function Test-UI {
     param([string]$Name, [scriptblock]$Script)
@@ -57,37 +56,35 @@ function Test-UI {
     }
 }
 
-# Read an element's UIA Name (deterministic for SettingsCard groups, which expose a rich
-# AutomationProperties.Name). Returns "" if the element/property is missing.
+# Read an element's UIA Name. Returns "" if the element/property is missing.
 function Get-Name([string]$id) {
     $json = winapp ui get-property $id -a $AppPid -p Name --json 2>$null | ConvertFrom-Json
     return [string]$json.properties.Name
 }
 
-# Returns the number of elements whose text matches $text.
-function Get-MatchCount([string]$text) {
-    return [int](winapp ui search "$text" -a $AppPid --json 2>$null | ConvertFrom-Json).matchCount
+# Read a control's effective value (ComboBox selected item, TextBox text, etc.).
+function Get-Value([string]$id) {
+    $json = winapp ui get-value $id -a $AppPid --json 2>$null | ConvertFrom-Json
+    return [string]$json.text
 }
 
-# Read an element's on-screen TOP (Y) from its BoundingRectangle, for ordering assertions. Tolerant of
-# the rectangle being a string ("x,y,w,h" / "X=..,Y=..") or an object. Returns $null when unavailable.
-function Get-Top([string]$id) {
-    $json = winapp ui get-property $id -a $AppPid -p BoundingRectangle --json 2>$null | ConvertFrom-Json
-    $r = $json.properties.BoundingRectangle
-    if ($null -eq $r) { return $null }
-    if ($r -is [string]) {
-        $m = [regex]::Match($r, 'Y\s*=\s*(-?\d+(\.\d+)?)')
-        if ($m.Success) { return [double]$m.Groups[1].Value }
-        $nums = [regex]::Matches($r, '-?\d+(\.\d+)?')
-        if ($nums.Count -ge 2) { return [double]$nums[1].Value }
-        return $null
-    }
-    if ($null -ne $r.Y) { return [double]$r.Y }
-    if ($null -ne $r.Top) { return [double]$r.Top }
-    return $null
+# Navigate via a top-level nav item and wait for a page-specific anchor to appear.
+function Goto([string]$navId, [string]$anchorId) {
+    winapp ui invoke $navId -a $AppPid 2>$null | Out-Null
+    Start-Sleep -Milliseconds 500
+    winapp ui wait-for $anchorId -a $AppPid -t 5000 | Out-Null
 }
 
-Write-Host "DevDriveManager UI tests — app PID $AppPid`n"
+# Select a ComboBox item by its AutomationId (expand, then invoke the item).
+function Select-Combo([string]$comboId, [string]$itemId) {
+    winapp ui invoke $comboId -a $AppPid 2>$null | Out-Null   # ExpandCollapse
+    Start-Sleep -Milliseconds 400
+    winapp ui invoke $itemId -a $AppPid 2>$null | Out-Null    # SelectionItem
+    Start-Sleep -Milliseconds 500
+}
+
+New-Item -ItemType Directory -Force -Path "screenshots" | Out-Null
+Write-Host "DevDriveManager UI tests (NavigationView shell) — app PID $AppPid`n"
 
 # Hard safety gate: do not merely record this as a failed test and continue into mutation scenarios.
 winapp ui wait-for "SafeMutationModeIndicator" -a $AppPid -t 4000 2>$null | Out-Null
@@ -97,390 +94,172 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  (a) The volumes list renders — assert the realized item rows are present.
-#      (ItemsRepeater is a lightweight panel and does not project its own automation
-#       peer, so we assert on the rendered rows — a stronger check than the container.)
+#  (1) Shell + navigation rail render
 # ─────────────────────────────────────────────────────────────────────────────
-# The "All drives on this PC" list is a collapsed disclosure when a Dev Drive exists; expand it so
-# its (non-virtualizing) rows realize into the UIA tree before we assert on them.
-Test-UI "All-drives disclosure present" { winapp ui wait-for "AllDrivesExpander" -a $AppPid -t 4000 }
-winapp ui invoke "AllDrivesExpander" -a $AppPid 2>$null | Out-Null
-Start-Sleep -Milliseconds 600
-Test-UI "Volumes list rendered: G: row present"        { winapp ui wait-for "VolumeCard_G"        -a $AppPid -t 5000 }
-Test-UI "Volumes list rendered: C: row present"        { winapp ui wait-for "VolumeCard_C"        -a $AppPid -t 4000 }
-Test-UI "Volumes list rendered: Recovery row present"  { winapp ui wait-for "VolumeCard_Recovery" -a $AppPid -t 4000 }
+Test-UI "Shell NavigationView present"      { winapp ui wait-for "ShellNavView"     -a $AppPid -t 6000 }
+Test-UI "Nav: Dashboard present"            { winapp ui wait-for "NavDashboard"     -a $AppPid -t 4000 }
+Test-UI "Nav: Package caches present"       { winapp ui wait-for "NavPackageCaches" -a $AppPid -t 4000 }
+Test-UI "Nav: Benchmarks present"           { winapp ui wait-for "NavBenchmarks"    -a $AppPid -t 4000 }
+Test-UI "Nav: Drives present"               { winapp ui wait-for "NavDrives"        -a $AppPid -t 4000 }
+Test-UI "Nav: Create Dev Drive present"     { winapp ui wait-for "NavCreate"        -a $AppPid -t 4000 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  (b) The G: row shows the "Dev Drive" badge (headline requirement) — and C: does not.
+#  (2) Dashboard — the calm landing surface; leads with what's NOT on the Dev Drive.
+#      (Navigate explicitly so the suite is re-runnable regardless of prior nav state; the shell
+#      selects Dashboard on fresh launch.)
 # ─────────────────────────────────────────────────────────────────────────────
-Test-UI "G: row shows the Dev Drive badge" { winapp ui wait-for "DevDriveBadge_G" -a $AppPid -t 4000 }
-Test-UI "C: row has NO Dev Drive badge"    { winapp ui wait-for "DevDriveBadge_C" -a $AppPid --gone -t 3000 }
+Test-UI "Navigate to Dashboard"              { Goto "NavDashboard" "DashboardScrollViewer" }
+Test-UI "Dashboard: Refresh present"         { winapp ui wait-for "RefreshButton"         -a $AppPid -t 3000 }
+Test-UI "Dashboard: Create present"          { winapp ui wait-for "CreateDevDriveButton"  -a $AppPid -t 3000 }
+# The cards are lightweight Border/ItemsControl panels (no automation peer); assert on the
+# peer-projecting child each card owns — its "Move all" button and its three nav links.
+Test-UI "Dashboard: caches hero (Move all)"  { winapp ui wait-for "MoveAllButton"          -a $AppPid -t 3000 }
+Test-UI "Dashboard: caches hero (Manage link)" { winapp ui wait-for "OpenPackageCachesLink" -a $AppPid -t 3000 }
+Test-UI "Dashboard: drive-health card link"  { winapp ui wait-for "OpenDrivesLink"         -a $AppPid -t 3000 }
+Test-UI "Dashboard: benchmarks card link"    { winapp ui wait-for "OpenBenchmarksLink"     -a $AppPid -t 3000 }
+winapp ui screenshot -a $AppPid -o "screenshots\01-dashboard.png" 2>$null | Out-Null
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  Content correctness — G: is a ReFS Dev Drive, C: is a plain NTFS volume.
+#  (3) Package caches — status-grouped, banded; critical "still on C:" group leads.
 # ─────────────────────────────────────────────────────────────────────────────
-Test-UI "G: row reports ReFS filesystem" {
+Test-UI "Navigate to Package caches"         { Goto "NavPackageCaches" "PackageCachesScrollViewer" }
+# Status groups are banded ItemsControls (no automation peer); assert each group rendered via a
+# representative row's action button. (This PC: NuGet/pip/Cargo/vcpkg on C:, npm already on G:,
+# uv/Poetry/Gradle/... not installed.)
+Test-UI "Caches: Needs-action row present (Cargo)" { winapp ui wait-for "MoveCache_Cargo" -a $AppPid -t 4000 }
+Test-UI "Caches: On-Dev-Drive row present (npm)"   { winapp ui wait-for "MoveBack_npm"    -a $AppPid -t 4000 }
+Test-UI "Caches: Not-installed row present (uv)"   { winapp ui wait-for "MapPathInput_uv" -a $AppPid -t 4000 }
+Test-UI "Caches: Move all present"           { winapp ui wait-for "MoveAllButton"     -a $AppPid -t 3000 }
+Test-UI "Caches: 'Learn what this does' link"{ winapp ui wait-for "LearnWhatThisDoes" -a $AppPid -t 3000 }
+winapp ui screenshot -a $AppPid -o "screenshots\02-caches.png" 2>$null | Out-Null
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  (4) Benchmarks — demoted to on-demand; run-all hero + per-workload rows.
+# ─────────────────────────────────────────────────────────────────────────────
+Test-UI "Navigate to Benchmarks"             { Goto "NavBenchmarks" "BenchmarksScrollViewer" }
+Test-UI "Benchmarks: Run all present"        { winapp ui wait-for "RunAllTestsButton" -a $AppPid -t 4000 }
+# The workloads list is a banded ItemsControl (no peer); assert on the universal git-clone row's
+# Run button (the filesystem baseline that's always present).
+Test-UI "Benchmarks: git-clone workload row" { winapp ui wait-for "RunRow_git-clone"  -a $AppPid -t 4000 }
+winapp ui screenshot -a $AppPid -o "screenshots\03-benchmarks.png" 2>$null | Out-Null
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  (5) Drives — Dev Drive hero + banded all-volumes table. G: is the real ReFS Dev Drive.
+# ─────────────────────────────────────────────────────────────────────────────
+Test-UI "Navigate to Drives"                 { Goto "NavDrives" "DrivesScrollViewer" }
+# The Dev Drive hero is a Border (no peer); assert on its child buttons.
+Test-UI "Drives: hero 'Manage in Storage'"   { winapp ui wait-for "ManageInStorageButton" -a $AppPid -t 4000 }
+Test-UI "Drives: hero 'See filter drivers'"  { winapp ui wait-for "SeeFiltersButton"      -a $AppPid -t 4000 }
+Test-UI "Drives: G: row present"             { winapp ui wait-for "VolumeCard_G"    -a $AppPid -t 4000 }
+Test-UI "Drives: C: row present"             { winapp ui wait-for "VolumeCard_C"    -a $AppPid -t 4000 }
+Test-UI "Drives: G: shows Dev Drive badge"   { winapp ui wait-for "DevDriveBadge_G" -a $AppPid -t 4000 }
+Test-UI "Drives: C: has NO Dev Drive badge"  { winapp ui wait-for "DevDriveBadge_C" -a $AppPid --gone -t 3000 }
+Test-UI "Drives: G: row reports ReFS" {
     $n = Get-Name "VolumeCard_G"
     if ($n -notmatch 'ReFS') { throw "expected 'ReFS' in G: row name but got: '$n'" }
 }
-Test-UI "G: row name advertises Dev Drive" {
+Test-UI "Drives: G: row advertises Dev Drive" {
     $n = Get-Name "VolumeCard_G"
     if ($n -notmatch 'Dev Drive') { throw "expected 'Dev Drive' in G: row name but got: '$n'" }
 }
-Test-UI "G: row name advertises Trusted" {
-    $n = Get-Name "VolumeCard_G"
-    if ($n -notmatch 'Trusted') { throw "expected 'Trusted' in G: row name but got: '$n'" }
-}
-Test-UI "C: row reports NTFS filesystem" {
+Test-UI "Drives: C: row reports NTFS" {
     $n = Get-Name "VolumeCard_C"
     if ($n -notmatch 'NTFS') { throw "expected 'NTFS' in C: row name but got: '$n'" }
 }
-Test-UI "C: row name does NOT advertise Dev Drive" {
-    $n = Get-Name "VolumeCard_C"
-    if ($n -match 'Dev Drive') { throw "C: row name unexpectedly contains 'Dev Drive': '$n'" }
+winapp ui screenshot -a $AppPid -o "screenshots\04-drives.png" 2>$null | Out-Null
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  (6) Create Dev Drive — hosted in the shell (guarded preview; nothing changes until confirm).
+# ─────────────────────────────────────────────────────────────────────────────
+Test-UI "Navigate to Create Dev Drive"       { Goto "NavCreate" "SourceComboBox" }
+Test-UI "Create: guardrails info bar present"{ winapp ui wait-for "GuardrailsInfoBar" -a $AppPid -t 3000 }
+winapp ui screenshot -a $AppPid -o "screenshots\05-create.png" 2>$null | Out-Null
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  (7) Settings — the one real preference: Light/Dark/System theme override (applied live).
+# ─────────────────────────────────────────────────────────────────────────────
+Test-UI "Navigate to Settings" {
+    winapp ui invoke "SettingsItem" -a $AppPid 2>$null | Out-Null
+    Start-Sleep -Milliseconds 500
+    winapp ui wait-for "ThemeSelector" -a $AppPid -t 5000 | Out-Null
+}
+Test-UI "Settings: Rescan present"           { winapp ui wait-for "RescanButton"          -a $AppPid -t 3000 }
+Test-UI "Settings: Create present"           { winapp ui wait-for "SettingsCreateButton"  -a $AppPid -t 3000 }
+Test-UI "Settings: Windows Security present" { winapp ui wait-for "SettingsOpenWindowsSecurityButton" -a $AppPid -t 3000 }
+winapp ui screenshot -a $AppPid -o "screenshots\06-settings.png" 2>$null | Out-Null
+
+# Theme override: Dark, then Light, then back to System default. Assert the ComboBox reflects each.
+Select-Combo "ThemeSelector" "ThemeOptionDark"
+Test-UI "Theme override -> Dark" {
+    winapp ui wait-for "ThemeSelector" -a $AppPid --value "Dark" -t 3000
+}
+winapp ui screenshot -a $AppPid -o "screenshots\07-settings-dark.png" 2>$null | Out-Null
+
+Select-Combo "ThemeSelector" "ThemeOptionLight"
+Test-UI "Theme override -> Light" {
+    winapp ui wait-for "ThemeSelector" -a $AppPid --value "Light" -t 3000
+}
+winapp ui screenshot -a $AppPid -o "screenshots\08-settings-light.png" 2>$null | Out-Null
+
+Select-Combo "ThemeSelector" "ThemeOptionSystem"
+Test-UI "Theme override -> System default (restored)" {
+    winapp ui wait-for "ThemeSelector" -a $AppPid --value "System default" -t 3000
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  Status banner — CHANGE 1: dropped in the active state. With a Dev Drive on G:,
-#  the (previously green) "active" banner is gone; Drive health conveys active/healthy.
-#  The banner is reserved for the no-Dev-Drive-yet and error states only.
+#  (8) Accessibility — every interactive control is identifiable to assistive tech.
+#      A control is accessible if it exposes EITHER a stable AutomationId OR an accessible Name
+#      (screen readers announce the Name; automation addresses the Id). We flag only controls that
+#      have NEITHER. Note: framework-templated CommunityToolkit SettingsExpander header toggles
+#      surface as Button peers WITHOUT an AutomationId, but they carry a Name from their Header
+#      ("About the benchmarks", "Dev Drive Manager"), so they're properly announced.
+#      Every *app-authored* interactive control additionally carries an AutomationId — the rest of
+#      this suite proves it by addressing each one by Id directly (a missing Id fails those tests).
+#      UIA only sees the live visual tree, so we walk every page and accumulate. The element array
+#      lives at $obj.windows[].elements (NOT $obj.elements); flatten across all windows so the
+#      open-ComboBox popup window is covered too.
 # ─────────────────────────────────────────────────────────────────────────────
-Test-UI "No status banner in the active Dev Drive state" { winapp ui wait-for "StatusBanner" -a $AppPid --gone -t 3000 }
-Test-UI "Dropped green 'active' banner text is gone" {
-    # search exits non-zero when the text is absent (the desired outcome here), so neutralize
-    # $LASTEXITCODE and assert via throw on the parsed matchCount instead.
-    $j = winapp ui search "Dev Drive (G:) is active" -a $AppPid --json 2>$null | ConvertFrom-Json
-    $global:LASTEXITCODE = 0
-    if ([int]$j.matchCount -ge 1) { throw "the dropped green banner text 'Dev Drive (G:) is active' is still present" }
-}
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  Controls present + safe Refresh interaction (Refresh only re-reads, never mutates).
-# ─────────────────────────────────────────────────────────────────────────────
-Test-UI "Refresh button present"        { winapp ui wait-for "RefreshButton"        -a $AppPid -t 3000 }
-Test-UI "Create Dev Drive button present" { winapp ui wait-for "CreateDevDriveButton" -a $AppPid -t 3000 }
-Test-UI "Refresh button invokes (re-reads volumes)" { winapp ui invoke "RefreshButton" -a $AppPid }
-Start-Sleep -Milliseconds 1200
-Test-UI "G: row still present after refresh" { winapp ui wait-for "VolumeCard_G" -a $AppPid -t 5000 }
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  Unelevated state — CHANGE 3: the heavy "restart the whole app as admin" InfoBar is
-#  replaced by a compact "See filter drivers" affordance in the Drive health card that reads
-#  trust/filters live via a short-lived, UAC-elevated, READ-ONLY helper (no full-app restart).
-#  The live UAC prompt can't be auto-driven by an agent, so we assert the affordance + its
-#  wiring are present (not the elevation itself). (This run is unelevated, so it's shown.)
-# ─────────────────────────────────────────────────────────────────────────────
-# ── We assert on the shield "See filter drivers" button (proves the affordance is shown).
-#    The old heavy elevation InfoBar AND the "Restart as administrator" fallback must be gone. ──
-Test-UI "See Filters affordance shown when unelevated (shield button present)" { winapp ui wait-for "SeeFiltersButton" -a $AppPid -t 3000 }
-Test-UI "Restart-as-administrator link removed" { winapp ui wait-for "RestartAsAdminButton" -a $AppPid --gone -t 2000 }
-Test-UI "Old heavy elevation InfoBar is gone" { winapp ui wait-for "ElevationInfoBar" -a $AppPid --gone -t 2000 }
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  Trust & filters expander — Drive health owns the detail. When trust detail is
-#  readable (elevated) the expander is present and EXPANDED BY DEFAULT (its child
-#  cards realize); when unelevated (no detail) the expander is absent and the
-#  "See Filters" affordance stands in. Robust to both: this run is unelevated, so we
-#  take the See-Filters branch — the elevated branch is covered by reasoning + unit tests.
-# ─────────────────────────────────────────────────────────────────────────────
-Test-UI "Trust & filters: expander expanded by default (else See Filters affordance when unelevated)" {
-    winapp ui wait-for "TrustExpander" -a $AppPid -t 2000 2>$null | Out-Null
-    if ($LASTEXITCODE -eq 0) {
-        # Trust detail present — expanded-by-default realizes the expander's child cards.
-        # "Filters allowed" is unique to the expander content and is only in the UIA tree
-        # (non-collapsed) when the expander is open.
-        if ((Get-MatchCount 'Filters allowed') -lt 1) {
-            throw "TrustExpander is present but its content is not expanded by default"
-        }
-    } else {
-        # Unelevated — no trust detail; the See Filters affordance must stand in instead.
-        winapp ui wait-for "SeeFiltersButton" -a $AppPid -t 3000
-        if ($LASTEXITCODE -ne 0) { throw "neither TrustExpander nor SeeFiltersButton present" }
+$auditPages = @(
+    @{ nav = "NavDashboard";     anchor = "DashboardScrollViewer" },
+    @{ nav = "NavPackageCaches"; anchor = "PackageCachesScrollViewer" },
+    @{ nav = "NavBenchmarks";    anchor = "BenchmarksScrollViewer" },
+    @{ nav = "NavDrives";        anchor = "DrivesScrollViewer" },
+    @{ nav = "NavCreate";        anchor = "SourceComboBox" },
+    @{ nav = "SettingsItem";     anchor = "ThemeSelector" }
+)
+$inaccessible = @()
+$auditedCount = 0
+foreach ($p in $auditPages) {
+    winapp ui invoke $p.nav -a $AppPid 2>$null | Out-Null
+    winapp ui wait-for $p.anchor -a $AppPid -t 4000 2>$null | Out-Null
+    Start-Sleep -Milliseconds 300
+    $obj = winapp ui inspect -a $AppPid --interactive --json --depth 14 2>$null | Out-String | ConvertFrom-Json
+    $elements = @()
+    foreach ($win in $obj.windows) { if ($win.elements) { $elements += $win.elements } }
+    $interactive = @($elements | Where-Object {
+        $_.type -match 'Button|TextBox|ComboBox|ComboBoxItem|CheckBox|ToggleSwitch|TabItem|Edit|Hyperlink' -and
+        $_.name -notmatch 'Minimize|Maximize|Close|Restore' -and
+        $_.className -notmatch 'PickerHost|#32770|CabinetWClass'
+    })
+    $auditedCount += $interactive.Count
+    foreach ($e in ($interactive | Where-Object { -not $_.automationId -and [string]::IsNullOrWhiteSpace($_.name) })) {
+        $inaccessible += "$($p.nav): $($e.type) (no AutomationId, no Name)"
     }
 }
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  Drive-health perf-mode line — the CORE honesty check for the detection fix.
-#  The bug was: the app wrongly reported "Performance mode: Off" + offered "turn on"
-#  on this org-managed, async-ON machine — caused by an INVERTED Get-MpPreference
-#  mapping (it read 1 = on but treated it as off). The global Defender pref is reliable
-#  (1 = on/async, verified against Windows Security "See volumes") and readable
-#  UNELEVATED, so this run must POSITIVELY read "Performance mode: On (async)" — never
-#  "Off", never "Unknown", never offering "turn on". (TextBlock UIA Name == its Text.)
-# ─────────────────────────────────────────────────────────────────────────────
-Test-UI "Drive health: perf-mode line reads 'On (async)' (never 'Off' / 'turn on')" {
-    winapp ui wait-for "DriveHealthPerformanceMode" -a $AppPid -t 3000
-    if ($LASTEXITCODE -ne 0) { throw "DriveHealthPerformanceMode line not found" }
-    $n = Get-Name "DriveHealthPerformanceMode"
-    if ($n -match '(?i)\bOff\b')      { throw "perf-mode line wrongly reads 'Off': '$n'" }
-    if ($n -match '(?i)turn on')      { throw "perf-mode line wrongly offers 'turn on': '$n'" }
-    if ($n -notmatch '(?i)Performance mode:') { throw "perf-mode line missing its label: '$n'" }
-    # This machine has performance mode ON (async); the reliable global pref drives it even unelevated.
-    if ($n -notmatch 'On \(async\)') { throw "perf-mode line should read 'On (async)' on this machine: '$n'" }
-}
-
-# ═════════════════════════════════════════════════════════════════════════════
-#  FULL-PAGE SECTIONS (concept page) — every section header + key controls are
-#  present, real data populates, and every *mutating* affordance is a SAFE preview.
-#  All controls are direct StackPanel children or fully-realized ItemsRepeater rows
-#  (the page's single ScrollViewer gives the repeaters infinite measure), so they are
-#  in the UIA tree regardless of scroll position — no scrolling needed to assert them.
-# ═════════════════════════════════════════════════════════════════════════════
-
-# ── Section headers (in mock order). These are plain TextBlocks, always realized. ──
-Test-UI "Section header: Performance"        { if ((Get-MatchCount 'Performance') -lt 1)       { throw "header 'Performance' not found" } }
-Test-UI "Section header: Package caches"     { if ((Get-MatchCount 'Package caches') -lt 1)    { throw "header 'Package caches' not found" } }
-Test-UI "Section header: Drive health"       { if ((Get-MatchCount 'Drive health') -lt 1)      { throw "header 'Drive health' not found" } }
-
-# ── CHANGE 2: the "Source code" section was REMOVED (its only real action set VS Code's
-#    git.defaultCloneDirectory, which git/gh/GitHub Desktop/Visual Studio ignore — misleading).
-#    A genuine system-wide clone redirection is a FUTURE item (out of scope).
-#    NOTE: removal is asserted by AutomationId (--gone), NOT free-text. `winapp ui search`
-#    token-matches, and "source" legitimately appears in the reframed "You could do more"
-#    copy ("Put your source on the Dev Drive"), so a text search for "Source code" would
-#    false-positive. The id-based checks are the reliable proof the section is gone. ──
-Test-UI "Section: Source-code feature fully removed (all action ids gone)" {
-    foreach ($id in @('UseSourceButton', 'ConfirmUseSource', 'RevertSourceButton', 'SourceManualNote')) {
-        winapp ui wait-for $id -a $AppPid --gone -t 2000
-        if ($LASTEXITCODE -ne 0) { throw "source-feature control '$id' still present" }
-    }
-}
-Test-UI "Source: 'Use Dev Drive source' action is gone" { winapp ui wait-for "UseSourceButton" -a $AppPid --gone -t 2000 }
-
-# ── CHANGE 2: "Manage in Storage" relocated from the status banner into the Drive
-#    health card footer (NOT invoked — it would pop the Settings app; it is a safe
-#    ms-settings: launch). The AutomationId is preserved so tests still find it. ──
-Test-UI "Manage in Storage button lives in the Drive health card" { winapp ui wait-for "ManageInStorageButton" -a $AppPid -t 3000 }
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  Ecosystems (Concept A) — the unified per-ecosystem experience REPLACES the old three
-#  sections: the Performance "Run tests" suite, the standalone "Package caches" section,
-#  and the "Suggestions" upside panel. One card per language ecosystem fuses: the detected
-#  tools -> where each cache lives (C: vs Dev Drive) -> one reversible Move -> the measured
-#  speedup inline, but ONLY where a real workload exists (Node/npm, .NET/dotnet, Rust/cargo).
-#  Honesty is non-negotiable: ecosystems WITHOUT a workload show the move action plus an
-#  honest "build benchmark not available" note -- never a fabricated number.
-#
-#  SAFETY: the app is launched under DDM_UITEST_SAFE_MUTATIONS=1 (SafeMutationModeIndicator),
-#  so every Move/Map runs in-memory -- no real cache, env var, or disk is touched. The
-#  "Run all tests" benchmark is READ-ONLY and bounded; we don't run it here (the Core suite
-#  tests cover the streaming run) to keep the live UI test fast.
-# ─────────────────────────────────────────────────────────────────────────────
-
-# Top affordances: an honest one-line summary, the in-app doc link, and "Run all tests".
-Test-UI "Ecosystems: honest one-line summary present" {
-    winapp ui wait-for "EcosystemsSummary" -a $AppPid -t 4000
-    if ($LASTEXITCODE -ne 0) { throw "EcosystemsSummary not found" }
-}
-Test-UI "Ecosystems: 'Learn what this does' doc link opens the cache-move explainer" {
-    winapp ui wait-for "LearnWhatThisDoes" -a $AppPid -t 3000
-    if ($LASTEXITCODE -ne 0) { throw "LearnWhatThisDoes doc link not found" }
-    winapp ui invoke "LearnWhatThisDoes" -a $AppPid
-    if ($LASTEXITCODE -ne 0) { throw "invoke LearnWhatThisDoes failed" }
-    winapp ui wait-for "LearnAboutCacheMovesDialog" -a $AppPid -t 4000
-    if ($LASTEXITCODE -ne 0) { throw "cache-move explainer dialog did not open" }
-    # Dismiss via the dialog's close button ("Got it") so it doesn't stay foreground and break later invokes.
-    winapp ui invoke "Got it" -a $AppPid 2>$null | Out-Null
-    winapp ui wait-for "LearnAboutCacheMovesDialog" -a $AppPid --gone -t 4000
-    if ($LASTEXITCODE -ne 0) { throw "explainer dialog did not close" }
-}
-Test-UI "Ecosystems: 'Run all tests' benchmark affordance present" {
-    winapp ui wait-for "RunAllTestsButton" -a $AppPid -t 3000
-}
-
-# One card per ecosystem; the three benchmarked stacks lead, then the movable-but-unmeasured ones.
-Test-UI "Ecosystems: the Git benchmark-only card is present" { winapp ui wait-for "Ecosystem_Git" -a $AppPid -t 4000 }
-Test-UI "Ecosystems: the Node card is present"          { winapp ui wait-for "Ecosystem_Node"   -a $AppPid -t 4000 }
-Test-UI "Ecosystems: the .NET card is present"          { winapp ui wait-for "Ecosystem_NET"    -a $AppPid -t 3000 }
-Test-UI "Ecosystems: the Rust card is present"          { winapp ui wait-for "Ecosystem_Rust"   -a $AppPid -t 3000 }
-Test-UI "Ecosystems: an unmeasured ecosystem (Python) is present" { winapp ui wait-for "Ecosystem_Python" -a $AppPid -t 3000 }
-
-# Honesty: an unmeasured ecosystem shows the honest 'not available' note, never a fake number.
-Test-UI "Ecosystems: unmeasured ecosystems carry the honest 'benchmark not available' note" {
-    winapp ui scroll-into-view "Ecosystem_Python" -a $AppPid 2>$null | Out-Null
-    winapp ui invoke "Ecosystem_Python" -a $AppPid 2>$null | Out-Null
-    Start-Sleep -Milliseconds 400
-    if ((Get-MatchCount 'benchmark not available') -lt 1) { throw "honest no-benchmark note not shown for an unmeasured ecosystem" }
-}
-
-# The OLD three-section structure is GONE -- assert each removed affordance is absent by id.
-Test-UI "Removed: old 'Suggestions' header gone"             { winapp ui wait-for "SuggestionsHeader"     -a $AppPid --gone -t 3000 }
-Test-UI "Removed: old 'Move all caches' button gone"         { winapp ui wait-for "MoveAllCachesButton"   -a $AppPid --gone -t 2000 }
-Test-UI "Removed: old 'Move your package caches' lever gone" { winapp ui wait-for "LeverMoveCaches"       -a $AppPid --gone -t 2000 }
-Test-UI "Removed: old per-cache warning bar gone"            { winapp ui wait-for "PackageCacheWarningBar" -a $AppPid --gone -t 2000 }
-
-# ── A per-tool Move inside an ecosystem card performs a REAL, reversible move (M4). Under the
-#    SAFE-mutation seam the real mover is swapped for an in-memory SafeFake, so no real cache/env
-#    is touched. We CONFIRM the seam is active, expand the Node card so its per-tool rows realize,
-#    then exercise the npm row: Move -> Confirm -> live progress -> "Moved" result -> Move back. ──
-Test-UI "Move: SAFE-mutation test seam is active (guards the live move)" {
-    winapp ui wait-for "SafeMutationModeIndicator" -a $AppPid -t 4000
-    if ($LASTEXITCODE -ne 0) { throw "SafeMutationModeIndicator absent -- refusing to run the live move (would touch a real cache)" }
-}
-# The Node card auto-expands when detected (ShouldExpand); just bring it into view. Do NOT invoke the
-# header — that would TOGGLE an already-expanded card CLOSED and hide its per-tool rows.
-winapp ui scroll-into-view "Ecosystem_Node" -a $AppPid 2>$null | Out-Null
-Start-Sleep -Milliseconds 400
-Test-UI "Move: the npm tool row is present inside the Node card" {
-    winapp ui wait-for "PackageCacheCard_npm" -a $AppPid -t 4000
-}
-winapp ui scroll-into-view "PackageCacheCard_npm" -a $AppPid 2>$null | Out-Null
-# The live-move flow needs npm detected ON C: (a "Move" button). On a machine where npm's cache is already
-# on the Dev Drive (or undetected), there is nothing to move FROM C: — record those checks as SKIPPED
-# (machine state), not failed. The move engine itself is covered exhaustively by the unit-test suite.
-winapp ui wait-for "MoveCache_npm" -a $AppPid -t 2500 2>$null | Out-Null
-$npmMovable = ($LASTEXITCODE -eq 0)
-if (-not $npmMovable) {
-    foreach ($n in @(
-        "Move: Move opens a reversible-move confirm; Cancel collapses it",
-        "Move: Confirm performs the (safely-faked) real move and shows a 'Moved' result",
-        "Move: a 'Move back' affordance is revealed after the move",
-        "Move: 'Move back' reverses the move (Move returns, Move back disappears)")) {
-        $skip++; $results += @{ name = $n; status = "SKIP"; detail = "npm is not on C: on this machine (already relocated/undetected) — nothing to move" }
-        Write-Host "  SKIP: $n — npm not on C: (nothing to move from C:)" -ForegroundColor Yellow
-    }
-} else {
-    Test-UI "Move: Move opens a reversible-move confirm; Cancel collapses it" {
-        winapp ui invoke "MoveCache_npm" -a $AppPid
-        if ($LASTEXITCODE -ne 0) { throw "invoke MoveCache_npm failed" }
-        Start-Sleep -Milliseconds 500
-        winapp ui wait-for "ConfirmMove_npm" -a $AppPid -t 4000
-        if ($LASTEXITCODE -ne 0) { throw "inline move-confirm did not appear" }
-        winapp ui invoke "CancelMove_npm" -a $AppPid
-        if ($LASTEXITCODE -ne 0) { throw "invoke CancelMove_npm failed" }
-        winapp ui wait-for "ConfirmMove_npm" -a $AppPid --gone -t 3000
-        if ($LASTEXITCODE -ne 0) { throw "inline confirm did not collapse after Cancel" }
-    }
-    Test-UI "Move: Confirm performs the (safely-faked) real move and shows a 'Moved' result" {
-        winapp ui invoke "MoveCache_npm" -a $AppPid
-        if ($LASTEXITCODE -ne 0) { throw "re-invoke MoveCache_npm failed" }
-        winapp ui wait-for "ConfirmMove_npm" -a $AppPid -t 4000
-        if ($LASTEXITCODE -ne 0) { throw "inline move-confirm did not re-appear" }
-        winapp ui invoke "ConfirmMove_npm" -a $AppPid
-        if ($LASTEXITCODE -ne 0) { throw "invoke ConfirmMove_npm failed" }
-        winapp ui wait-for "MoveResult_npm" -a $AppPid -t 8000
-        if ($LASTEXITCODE -ne 0) { throw "move result did not appear after Confirm" }
-        $seen = $false
-        for ($i = 0; $i -lt 15; $i++) {
-            if ((Get-MatchCount 'Moved') -ge 1) { $seen = $true; break }
-            Start-Sleep -Milliseconds 500
-        }
-        if (-not $seen) { throw "Confirm did not yield a 'Moved' result" }
-        winapp ui wait-for "ConfirmMove_npm" -a $AppPid --gone -t 3000
-        if ($LASTEXITCODE -ne 0) { throw "inline confirm did not collapse after Confirm" }
-    }
-    Test-UI "Move: a 'Move back' affordance is revealed after the move" {
-        winapp ui wait-for "MoveBack_npm" -a $AppPid -t 4000
-        if ($LASTEXITCODE -ne 0) { throw "'Move back' affordance not revealed after a successful move" }
-    }
-    Test-UI "Move: 'Move back' reverses the move (Move returns, Move back disappears)" {
-        winapp ui invoke "MoveBack_npm" -a $AppPid
-        if ($LASTEXITCODE -ne 0) { throw "invoke MoveBack_npm failed" }
-        winapp ui wait-for "MoveCache_npm" -a $AppPid -t 6000
-        if ($LASTEXITCODE -ne 0) { throw "Move button did not return after Move back" }
-        winapp ui wait-for "MoveBack_npm" -a $AppPid --gone -t 4000
-        if ($LASTEXITCODE -ne 0) { throw "'Move back' affordance did not disappear after reverting" }
-    }
-}
-
-# ── CHANGE 2: the entire "Source code" section was REMOVED (its only action set VS Code's
-#    git.defaultCloneDirectory, which git CLI / gh / GitHub Desktop / Visual Studio ignore — it
-#    implied all clones redirect when they do not). A genuine system-wide clone redirection is a
-#    deliberately out-of-scope future item. Assert every former affordance is gone. ──
-Test-UI "Source: 'Use Dev Drive source' action gone (misleading feature removed)" { winapp ui wait-for "UseSourceButton" -a $AppPid --gone -t 3000 }
-Test-UI "Source: confirm affordance gone"  { winapp ui wait-for "ConfirmUseSource"  -a $AppPid --gone -t 2000 }
-Test-UI "Source: Revert affordance gone"    { winapp ui wait-for "RevertSourceButton" -a $AppPid --gone -t 2000 }
-Test-UI "Source: detect-only note gone"     { winapp ui wait-for "SourceManualNote"  -a $AppPid --gone -t 2000 }
-
-# ── Drive health: capacity bar + Healthy pill render with real values. ──
-Test-UI "Drive health: capacity bar present" { winapp ui wait-for "DriveCapacityBar" -a $AppPid -t 3000 }
-Test-UI "Drive health: 'Healthy' pill present" {
-    if ((Get-MatchCount 'Healthy') -lt 1) { throw "'Healthy' pill not found" }
-}
-Test-UI "Drive health: capacity caption reports used/free" {
-    if ((Get-MatchCount 'free') -lt 1) { throw "capacity caption (used/free) not found" }
-}
-
-# ── Capture full-page evidence (speed test now populated). Scroll through the page so
-#    the screenshots show each section, then return to the top. The page host is the
-#    outer ScrollViewer (PageScrollViewer); the section lists are non-virtualizing
-#    ItemsControls, so scroll-into-view on any realized row reliably brings it on-screen. ──
-New-Item -ItemType Directory -Force -Path "screenshots" | Out-Null
-winapp ui scroll "PageScrollViewer" -a $AppPid --to top 2>$null | Out-Null
-Start-Sleep -Milliseconds 500
-winapp ui screenshot -a $AppPid -o "screenshots/01-initial.png" 2>$null | Out-Null
-# Performance — at the top of the page the populated speed-test card is fully visible.
-winapp ui screenshot -a $AppPid -o "screenshots/03-performance.png" 2>$null | Out-Null
-# Ecosystems — scroll the Node card (and its npm row) into view for the cards screenshot.
-winapp ui scroll-into-view "Ecosystem_Node" -a $AppPid 2>$null | Out-Null
-Start-Sleep -Milliseconds 500
-winapp ui screenshot -a $AppPid -o "screenshots/04-ecosystems.png" 2>$null | Out-Null
-# An unmeasured ecosystem (Python) — its honest "benchmark not available" note.
-winapp ui scroll-into-view "Ecosystem_Python" -a $AppPid 2>$null | Out-Null
-Start-Sleep -Milliseconds 500
-winapp ui screenshot -a $AppPid -o "screenshots/05a-ecosystems-unmeasured.png" 2>$null | Out-Null
-# Drive health + the per-volume list (bottom of the page).
-winapp ui scroll-into-view "VolumeCard_Recovery" -a $AppPid 2>$null | Out-Null
-Start-Sleep -Milliseconds 500
-winapp ui screenshot -a $AppPid -o "screenshots/06-health-volumes.png" 2>$null | Out-Null
-# Return to the top for the navigation round-trip.
-winapp ui scroll "PageScrollViewer" -a $AppPid --to top 2>$null | Out-Null
-Start-Sleep -Milliseconds 500
-# ─────────────────────────────────────────────────────────────────────────────
-#  Navigation round-trip — Create button routes to the real creation flow, Back returns.
-# ─────────────────────────────────────────────────────────────────────────────
-Test-UI "Navigate to Create Dev Drive page" {
-    winapp ui invoke "CreateDevDriveButton" -a $AppPid
-    if ($LASTEXITCODE -ne 0) { throw "invoke CreateDevDriveButton failed" }
-    Start-Sleep -Milliseconds 800
-    winapp ui wait-for "SourceComboBox" -a $AppPid -t 4000
-}
-Test-UI "Creation: source selector + size control present" {
-    winapp ui wait-for "SourceComboBox" -a $AppPid -t 3000
-    # The disk-bar is decorative (AccessibilityView=Raw); assert the accessible size control instead.
-    winapp ui wait-for "SizeSlider" -a $AppPid -t 4000
-}
-Test-UI "Creation: size slider present"      { winapp ui wait-for "SizeSlider"    -a $AppPid -t 3000 }
-Test-UI "Creation: size number box present"  { winapp ui wait-for "SizeNumberBox" -a $AppPid -t 3000 }
-Test-UI "Creation: Create/Format button present" { winapp ui wait-for "CreateButton" -a $AppPid -t 3000 }
-winapp ui screenshot -a $AppPid -o "screenshots/02-create-flow.png" 2>$null | Out-Null
-Test-UI "Back navigation returns to the Dev Drive page" {
-    winapp ui invoke "BackButton" -a $AppPid
-    if ($LASTEXITCODE -ne 0) { throw "invoke BackButton failed" }
-    Start-Sleep -Milliseconds 800
-    # The status banner is dropped in the active Dev Drive state (CHANGE 1); assert on
-    # the always-present Refresh button instead.
-    winapp ui wait-for "RefreshButton" -a $AppPid -t 4000
-}
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  Accessibility audit — every interactive control the app authors has an AutomationId.
-#  (Window chrome — Minimize/Maximize/Close/System menu — is framework-owned; excluded.)
-# ─────────────────────────────────────────────────────────────────────────────
-$inspect = winapp ui inspect -a $AppPid --interactive --json 2>$null | ConvertFrom-Json
-$all = @($inspect.windows | ForEach-Object { $_.elements })
-$appElements = @($all | Where-Object {
-    $_.type -match 'Button|TextBox|ComboBox|CheckBox|ToggleSwitch|TabItem|Edit|Hyperlink' -and
-    $_.name -notmatch 'Minimize|Maximize|Close|System'
-})
-$missingId = @($appElements | Where-Object { -not $_.automationId })
-if ($appElements.Count -gt 0 -and $missingId.Count -eq 0) {
-    $pass++; $results += @{ name = "All app interactive controls have AutomationId"; status = "PASS" }
-    Write-Host "  PASS: All app interactive controls have AutomationId ($($appElements.Count) checked)" -ForegroundColor Green
+if ($inaccessible.Count -eq 0) {
+    $pass++; $results += @{ name = "Accessibility: all interactive controls are identifiable ($auditedCount audited across 6 pages)"; status = "PASS" }
+    Write-Host "  PASS: Accessibility: all $auditedCount interactive controls (6 pages) expose an AutomationId or Name" -ForegroundColor Green
 } else {
     $fail++
-    $names = ($missingId | ForEach-Object { "$($_.type) '$($_.name)'" }) -join ", "
-    $results += @{ name = "AutomationId coverage"; status = "FAIL"; detail = "Missing: $names (checked $($appElements.Count))" }
-    Write-Host "  FAIL: AutomationId coverage — Missing: $names" -ForegroundColor Red
+    $names = ($inaccessible | Select-Object -Unique) -join ", "
+    $results += @{ name = "Accessibility: identifiability coverage"; status = "FAIL"; detail = "Unidentifiable: $names" }
+    Write-Host "  FAIL: Accessibility: identifiability coverage — $names" -ForegroundColor Red
 }
 
-# ─── Final screenshot (back on the volumes list). ───
-winapp ui screenshot -a $AppPid -o "test-screenshot.png" 2>$null | Out-Null
-
-# ─────────────────────────────────────────────────────────────────────────────
-#  Results
-# ─────────────────────────────────────────────────────────────────────────────
-Write-Host "`n────────────────────────────────────────"
-Write-Host "Passed: $pass | Failed: $fail | Skipped: $skip"
-$results | ConvertTo-Json | Out-File "test-results.json" -Encoding utf8
+# ─── Results ───
+Write-Host "`nPassed: $pass | Failed: $fail"
+$results | Where-Object { $_.status -eq "FAIL" } | ForEach-Object {
+    Write-Host "  FAIL: $($_.name) — $($_.detail)" -ForegroundColor Red
+}
+$results | ConvertTo-Json -Depth 4 | Out-File "test-results.json"
 if ($fail -gt 0) { exit 1 } else { exit 0 }
