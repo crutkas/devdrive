@@ -45,7 +45,7 @@
                     IsOpen="True"
                     Message="{x:Bind ViewModel.GuardrailsMessage, Mode=OneTime}"
                     Severity="Informational"
-                    Title="Guarded preview" />
+                    Title="Guarded creation" />
 
                 <ProgressBar
                     AutomationProperties.AutomationId="CreationProgress"
@@ -286,31 +286,6 @@
                             TextWrapping="Wrap" />
                     </StackPanel>
 
-                    <!--  Gated destructive action: collapsed unless a self-hosting build enables the
-                          ResizeFeatureGate and a real preview passes.  -->
-                    <Button
-                        HorizontalAlignment="Stretch"
-                        HorizontalContentAlignment="Left"
-                        AutomationProperties.AutomationId="ApplyRealResizeButton"
-                        Command="{x:Bind ViewModel.ApplyRealResizeCommand}"
-                        Visibility="{x:Bind local:CreateDevDrivePage.BoolToVisibility(ViewModel.CanApplyRealResize), Mode=OneWay}">
-                        <StackPanel Spacing="2">
-                            <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Apply resize (repartition this drive)" />
-                            <TextBlock
-                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                Style="{StaticResource CaptionTextBlockStyle}"
-                                Text="Really shrinks the selected volume and creates the Dev Drive. Not trivially reversible."
-                                TextWrapping="Wrap" />
-                        </StackPanel>
-                    </Button>
-
-                    <Button
-                        HorizontalAlignment="Left"
-                        AutomationProperties.AutomationId="ChangeCreateOptionsButton"
-                        Command="{x:Bind ViewModel.ReturnToFormCommand}"
-                        Content="Change options"
-                        Visibility="{x:Bind local:CreateDevDrivePage.BoolToVisibility(ViewModel.CanReturnToForm), Mode=OneWay}" />
-
                     <StackPanel
                         Spacing="8"
                         Visibility="{x:Bind local:CreateDevDrivePage.BoolToVisibility(ViewModel.HasUsableDevDrive), Mode=OneWay}">
@@ -348,6 +323,7 @@
                         AutomationProperties.AutomationId="GoToManagementButton"
                         Command="{x:Bind ViewModel.BackToManagementCommand}"
                         Content="Done"
+                        IsEnabled="{x:Bind local:CreateDevDrivePage.Not(ViewModel.IsBusy), Mode=OneWay}"
                         Style="{StaticResource AccentButtonStyle}" />
                 </StackPanel>
             </Border>

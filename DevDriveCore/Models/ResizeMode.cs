@@ -7,8 +7,8 @@ namespace DevDriveCore.Models;
 /// </summary>
 /// <remarks>
 /// <b>SAFETY:</b> the broker defaults every code path to <see cref="WhatIf"/>. The only way to reach
-/// <see cref="Execute"/> is to pass it deliberately; the app keeps it behind a default-off feature flag
-/// plus an explicit user confirmation plus UAC elevation, so the prototype never one-click repartitions.
+/// <see cref="Execute"/> is to pass it deliberately after explicit user confirmation and UAC elevation.
+/// The elevated helper verifies and binds live disk identity before any mutation.
 /// </remarks>
 public enum ResizeMode
 {

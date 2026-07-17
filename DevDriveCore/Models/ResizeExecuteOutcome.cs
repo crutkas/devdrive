@@ -22,6 +22,9 @@ public sealed record ResizeExecuteOutcome
     /// </summary>
     public bool Executed { get; init; }
 
+    /// <summary>True when disk mutation may have started but the final layout could not be verified.</summary>
+    public bool StateUnknown { get; init; }
+
     /// <summary>Human-readable result or failure message.</summary>
     public string Message { get; init; } = string.Empty;
 
@@ -33,6 +36,18 @@ public sealed record ResizeExecuteOutcome
 
     /// <summary>Size in bytes of the Dev Drive that was (or would have been) created.</summary>
     public ulong DevDriveBytes { get; init; }
+
+    /// <summary>Disk number read back for the created Dev Drive.</summary>
+    public int? DiskNumber { get; init; }
+
+    /// <summary>Partition number read back for the created Dev Drive.</summary>
+    public int? PartitionNumber { get; init; }
+
+    /// <summary>Filesystem read back for the created Dev Drive.</summary>
+    public string FileSystem { get; init; } = string.Empty;
+
+    /// <summary>True only when <c>fsutil devdrv query</c> verified the final volume.</summary>
+    public bool IsDevDrive { get; init; }
 
     /// <summary>Ordered, human-readable steps that completed (or that would run, in a gated/dry path).</summary>
     public IReadOnlyList<string> CompletedSteps { get; init; } = Array.Empty<string>();

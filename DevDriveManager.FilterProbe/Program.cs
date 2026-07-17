@@ -7,28 +7,34 @@
 //   query  <driveLetter> <outputJsonPath>                                     READ-ONLY  fsutil devdrv query
 //   resize --whatif  --plan <base64> --out <path> [--allowed-root <dir>]      READ-ONLY  feasibility of a shrink
 //   resize --execute --plan <base64> --out <path> [--allowed-root <dir>]      DESTRUCTIVE shrink → carve → format
+//   vhd --create|--revert --plan <base64> --out <path> [--allowed-root <dir>] PRIVILEGED VHDX transaction
 //
 // SAFETY MODEL
 //  * `query` and `resize --whatif` touch NOTHING — they only run Get-* / fsutil read queries.
-//  * `resize --execute` is the ONLY destructive path and must be requested explicitly AND authorized:
-//    the plan must carry ExecuteAuthorized=true (set only by the app's gated VolumeResizer.ExecuteAsync),
+//  * `resize --execute` is the existing-volume destructive path and must be requested explicitly and authorized:
+//    the plan must carry ExecuteAuthorized=true (set only by VolumeResizer.ExecuteAsync after confirmation),
 //    so a bare command-line `--execute` against a preview/hand-written plan is refused. Before it runs,
-//    ResizeGuard re-validates the plan against a fresh read-only disk snapshot (defence in depth): a
-//    crafted/garbage plan is rejected and NOTHING is touched. As an extra valve, setting
+//    ResizeGuard validates a fresh read-only disk snapshot, binds that exact identity inside this elevated
+//    process, and revalidates it immediately before mutation (defence in depth): a crafted/garbage plan is
+//    rejected and NOTHING is touched. As an extra valve, setting
 //    DDM_RESIZE_DRYRUN=1 makes --execute build the real commands but NOT run them.
-//  * F3 IPC hardening: the resize PLAN arrives base64-encoded ON THE COMMAND LINE — there is no plan
+//  * `vhd --create` also requires authorization. It refuses existing/reparse-point paths, creates and
+//    attaches only that new VHDX, then binds Get-DiskImage to the native physical disk number before
+//    requiring RAW/empty/online/writable/expected-size state. A confirmed failure detaches and deletes
+//    only the new VHDX; uncertain state is reported rather than retried or hidden.
+//  * F3 IPC hardening: mutation plans arrive base64-encoded ON THE COMMAND LINE — there is no plan
 //    FILE, eliminating the plan-file TOCTOU. Only the OUTPUT is a file (runas/ShellExecute can't redirect
-//    stdout). The output path is canonicalized (Path.GetFullPath), must be a `ddm-resize-*.json` file,
+//    stdout). The output path is canonicalized (Path.GetFullPath), must use the verb-specific app prefix,
 //    must NOT be a reparse point (junction/symlink), and must sit DIRECTLY under an app-owned root. The
 //    broker passes the USER's temp dir via `--allowed-root` so over-the-shoulder elevation works (the
 //    elevated child's %TEMP% is the admin's, not the user's). RESIDUAL LIMITATION: a hijacked caller can
 //    pass an arbitrary `--allowed-root`, so the output-path root check is advisory; the real firewall is
-//    ResizeGuard + ExecuteAuthorized + UAC, and the output is only ever a small JSON result object.
-//  * fsutil and powershell are resolved fully-qualified from System32 (never bare PATH), because this
-//    helper runs ELEVATED and a PATH-hijack would otherwise run as administrator.
-//  * F7: once --execute has begun mutating, a timeout does NOT kill the destructive child (aborting a
-//    shrink/format mid-flight can corrupt the disk); the helper re-queries final disk state and reports
-//    "state unknown — check Disk Management" instead of a false "Nothing was changed".
+//    live guards + ExecuteAuthorized + UAC, and the output is only ever a small JSON result object.
+//  * fsutil and powershell resolve fully-qualified from System32. Generated scripts import the inbox
+//    Storage module from its absolute System32 path and use module-qualified cmdlets.
+//  * F7: once storage mutation begins, a timeout does NOT kill the child (aborting a shrink/format
+//    mid-flight can corrupt state); the helper reports "state unknown — check Disk Management" instead
+//    of a false "Nothing was changed".
 //
 // Exit codes: 0 = result written; 2 = bad arguments / disallowed path; 3 = failed to write the output file.
 
@@ -37,6 +43,7 @@ using System.Text;
 using System.Text.Json;
 using DevDriveCore;
 using DevDriveCore.Models;
+using DevDriveCore.Platform;
 using DevDriveCore.Services;
 
 return Dispatch(args);
@@ -47,7 +54,7 @@ static int Dispatch(string[] args)
 {
     if (args.Length == 0)
     {
-        Console.Error.WriteLine("usage: DevDriveManager.FilterProbe <query|resize> ...");
+        Console.Error.WriteLine("usage: DevDriveManager.FilterProbe <query|resize|vhd> ...");
         return 2;
     }
 
@@ -62,6 +69,9 @@ static int Dispatch(string[] args)
         case "resize":
             return RunResize(args);
 
+        case "vhd":
+            return RunVhd(args);
+
         default:
             // Back-compat: the legacy form was "<driveLetter> <outputJsonPath>" (== query).
             if (NormalizeDriveLetter(args[0]) is not null && args.Length >= 2)
@@ -69,7 +79,7 @@ static int Dispatch(string[] args)
                 return RunQuery(args[0], args[1]);
             }
 
-            return BadArgs("<query|resize> ...");
+            return BadArgs("<query|resize|vhd> ...");
     }
 }
 
@@ -174,8 +184,8 @@ static int RunResize(string[] args)
         return WriteJson(outputPath, failure) ? 0 : 3;
     }
 
-    // F3: --execute must be authorized by the gated UI path (VolumeResizer.ExecuteAsync sets the flag on
-    // the plan it serializes). A bare command-line --execute against a preview/hand-written plan is refused
+    // F3: --execute must be authorized by the gated UI path (VolumeResizer sets the flag on
+    // the plan it serializes). A bare command-line --execute against a hand-written plan is refused
     // here BEFORE any disk query. The read-only --whatif feasibility never needs authorization.
     if (execute && !plan.ExecuteAuthorized)
     {
@@ -193,7 +203,11 @@ static int RunResize(string[] args)
 
     // Build a fresh READ-ONLY snapshot of the source volume/partition/disk, then run the guards.
     DiskLayoutSnapshot snapshot = QueryDiskLayout(char.ToUpperInvariant(plan.SourceVolumeLetter));
-    ResizeFeasibility feasibility = ResizeGuard.Evaluate(plan, snapshot);
+    bool hasBoundIdentity = ResizeGuard.HasExpectedPreviewIdentity(plan);
+    ResizePlan verificationPlan = execute && !hasBoundIdentity
+        ? plan with { ExecuteAuthorized = false }
+        : plan;
+    ResizeFeasibility feasibility = ResizeGuard.Evaluate(verificationPlan, snapshot);
 
     if (!execute)
     {
@@ -201,12 +215,482 @@ static int RunResize(string[] args)
         return WriteJson(outputPath, feasibility) ? 0 : 3;
     }
 
-    ResizeExecuteOutcome outcome = ExecuteResize(plan, snapshot, feasibility);
+    ResizePlan executionPlan = plan;
+    if (feasibility.CanProceed && !hasBoundIdentity)
+    {
+        // The normal one-confirmation path arrives without a separate preview identity. Bind the exact
+        // live snapshot here, inside the same elevated helper, then run the authorized guard again.
+        executionPlan = ResizeGuard.BindForExecution(plan, feasibility);
+        feasibility = ResizeGuard.Evaluate(executionPlan, snapshot);
+    }
+
+    ResizeExecuteOutcome outcome = ExecuteResize(executionPlan, snapshot, feasibility);
     return WriteJson(outputPath, outcome) ? 0 : 3;
 }
 
 // Returns the NEXT arg (advancing the index) for a "--flag value" pair, or null when value is missing.
 static string? NextArg(string[] args, ref int i) => i + 1 < args.Length ? args[++i] : null;
+
+// ---- VHDX verb -------------------------------------------------------------------------------------
+
+static int RunVhd(string[] args)
+{
+    string? mode = null;
+    string? planB64 = null;
+    string? rawOutputPath = null;
+    var extraRoots = new List<string>();
+
+    for (int i = 1; i < args.Length; i++)
+    {
+        switch (args[i].Trim().ToLowerInvariant())
+        {
+            case "--create":
+                mode = "--create";
+                break;
+            case "--revert":
+                mode = "--revert";
+                break;
+            case "--plan":
+                planB64 = NextArg(args, ref i);
+                break;
+            case "--out":
+                rawOutputPath = NextArg(args, ref i);
+                break;
+            case "--allowed-root":
+                string? root = NextArg(args, ref i);
+                if (!string.IsNullOrWhiteSpace(root))
+                {
+                    extraRoots.Add(root);
+                }
+
+                break;
+        }
+    }
+
+    if (mode is null || string.IsNullOrWhiteSpace(planB64) || string.IsNullOrWhiteSpace(rawOutputPath))
+    {
+        return BadArgs("vhd <--create|--revert> --plan <base64> --out <outputJsonPath> [--allowed-root <dir>]");
+    }
+
+    if (!TryCanonicalizeAppOwnedPath(rawOutputPath, "ddm-vhd-", out string outputPath, extraRoots))
+    {
+        return 2;
+    }
+
+    VhdProvisionResult outcome;
+    if (mode == "--create")
+    {
+        VhdProvisionPlan? plan = TryDecodeJson<VhdProvisionPlan>(planB64);
+        outcome = plan is null
+            ? VhdFailure("Couldn't decode or parse the VHDX creation plan. Nothing was changed.")
+            : ExecuteVhdCreate(plan);
+    }
+    else
+    {
+        VhdRevertPlan? plan = TryDecodeJson<VhdRevertPlan>(planB64);
+        outcome = plan is null
+            ? VhdFailure("Couldn't decode or parse the VHDX recovery plan. Nothing was changed.")
+            : ExecuteVhdRevert(plan);
+    }
+
+    return WriteJson(outputPath, outcome) ? 0 : 3;
+}
+
+static VhdProvisionResult ExecuteVhdCreate(VhdProvisionPlan plan)
+{
+    if (!plan.ExecuteAuthorized)
+    {
+        return VhdFailure(
+            "Refusing VHDX creation: this plan is not authorized for execution. Nothing was changed.",
+            plan.FilePath,
+            plan.DriveLetter);
+    }
+
+    if (!TryValidateVhdCreatePlan(plan, out string fullPath, out string validationError))
+    {
+        return VhdFailure($"{validationError} Nothing was changed.", plan.FilePath, plan.DriveLetter);
+    }
+
+    plan = plan with
+    {
+        FilePath = fullPath,
+        DriveLetter = char.ToUpperInvariant(plan.DriveLetter),
+    };
+
+    if (IsVhdDryRun())
+    {
+        string dryRunScript = VhdPowerShellScript.BuildFinalize(plan, expectedDiskNumber: 0);
+        (int parseExitCode, string _, string parseError) = ValidatePowerShellSyntax(dryRunScript);
+        if (parseExitCode != 0)
+        {
+            return VhdFailure(
+                $"Dry run could not parse the generated VHDX command sequence: {Trim(parseError)} Nothing was changed.",
+                fullPath,
+                plan.DriveLetter);
+        }
+
+        return VhdFailure(
+            "Dry run (DDM_VHD_DRYRUN=1): the complete VHDX command sequence was built but not executed. Nothing was changed.",
+            fullPath,
+            plan.DriveLetter);
+    }
+
+    (int capabilityExitCode, string capabilityOutput, string capabilityError) =
+        RunPowerShell(VhdPowerShellScript.BuildCapabilityProbe());
+    if (capabilityExitCode != 0)
+    {
+        return VhdFailure(
+            $"Couldn't verify Dev Drive formatting support: {Trim(capabilityError)} Nothing was changed.",
+            fullPath,
+            plan.DriveLetter);
+    }
+
+    if (!VhdPowerShellScript.TryParseCapability(capabilityOutput, out VhdCapabilityState capability))
+    {
+        return VhdFailure(
+            "Dev Drive formatting support returned an invalid response. Nothing was changed.",
+            fullPath,
+            plan.DriveLetter);
+    }
+
+    if (!capability.Supported)
+    {
+        return VhdFailure(
+            $"This Windows installation cannot format Dev Drives (build {capability.Build}.{capability.Revision}, DevDrive parameter present: {capability.HasDevDriveParameter}). Nothing was changed.",
+            fullPath,
+            plan.DriveLetter);
+    }
+
+    var provisioner = new VhdProvisioner(
+        new NativeVhdApi(),
+        new SystemFileSystem(),
+        new InMemoryReversibilityStore());
+
+    VhdProvisionResult surfaced;
+    try
+    {
+        surfaced = provisioner.ProvisionAsync(plan).GetAwaiter().GetResult();
+    }
+    catch (VhdProvisioningException ex)
+    {
+        if (ex.Stage == VhdProvisioningStage.Create)
+        {
+            return new VhdProvisionResult
+            {
+                Success = false,
+                Executed = !ex.RollbackConfirmed,
+                StateUnknown = !ex.RollbackConfirmed,
+                RolledBack = ex.RollbackConfirmed,
+                Message = ex.RollbackConfirmed
+                    ? $"{ex.Message} Nothing was attached."
+                    : $"{ex.Message} Cleanup could not be confirmed. Check the VHDX path and Disk Management before retrying.",
+                FilePath = fullPath,
+                DriveLetter = plan.DriveLetter,
+            };
+        }
+
+        return new VhdProvisionResult
+        {
+            Success = false,
+            Executed = !ex.RollbackConfirmed,
+            StateUnknown = !ex.RollbackConfirmed,
+            RolledBack = ex.RollbackConfirmed,
+            Message = ex.RollbackConfirmed
+                ? ex.Message
+                : $"{ex.Message} Check Disk Management before retrying.",
+            FilePath = fullPath,
+            DriveLetter = plan.DriveLetter,
+        };
+    }
+    catch (Exception ex)
+    {
+        bool remains = File.Exists(fullPath);
+        return new VhdProvisionResult
+        {
+            Success = false,
+            Executed = remains,
+            StateUnknown = remains,
+            RolledBack = !remains,
+            Message = remains
+                ? $"VHDX creation failed and cleanup could not be confirmed ({ex.Message}). Check Disk Management before retrying."
+                : $"VHDX creation failed and no backing file remains: {ex.Message}",
+            FilePath = fullPath,
+            DriveLetter = plan.DriveLetter,
+        };
+    }
+
+    if (surfaced.DiskNumber is not int diskNumber)
+    {
+        return RollBackVhd(
+            provisioner,
+            surfaced,
+            "Windows attached the VHDX but did not return a usable physical disk number.");
+    }
+
+    string script;
+    try
+    {
+        script = VhdPowerShellScript.BuildFinalize(plan, diskNumber);
+    }
+    catch (Exception ex)
+    {
+        return RollBackVhd(provisioner, surfaced, $"The format plan could not be built: {ex.Message}");
+    }
+
+    (int exitCode, string stdout, string stderr) =
+        RunPowerShell(script, killOnTimeout: false, timeoutMs: 600_000);
+
+    if (exitCode == HelperExit.TimedOutNotKilled)
+    {
+        return surfaced with
+        {
+            Success = false,
+            Executed = true,
+            StateUnknown = true,
+            Message =
+                "VHDX formatting did not confirm completion and was not cancelled. " +
+                "Check Disk Management before retrying.",
+            DriveLetter = plan.DriveLetter,
+        };
+    }
+
+    if (exitCode != 0)
+    {
+        string detail = Trim(VhdPowerShellScript.RemoveMutationMarker(stderr));
+        bool mutationStarted = VhdPowerShellScript.MutationMayHaveStarted(exitCode, stderr);
+        return RollBackVhd(
+            provisioner,
+            surfaced,
+            mutationStarted
+                ? $"VHDX initialization or formatting failed after disk changes began: {detail}"
+                : $"The live VHDX preflight refused the operation: {detail}");
+    }
+
+    if (!VhdPowerShellScript.TryParseFinalState(stdout, out VhdFinalState finalState) ||
+        finalState.DriveLetter != plan.DriveLetter)
+    {
+        return surfaced with
+        {
+            Success = false,
+            Executed = true,
+            StateUnknown = true,
+            Message =
+                "Windows completed the VHDX command sequence without a trustworthy matching final-state readback. " +
+                "Check Disk Management before retrying.",
+            DriveLetter = plan.DriveLetter,
+        };
+    }
+
+    return surfaced with
+    {
+        Success = true,
+        Executed = true,
+        StateUnknown = false,
+        RolledBack = false,
+        Message =
+            $"Created and attached the VHDX, then initialized and formatted {finalState.DriveLetter}: " +
+            $"as a {ByteSizeFormatter.Format(finalState.SizeBytes)} ReFS Dev Drive.",
+        DriveLetter = finalState.DriveLetter,
+        SizeBytes = finalState.SizeBytes,
+        FileSystem = finalState.FileSystem,
+    };
+}
+
+static VhdProvisionResult ExecuteVhdRevert(VhdRevertPlan plan)
+{
+    if (!plan.ExecuteAuthorized)
+    {
+        return VhdFailure(
+            "Refusing VHDX recovery: this plan is not authorized for execution. Nothing was changed.",
+            plan.FilePath);
+    }
+
+    if (!TryNormalizeVhdPath(plan.FilePath, out string fullPath, out string validationError))
+    {
+        return VhdFailure($"{validationError} Nothing was changed.", plan.FilePath);
+    }
+
+    if (!File.Exists(fullPath))
+    {
+        return new VhdProvisionResult
+        {
+            Success = true,
+            Executed = false,
+            Message = "The recorded VHDX is already absent.",
+            FilePath = fullPath,
+        };
+    }
+
+    var store = new InMemoryReversibilityStore();
+    var provisioner = new VhdProvisioner(new NativeVhdApi(), new SystemFileSystem(), store);
+    var entry = new ReversibilityEntry
+    {
+        Id = VhdProvisioner.ReversibilityId(fullPath),
+        Kind = ReversibilityKinds.VhdProvision,
+        TargetPath = fullPath,
+    };
+    store.Save(entry);
+
+    try
+    {
+        provisioner.RevertAsync(entry).GetAwaiter().GetResult();
+        return new VhdProvisionResult
+        {
+            Success = true,
+            Executed = true,
+            Message = "Detached and deleted the recorded VHDX.",
+            FilePath = fullPath,
+        };
+    }
+    catch (Exception ex)
+    {
+        return new VhdProvisionResult
+        {
+            Success = false,
+            Executed = true,
+            StateUnknown = true,
+            Message =
+                $"The VHDX could not be fully detached and deleted ({ex.Message}). " +
+                "Check Disk Management before retrying.",
+            FilePath = fullPath,
+        };
+    }
+}
+
+static VhdProvisionResult RollBackVhd(
+    VhdProvisioner provisioner,
+    VhdProvisionResult surfaced,
+    string reason)
+{
+    try
+    {
+        provisioner.RevertAsync(surfaced.ReversibilityId).GetAwaiter().GetResult();
+        bool remains = File.Exists(surfaced.FilePath);
+        if (!remains)
+        {
+            return surfaced with
+            {
+                Success = false,
+                Executed = false,
+                StateUnknown = false,
+                RolledBack = true,
+                Message = $"{reason} The new VHDX was detached and deleted.",
+            };
+        }
+    }
+    catch (Exception ex)
+    {
+        reason = $"{reason} Automatic rollback also failed: {ex.Message}";
+    }
+
+    return surfaced with
+    {
+        Success = false,
+        Executed = true,
+        StateUnknown = true,
+        RolledBack = false,
+        Message = $"{reason} Check Disk Management before retrying.",
+    };
+}
+
+static VhdProvisionResult VhdFailure(string message, string filePath = "", char? driveLetter = null) =>
+    new()
+    {
+        Success = false,
+        Executed = false,
+        Message = message,
+        FilePath = filePath,
+        DriveLetter = driveLetter is char letter ? char.ToUpperInvariant(letter) : null,
+    };
+
+static bool TryValidateVhdCreatePlan(
+    VhdProvisionPlan plan,
+    out string fullPath,
+    out string error)
+{
+    fullPath = string.Empty;
+    error = string.Empty;
+
+    if (!TryNormalizeVhdPath(plan.FilePath, out fullPath, out error))
+    {
+        return false;
+    }
+
+    if (File.Exists(fullPath))
+    {
+        error = $"A file already exists at '{fullPath}'. Refusing to overwrite or delete it.";
+        return false;
+    }
+
+    if (plan.VolumeSizeBytes < DevDriveSizeMath.MinimumSizeBytesExact)
+    {
+        error = "A Dev Drive must be at least 50 GiB.";
+        return false;
+    }
+
+    if (plan.MaximumSizeBytes <= plan.VolumeSizeBytes)
+    {
+        error = "The VHD container does not include space for partition metadata.";
+        return false;
+    }
+
+    char letter = char.ToUpperInvariant(plan.DriveLetter);
+    if (letter is < 'D' or > 'Z')
+    {
+        error = "The target drive letter must be between D and Z.";
+        return false;
+    }
+
+    return true;
+}
+
+static bool TryNormalizeVhdPath(string rawPath, out string fullPath, out string error)
+{
+    fullPath = string.Empty;
+    error = string.Empty;
+    if (string.IsNullOrWhiteSpace(rawPath) || !Path.IsPathFullyQualified(rawPath))
+    {
+        error = "The VHDX path must be fully qualified.";
+        return false;
+    }
+
+    try
+    {
+        fullPath = Path.GetFullPath(rawPath);
+    }
+    catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+    {
+        error = $"The VHDX path is invalid: {ex.Message}";
+        return false;
+    }
+
+    if (!Path.GetExtension(fullPath).Equals(".vhdx", StringComparison.OrdinalIgnoreCase))
+    {
+        error = "The backing file must use the .vhdx extension.";
+        return false;
+    }
+
+    string? parent = Path.GetDirectoryName(fullPath);
+    for (string? current = parent; !string.IsNullOrEmpty(current); current = Path.GetDirectoryName(current))
+    {
+        if (IsReparsePoint(current))
+        {
+            error = "Refusing a VHDX path below a junction or symbolic link.";
+            return false;
+        }
+    }
+
+    if (IsReparsePoint(fullPath))
+    {
+        error = "Refusing a VHDX path that is a junction or symbolic link.";
+        return false;
+    }
+
+    return true;
+}
+
+static bool IsVhdDryRun() =>
+    string.Equals(Environment.GetEnvironmentVariable("DDM_VHD_DRYRUN"), "1", StringComparison.Ordinal);
 
 // Runs (or, under DDM_RESIZE_DRYRUN, only builds) the real destructive resize sequence.
 static ResizeExecuteOutcome ExecuteResize(ResizePlan plan, DiskLayoutSnapshot snapshot, ResizeFeasibility feasibility)
@@ -246,8 +730,8 @@ static ResizeExecuteOutcome ExecuteResize(ResizePlan plan, DiskLayoutSnapshot sn
     }
 
     // The real, destructive sequence (shrink → carve → Format-Volume -DevDrive). Only reached via an
-    // explicit, AUTHORIZED --execute + a passing guard + real elevation; the app keeps it behind a
-    // default-off flag. F7: once this begins mutating we must NOT kill it on timeout (aborting a
+    // explicit, AUTHORIZED --execute + one user confirmation + real elevation.
+    // F7: once this begins mutating we must NOT kill it on timeout (aborting a
     // shrink/format mid-flight can corrupt the disk), so killOnTimeout is false and the timeout is generous.
     (int exitCode, string stdout, string stderr) = RunPowerShell(script, killOnTimeout: false, timeoutMs: 480_000);
 
@@ -259,6 +743,7 @@ static ResizeExecuteOutcome ExecuteResize(ResizePlan plan, DiskLayoutSnapshot sn
         {
             Success = false,
             Executed = true,
+            StateUnknown = true,
             Message = "The resize did not confirm completion within the time limit and was NOT cancelled " +
                       "(cancelling a shrink/format mid-operation can corrupt the disk). State is unknown — " +
                       $"check Disk Management. {DescribeFinalState(source, target)}".TrimEnd(),
@@ -277,6 +762,7 @@ static ResizeExecuteOutcome ExecuteResize(ResizePlan plan, DiskLayoutSnapshot sn
         {
             Success = false,
             Executed = mutationMayHaveStarted,
+            StateUnknown = mutationMayHaveStarted,
             Message = mutationMayHaveStarted
                 ? $"Resize failed after disk changes may have begun: {detail}"
                 : $"The live resize preflight failed: {detail} Nothing was changed.",
@@ -287,19 +773,35 @@ static ResizeExecuteOutcome ExecuteResize(ResizePlan plan, DiskLayoutSnapshot sn
         };
     }
 
-    // F5: report the ACTUAL carved size + letter read back from the disk, not the requested value.
-    FinalState final = ParseFinalState(stdout);
-    char actualLetter = final.DriveLetter ?? target;
-    ulong actualBytes = final.PartitionSizeBytes is > 0UL ? final.PartitionSizeBytes!.Value : feasibility.AlignedShrinkBytes;
+    if (!ResizePowerShellScript.TryParseFinalState(stdout, plan, out ResizeFinalState final))
+    {
+        return new ResizeExecuteOutcome
+        {
+            Success = false,
+            Executed = true,
+            StateUnknown = true,
+            Message = "The resize command completed, but its final Dev Drive state could not be verified. Inspect Disk Management before retrying.",
+            SourceVolumeLetter = source,
+            NewDriveLetter = target,
+            DevDriveBytes = feasibility.AlignedShrinkBytes,
+            CompletedSteps = Array.Empty<string>(),
+        };
+    }
+
     return new ResizeExecuteOutcome
     {
         Success = true,
         Executed = true,
-        Message = $"Shrank {source}: and created a {ByteSizeFormatter.Format(actualBytes)} ReFS Dev Drive at {actualLetter}:.",
+        StateUnknown = false,
+        Message = $"Shrank {source}: and created a {ByteSizeFormatter.Format(final.FinalPartitionSizeBytes)} ReFS Dev Drive at {final.FinalDriveLetter}:.",
         SourceVolumeLetter = source,
-        NewDriveLetter = actualLetter,
-        DevDriveBytes = actualBytes,
+        NewDriveLetter = final.FinalDriveLetter,
+        DevDriveBytes = final.FinalPartitionSizeBytes,
         CompletedSteps = feasibility.Steps,
+        DiskNumber = final.FinalDiskNumber,
+        PartitionNumber = final.FinalPartitionNumber,
+        FileSystem = final.FinalFileSystem,
+        IsDevDrive = final.IsDevDrive,
     };
 }
 
@@ -317,44 +819,6 @@ static string DescribeFinalState(char source, char target)
     catch
     {
         return string.Empty;
-    }
-}
-
-// F5: parses the final-state object the execute script emits (actual carved letter + size + file system).
-static FinalState ParseFinalState(string stdout)
-{
-    if (string.IsNullOrWhiteSpace(stdout))
-    {
-        return new FinalState(null, null, null);
-    }
-
-    try
-    {
-        using JsonDocument doc = JsonDocument.Parse(stdout);
-        JsonElement root = doc.RootElement;
-
-        char? letter = null;
-        if (root.TryGetProperty("FinalDriveLetter", out JsonElement l) &&
-            l.ValueKind == JsonValueKind.String && !string.IsNullOrEmpty(l.GetString()))
-        {
-            letter = char.ToUpperInvariant(l.GetString()![0]);
-        }
-
-        ulong? size = null;
-        if (root.TryGetProperty("FinalPartitionSizeBytes", out JsonElement sz) && sz.TryGetUInt64(out ulong v))
-        {
-            size = v;
-        }
-
-        string? fs = root.TryGetProperty("FinalFileSystem", out JsonElement f) && f.ValueKind == JsonValueKind.String
-            ? f.GetString()
-            : null;
-
-        return new FinalState(letter, size, fs);
-    }
-    catch (JsonException)
-    {
-        return new FinalState(null, null, null);
     }
 }
 
@@ -470,6 +934,20 @@ static (int ExitCode, string Stdout, string Stderr) RunPowerShell(string script,
     }
 }
 
+static (int ExitCode, string Stdout, string Stderr) ValidatePowerShellSyntax(string script)
+{
+    string scriptBase64 = Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
+    string parserScript = $$"""
+$ErrorActionPreference='Stop'
+$code=[Text.Encoding]::Unicode.GetString([Convert]::FromBase64String('{{scriptBase64}}'))
+$tokens=$null
+$errors=$null
+[void][System.Management.Automation.Language.Parser]::ParseInput($code,[ref]$tokens,[ref]$errors)
+if ($errors.Count -gt 0) { throw (($errors | ForEach-Object { $_.Message }) -join '; ') }
+""";
+    return RunPowerShell(parserScript, killOnTimeout: true, timeoutMs: 30_000);
+}
+
 static string ResolveSystem32Exe(string exe)
 {
     string candidate = Path.Combine(Environment.SystemDirectory, exe);
@@ -491,17 +969,19 @@ static bool IsDryRun() =>
 
 // ---- input / output helpers ------------------------------------------------------------------------
 
-static ResizePlan? TryDecodePlan(string base64)
+static ResizePlan? TryDecodePlan(string base64) => TryDecodeJson<ResizePlan>(base64);
+
+static T? TryDecodeJson<T>(string base64)
 {
     try
     {
         byte[] bytes = Convert.FromBase64String(base64);
         string json = Encoding.UTF8.GetString(bytes);
-        return JsonSerializer.Deserialize<ResizePlan>(json, ResizeJson.ReadOptions);
+        return JsonSerializer.Deserialize<T>(json, ResizeJson.ReadOptions);
     }
     catch (Exception ex) when (ex is FormatException or JsonException or ArgumentException or DecoderFallbackException)
     {
-        return null;
+        return default;
     }
 }
 
@@ -665,7 +1145,6 @@ static bool IsSameDirectory(string a, string b)
 internal sealed record ProbeResult(int ExitCode, string Stdout, string Stderr);
 
 /// <summary>F5: the actual carved partition letter/size/file system read back after a successful execute.</summary>
-internal sealed record FinalState(char? DriveLetter, ulong? PartitionSizeBytes, string? FileSystem);
 
 /// <summary>Sentinel exit codes for the internal PowerShell runner.</summary>
 internal static class HelperExit

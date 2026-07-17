@@ -31,12 +31,17 @@ public sealed class ResizeGuardTests
             SupportedSizeMinBytes = 200UL * Gib,
             SupportedSizeMaxBytes = 500UL * Gib,
             DiskNumber = 0,
+            DiskUniqueId = "NVME-DISK-0",
+            PartitionNumber = 3,
+            PartitionOffsetBytes = Mib,
+            PartitionGuid = "{11111111-2222-3333-4444-555555555555}",
             PartitionStyle = "GPT",
             IsDiskOffline = false,
             IsDiskReadOnly = false,
             IsRemovable = false,
             BusType = "NVMe",
             PartitionAlignmentBytes = 0,
+            SupportsDevDriveFormat = true,
         };
         tweak?.Invoke(b);
         return b.Build();
@@ -145,6 +150,87 @@ public sealed class ResizeGuardTests
     {
         ResizeFeasibility f = ResizeGuard.Evaluate(Plan(), HealthySnapshot(s => s.SourceResolved = false));
         AssertDenied(f, "find volume");
+    }
+
+    [TestMethod]
+    public void Evaluate_UnsupportedDevDriveFormatting_Denied()
+    {
+        ResizeFeasibility f = ResizeGuard.Evaluate(
+            Plan(),
+            HealthySnapshot(s => s.SupportsDevDriveFormat = false));
+
+        AssertDenied(f, "22621.2338");
+    }
+
+    [TestMethod]
+    public void Evaluate_MissingStableIdentity_Denied()
+    {
+        ResizeFeasibility f = ResizeGuard.Evaluate(
+            Plan(),
+            HealthySnapshot(s => s.DiskUniqueId = string.Empty));
+
+        AssertDenied(f, "stable disk and partition identity");
+    }
+
+    [TestMethod]
+    public void Evaluate_AuthorizedPlanBoundToPreviewIdentity_CanProceed()
+    {
+        ResizePlan plan = Plan() with
+        {
+            ExecuteAuthorized = true,
+            ExpectedDiskNumber = 0,
+            ExpectedDiskUniqueId = "NVME-DISK-0",
+            ExpectedPartitionNumber = 3,
+            ExpectedPartitionOffsetBytes = Mib,
+            ExpectedPartitionGuid = "{11111111-2222-3333-4444-555555555555}",
+            ExpectedAlignedShrinkBytes = 100UL * Gib,
+        };
+
+        Assert.IsTrue(ResizeGuard.Evaluate(plan, HealthySnapshot()).CanProceed);
+    }
+
+    [TestMethod]
+    public void BindForExecution_CopiesVerifiedIdentity_AndPassesAuthorizedGuard()
+    {
+        ResizePlan plan = Plan() with { ExecuteAuthorized = true };
+        DiskLayoutSnapshot snapshot = HealthySnapshot();
+        ResizeFeasibility verification = ResizeGuard.Evaluate(
+            plan with { ExecuteAuthorized = false },
+            snapshot);
+
+        ResizePlan bound = ResizeGuard.BindForExecution(plan, verification);
+
+        Assert.AreEqual(0, bound.ExpectedDiskNumber);
+        Assert.AreEqual("NVME-DISK-0", bound.ExpectedDiskUniqueId);
+        Assert.AreEqual(3, bound.ExpectedPartitionNumber);
+        Assert.AreEqual(Mib, bound.ExpectedPartitionOffsetBytes);
+        Assert.AreEqual(100UL * Gib, bound.ExpectedAlignedShrinkBytes);
+        Assert.IsTrue(ResizeGuard.Evaluate(bound, snapshot).CanProceed);
+    }
+
+    [TestMethod]
+    public void BindForExecution_RejectsUnauthorizedPlan()
+    {
+        ResizeFeasibility verification = ResizeGuard.Evaluate(Plan(), HealthySnapshot());
+
+        Assert.ThrowsExactly<InvalidOperationException>(
+            () => ResizeGuard.BindForExecution(Plan(), verification));
+    }
+
+    [TestMethod]
+    public void Evaluate_AuthorizedPlanWithChangedIdentity_Denied()
+    {
+        ResizePlan plan = Plan() with
+        {
+            ExecuteAuthorized = true,
+            ExpectedDiskNumber = 0,
+            ExpectedDiskUniqueId = "OTHER-DISK",
+            ExpectedPartitionNumber = 3,
+            ExpectedPartitionOffsetBytes = Mib,
+            ExpectedAlignedShrinkBytes = 100UL * Gib,
+        };
+
+        AssertDenied(ResizeGuard.Evaluate(plan, HealthySnapshot()), "identity changed");
     }
 
     // ---- disk-level denials --------------------------------------------------------------------
@@ -365,6 +451,10 @@ public sealed class ResizeGuardTests
         public ulong SupportedSizeMinBytes { get; set; }
         public ulong SupportedSizeMaxBytes { get; set; }
         public int DiskNumber { get; set; }
+        public string DiskUniqueId { get; set; } = string.Empty;
+        public int PartitionNumber { get; set; }
+        public ulong PartitionOffsetBytes { get; set; }
+        public string PartitionGuid { get; set; } = string.Empty;
         public string PartitionStyle { get; set; } = string.Empty;
         public bool IsDiskOffline { get; set; }
         public bool IsDiskReadOnly { get; set; }
@@ -372,6 +462,7 @@ public sealed class ResizeGuardTests
         public string BusType { get; set; } = string.Empty;
         public ulong PartitionAlignmentBytes { get; set; }
         public string DriveLettersInUse { get; set; } = string.Empty;
+        public bool SupportsDevDriveFormat { get; set; }
 
         public DiskLayoutSnapshot Build() => new()
         {
@@ -385,6 +476,10 @@ public sealed class ResizeGuardTests
             SupportedSizeMinBytes = SupportedSizeMinBytes,
             SupportedSizeMaxBytes = SupportedSizeMaxBytes,
             DiskNumber = DiskNumber,
+            DiskUniqueId = DiskUniqueId,
+            PartitionNumber = PartitionNumber,
+            PartitionOffsetBytes = PartitionOffsetBytes,
+            PartitionGuid = PartitionGuid,
             PartitionStyle = PartitionStyle,
             IsDiskOffline = IsDiskOffline,
             IsDiskReadOnly = IsDiskReadOnly,
@@ -392,6 +487,7 @@ public sealed class ResizeGuardTests
             BusType = BusType,
             PartitionAlignmentBytes = PartitionAlignmentBytes,
             DriveLettersInUse = DriveLettersInUse,
+            SupportsDevDriveFormat = SupportsDevDriveFormat,
         };
     }
 }

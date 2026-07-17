@@ -23,11 +23,6 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <!--
-      Destructive resize execution stays off for normal builds. Self-hosting builds may opt in with
-      /p:EnableRealResizeExecute=true, which writes the existing AppContext switch into runtimeconfig.
-    -->
-    <EnableRealResizeExecute Condition="'$(EnableRealResizeExecute)' == ''">false</EnableRealResizeExecute>
-    <!--
       WUI2010 (nested x:Bind path may crash on a null segment) is suppressed *intentionally*.
       Pages bind to section sub-ViewModels (ViewModel.Suite/PackageCaches/DriveHealth.*). Every
       sub-VM is a get-only property assigned once in the MainPageViewModel constructor and never
@@ -44,10 +39,6 @@
     -->
     <NoWarn>$(NoWarn);WUI2010;WUI2011</NoWarn>
   </PropertyGroup>
-
-  <ItemGroup Condition="'$(EnableRealResizeExecute)' == 'true'">
-    <RuntimeHostConfigurationOption Include="DevDriveManager.EnableRealResizeExecute" Value="true" />
-  </ItemGroup>
 
   <ItemGroup>
     <Content Include="Assets\SplashScreen.scale-200.png" />
@@ -136,7 +127,7 @@
   <PropertyGroup>
     <_FilterProbeRid Condition="'$(_FilterProbePlatform)' == 'ARM64'">win-arm64</_FilterProbeRid>
     <_FilterProbeRid Condition="'$(_FilterProbeRid)' == ''">win-x64</_FilterProbeRid>
-    <_FilterProbeOutDir>$(MSBuildThisFileDirectory)..\DevDriveManager.FilterProbe\bin\$(_FilterProbePlatform)\$(Configuration)\net10.0\$(_FilterProbeRid)\</_FilterProbeOutDir>
+    <_FilterProbeOutDir>$(MSBuildThisFileDirectory)..\DevDriveManager.FilterProbe\bin\$(_FilterProbePlatform)\$(Configuration)\net10.0-windows10.0.26100.0\$(_FilterProbeRid)\</_FilterProbeOutDir>
   </PropertyGroup>
 
   <ItemGroup>

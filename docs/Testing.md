@@ -10,7 +10,7 @@ portable, safe test lane separate from real machine mutations.
 | Build + unit | Any supported x64/ARM64 Windows development machine | No | Compile, analyzers, core logic, fake mutation engines |
 | UI safe-mutation | Dedicated test account or VM | Only read-only detection and benchmark scratch data; mutation engines are faked | UI automation, confirmations, move/move-back state |
 | Detection matrix | Dedicated test machine with developer tools and populated caches | Tool installers and normal package restores only | Verify tool and package-cache discovery |
-| Real partition | Disposable VM with a checkpoint and a secondary fixed disk | **Yes: shrinks, partitions, and formats a volume** | Self-host the guarded resize workflow |
+| Real storage | Disposable VM with a checkpoint; add a secondary fixed disk for resize | **Yes: creates/attaches/formats a VHDX or shrinks/partitions/formats a volume** | Self-host both complete creation paths |
 
 Never run the real-partition lane on a machine that contains the only copy of important data.
 
@@ -171,24 +171,11 @@ Confirm that **Safe-mutation test mode** is visible before invoking Move, Move b
 resize controls. Safe mode swaps package moves, VHD provisioning, and volume resizing for in-memory
 fakes.
 
-## 7. Real partition self-hosting
+## 7. Real storage self-hosting
 
-Normal builds remain preview-only. Enable real execution only for a deliberate self-hosting build:
-
-```powershell
-$platform = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "ARM64" } else { "x64" }
-
-dotnet build .\DevDriveManager.slnx `
-    -c Debug `
-    -p:Platform=$platform `
-    -p:EnableRealResizeExecute=true
-```
-
-This writes `DevDriveManager.EnableRealResizeExecute=true` into the app runtime configuration. It does
-not bypass any other guard: the UI still requires a successful elevated read-only preview, a second
-destructive confirmation, and UAC. The helper then re-queries the live partition, disk identity,
-filesystem, supported minimum size, reclaimable bytes, and target drive letter immediately before
-`Resize-Partition`.
+The normal self-contained build supports complete VHDX creation and resize execution. This does not
+bypass safeguards: VHDX creation and resize each require explicit confirmation and UAC. For resize, the
+helper verifies and binds live identity after elevation, then rechecks it immediately before mutation.
 
 Use this machine profile:
 
@@ -198,12 +185,34 @@ Use this machine profile:
 4. Administrator credentials and no active disk-heavy workload.
 5. A backup or checkpoint verified before execution.
 
-Exercise the flow:
+### VHDX creation
+
+1. Select **Create a new VHDX**, a new path on the VM, an unused letter, and at least 50 GiB.
+2. Review the create/attach/identity-check/initialize/partition/format/read-back steps.
+3. Confirm and approve UAC.
+4. Verify the result from an elevated shell:
+
+   ```powershell
+   Get-DiskImage -ImagePath C:\DevDrives\DevDrive.vhdx | Get-Disk
+   Get-Partition -DriveLetter D
+   Get-Volume -DriveLetter D
+   fsutil devdrv query D:
+   ```
+
+5. Reboot and verify the VHDX reattaches and the Dev Drive remains usable.
+6. Restore the VM checkpoint after testing.
+
+If creation reports a confirmed rollback, verify that the VHDX path and requested letter are absent. If
+it reports unknown state, do not retry: inspect both `Get-DiskImage` and Disk Management first.
+
+### Resize
+
+Exercise only against the secondary test volume:
 
 1. Select **Resize an existing volume** and choose the secondary test volume.
-2. Request at least 50 GiB and run the read-only preview.
-3. Verify the source, target letter, aligned size, and three displayed commands.
-4. Select **Apply resize**, read the destructive confirmation, and approve UAC.
+2. Request at least 50 GiB and select **Create**.
+3. Verify the confirmation shows the planned final source size and target Dev Drive size.
+4. Confirm **Create** and approve the single UAC prompt.
 5. Verify the new volume with `Get-Volume`, `Get-Partition`, and `fsutil devdrv query <letter>:` from an
    elevated shell.
 6. Reboot and verify the source and new Dev Drive still mount correctly.
@@ -225,7 +234,10 @@ Verify all executable boundaries:
 2. Select **See filters**, approve UAC, and confirm the elevated helper returns a result without a runtime
    installation prompt.
 3. Run a resize feasibility preview and confirm the elevated helper returns a result.
-4. In **Apps > Installed apps**, confirm neither test step installed a .NET or Windows App SDK runtime.
+4. On a checkpointed disposable VM, create a 50 GiB dynamic VHDX and verify the helper completes without
+   a runtime or module installation prompt.
+5. In **Apps > Installed apps**, confirm no test step installed a .NET runtime, Windows App SDK runtime,
+   StorageDsc, or another PowerShell module.
 
 The build must keep `SelfContained=true`, `PublishSelfContained=true`, and
 `WindowsAppSDKSelfContained=true`. Create the MSIX from a dedicated `dotnet publish` directory as shown
@@ -236,6 +248,6 @@ in the root README; do not package a stale `bin\...\AppX` loose layout.
 Before widening self-hosting beyond the disposable-VM lane:
 
 - Make the UI suite deterministic across no-Dev-Drive, one-Dev-Drive, and multiple-Dev-Drive states.
-- Add an end-to-end elevated-helper dry run on a disposable VM.
+- Add automated end-to-end elevated-helper dry runs for both VHDX and resize verbs.
 - Validate interrupted/partial partition outcomes and publish a recovery runbook.
 - Resolve all **Error** items in [KnownIssues.md](KnownIssues.md).

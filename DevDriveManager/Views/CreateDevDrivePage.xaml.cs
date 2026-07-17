@@ -11,14 +11,12 @@ namespace DevDriveManager.Views;
 /// <summary>
 /// The "Create a Dev Drive" flow (Treatment&#160;A). The page is thin: it owns the
 /// <see cref="CreateDevDriveViewModel"/>, hosts the disk-bar + slider + number-box size control, and
-/// translates the view model's events into platform UI (the gating confirmation dialog and the file/
+/// translates the view model's events into platform UI (the initial confirmation dialog and the file/
 /// folder pickers). All logic and state live in the view model and the unit-tested core.
 /// </summary>
 /// <remarks>
-/// <b>SAFETY:</b> the page never executes anything on its own. <see cref="OnConfirmRequested"/> shows a
-/// blocking dialog whose primary button is the only path to <see cref="CreateDevDriveViewModel.ExecuteConfirmedAsync"/>
-/// — and even that creates/attaches only for VHDX and is pure simulation for resize. The app is not
-/// launched during development/validation, so the real provisioner is never exercised here.
+/// <b>SAFETY:</b> VHDX and resize creation start only from the blocking confirmation dialog. The resize
+/// helper verifies and binds live disk state before mutation in the same elevated invocation.
 /// </remarks>
 public sealed partial class CreateDevDrivePage : Page
 {
@@ -31,6 +29,7 @@ public sealed partial class CreateDevDrivePage : Page
         InitializeComponent();
         ViewModel.ConfirmRequested += OnConfirmRequested;
         ViewModel.BrowseVhdPathRequested += OnBrowseVhdPathRequested;
+        ViewModel.DevDriveCreated += RefreshAfterCreationAsync;
         ViewModel.NavigateBackRequested += OnNavigateBack;
         Loaded += OnLoaded;
     }
@@ -99,7 +98,7 @@ public sealed partial class CreateDevDrivePage : Page
                 },
                 PrimaryButtonText = request.ConfirmText,
                 CloseButtonText = "Cancel",
-                DefaultButton = ContentDialogButton.Close, // safe default: Cancel is highlighted
+                DefaultButton = ContentDialogButton.Primary,
                 XamlRoot = XamlRoot,
             };
 
@@ -121,6 +120,10 @@ public sealed partial class CreateDevDrivePage : Page
             _isConfirmOpen = false;
         }
     }
+
+    // All top-level pages bind to App.Shared, so this is the same reload as the Dashboard's
+    // Refresh button and updates drives, caches, benchmarks, and health.
+    private static Task RefreshAfterCreationAsync() => App.Shared.LoadCommand.ExecuteAsync(null);
 
     private async void OnBrowseVhdPathRequested()
     {

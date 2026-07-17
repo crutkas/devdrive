@@ -30,6 +30,12 @@ public sealed class SafeFakeVolumeResizer : IVolumeResizer
     }
 
     /// <inheritdoc />
+    public Task<ResizeExecuteOutcome> VerifyAndExecuteAsync(
+        ResizePlan plan,
+        CancellationToken cancellationToken = default) =>
+        ExecuteAsync(plan, cancellationToken);
+
+    /// <inheritdoc />
     public Task<ResizeExecuteOutcome> ExecuteAsync(ResizePlan plan, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(plan);
@@ -49,6 +55,10 @@ public sealed class SafeFakeVolumeResizer : IVolumeResizer
             SourceVolumeLetter = source,
             NewDriveLetter = target,
             DevDriveBytes = feasibility.AlignedShrinkBytes,
+            DiskNumber = 0,
+            PartitionNumber = 2,
+            FileSystem = "ReFS",
+            IsDevDrive = true,
             CompletedSteps = feasibility.Steps,
         });
     }
@@ -74,12 +84,17 @@ public sealed class SafeFakeVolumeResizer : IVolumeResizer
             SupportedSizeMinBytes = supportedMin,
             SupportedSizeMaxBytes = partitionSize,
             DiskNumber = 0,
+            DiskUniqueId = "UITEST-SYNTHETIC-DISK",
+            PartitionNumber = 1,
+            PartitionOffsetBytes = ResizeGuard.DefaultAlignmentBytes,
+            PartitionGuid = "{00000000-0000-0000-0000-000000000001}",
             PartitionStyle = "GPT",
             IsDiskOffline = false,
             IsDiskReadOnly = false,
             IsRemovable = false,
             BusType = "NVMe",
             PartitionAlignmentBytes = 0,
+            SupportsDevDriveFormat = true,
         };
     }
 }

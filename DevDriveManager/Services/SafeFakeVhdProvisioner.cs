@@ -5,9 +5,9 @@ using DevDriveCore.Services;
 namespace DevDriveManager.Services;
 
 /// <summary>
-/// UI-test-only <see cref="IVhdProvisioner"/> that SIMULATES creating and surfacing a VHDX: it returns a
-/// plausible success result (a synthetic disk number) WITHOUT touching <c>virtdisk.dll</c>, the
-/// filesystem, or any reversibility store — no real disk is created, attached, or recorded. Selected
+/// UI-test-only <see cref="IVhdProvisioner"/> that simulates complete VHDX Dev Drive creation. It returns
+/// a plausible verified result without touching <c>virtdisk.dll</c>, Storage cmdlets, the filesystem,
+/// or any reversibility store. Selected
 /// only when <c>DDM_UITEST_SAFE_MUTATIONS=1</c>; never used in normal operation.
 /// </summary>
 public sealed class SafeFakeVhdProvisioner : IVhdProvisioner
@@ -24,9 +24,15 @@ public sealed class SafeFakeVhdProvisioner : IVhdProvisioner
         return Task.FromResult(new VhdProvisionResult
         {
             Success = true,
+            Executed = true,
+            Message =
+                $"Created and attached the VHDX, then initialized and formatted {plan.DriveLetter}: as a simulated ReFS Dev Drive.",
             FilePath = plan.FilePath,
             PhysicalPath = $@"\\.\PhysicalDrive{SimulatedDiskNumber}",
             DiskNumber = SimulatedDiskNumber,
+            DriveLetter = char.ToUpperInvariant(plan.DriveLetter),
+            SizeBytes = plan.VolumeSizeBytes,
+            FileSystem = "ReFS",
             ReversibilityId = VhdProvisioner.ReversibilityId(plan.FilePath),
         });
     }

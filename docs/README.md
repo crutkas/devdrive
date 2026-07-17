@@ -15,7 +15,7 @@ truth; every claim below is grounded in a named file you can open and verify.
 | [CreatingADevDrive.md](CreatingADevDrive.md) | **Creating a Dev Drive** — the two code paths (new VHDX vs. resize an existing volume), all of the options, and exactly what is *real* vs. *simulated*. |
 | [PackageCacheMoves.md](PackageCacheMoves.md) | **Moving package caches** onto the Dev Drive — the catalogue, the copy‑then‑commit mechanism, and the **documented fallbacks** for every failure path (rollback, idempotency, Move back). |
 | [SpeedTest.md](SpeedTest.md) | **The performance tests** — what each test measures, why, the methodology, and how missing tools are flagged. |
-| [Testing.md](Testing.md) | **Test-machine setup and self-hosting** — build lanes, tool/cache population, safe UI automation, and the opt-in real-partition workflow. |
+| [Testing.md](Testing.md) | **Test-machine setup and self-hosting** — build lanes, tool/cache population, safe UI automation, and disposable-VM storage workflows. |
 | [KnownIssues.md](KnownIssues.md) | **Current readiness blockers** — severity, evidence, and the next action for each confirmed issue. |
 
 ## The through‑line (how this is built)
@@ -24,12 +24,11 @@ truth; every claim below is grounded in a named file you can open and verify.
   interfaces, with native/WMI/process calls isolated in `DevDriveCore/Platform`. The WinUI app
   (`DevDriveManager`) is a thin MVVM shell. That keeps every behaviour unit‑testable without XAML and
   lets the logic later drop into the real Settings handler.
-- **Safety‑first.** Detection and inspection are **real**; every *mutating* action is **preview →
-  explicit Confirm**, **reversible**, and **per‑user (no admin)** where possible. Destructive disk
-  operations (repartitioning the system drive) are **gated off by default** — the resize *preview* is
-  read‑only; the destructive execute requires a non‑default feature flag plus Confirm, UAC, and in‑helper
-  guards. Benchmarks run in **bounded, self‑cleaning temporary folders** and never touch your real
-  caches, settings, or partitions.
+- **Safety-first.** Detection and inspection are **real**. Package-cache changes are explicitly
+  confirmed, per-user, recorded, and reversible. Storage creation requires confirmation and UAC;
+  resize uses one confirmation and one elevated helper transaction that verifies and binds live disk
+  identity before mutation. The helper revalidates that identity immediately before shrinking. Benchmarks
+  run in bounded, self-cleaning temporary folders and never touch real caches, settings, or partitions.
 - **Honest numbers.** The app uses your actual machine and tools. It never fabricates a metric, and
   it surfaces the caveats that explain a result (for example, whether Defender performance mode is in
   effect). Where it can't determine something, it says so instead of guessing.
@@ -50,7 +49,7 @@ environment variable, or setting. In normal operation the real engines are used.
 | UI‑agnostic logic, models, interfaces | `DevDriveCore/` (`Services`, `Models`, `Abstractions`) |
 | Real native/WMI/process implementations | `DevDriveCore/Platform/` |
 | WinUI 3 shell (pages, ViewModels) | `DevDriveManager/` |
-| Elevated read‑only filter probe helper | `DevDriveManager.FilterProbe/` |
+| Bundled elevated filter, resize, and VHDX helper | `DevDriveManager.FilterProbe/` |
 | Unit tests | `DevDriveCore.Tests/` |
 | Automated UI tests | `DevDriveManager.UITests/` |
 

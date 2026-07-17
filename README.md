@@ -4,12 +4,9 @@ A Windows desktop app (WinUI 3 / Windows App SDK) that helps developers discover
 plan a move to a [Dev Drive](https://learn.microsoft.com/windows/dev-drive/) — a ReFS volume tuned
 for developer workloads (package caches, source trees, build output).
 
-> **Safety-first design.** Every operation that *would* change the machine follows the same shape:
-> a read-only **preview** of exactly what will happen → an **explicit confirm** → a **per-user** change
-> (no elevation) → a recorded **reversibility** entry so it can be undone. Detection and benchmarks are
-> read-only. Package-cache moves and VHDX creation are wired and run only after you confirm; the
-> experimental **resize C:** execute path is **off by default** (gated) — see
-> [Capability state](#capability-state).
+> **Safety-first design.** Changes require an explicit confirmation. For destructive resize, that one
+> confirmation starts an elevated helper that verifies and binds live disk state before mutation, then
+> revalidates it immediately before shrinking. Package-cache moves stay per-user and reversible.
 
 ---
 
@@ -47,13 +44,13 @@ can be unit-tested directly.
 
 ## Capability state
 
-The codebase has two tiers of capability: **read-only** work, and **guarded, reversible mutations**
-(preview → explicit confirm → per-user/no elevation → recorded for undo). Knowing which tier a feature
-is in tells you exactly how much it touches the machine.
+The codebase has two tiers of capability: **read-only/scratch** work and **guarded mutations**. Package
+cache mutations are per-user and reversible; storage mutations require UAC and have operation-specific
+recovery limits.
 
 ### ✅ REAL — wired into the app and shipping
 
-These run when you use the app. They are read-only or touch only throwaway scratch files.
+These surfaces default to read-only detection or throwaway scratch work.
 
 - **Volume & Dev Drive detection** — `DevDriveService` reads volumes and decodes the Dev Drive /
   trusted flags. Read-only.
@@ -68,24 +65,27 @@ These run when you use the app. They are read-only or touch only throwaway scrat
   offer a reversible **move** onto the Dev Drive — or **Map path** / **Move &amp; remap** for a tool
   whose cache wasn't auto-detected. Read-only until you confirm.
 
-### 🔁 GUARDED, REVERSIBLE mutations — wired into the app
+### 🔁 GUARDED mutations — wired into the app
 
-Each mutation runs **only after you confirm a preview**; each writes **per-user** (no elevation),
-records a reversibility entry, and offers an undo. Under the UI-test seam `DDM_UITEST_SAFE_MUTATIONS=1`
+Each mutation runs only after explicit confirmation. Storage operations use the bundled self-contained
+helper under UAC; no separately installed runtime, StorageDsc, or PowerShell module is required. Under
+the UI-test seam `DDM_UITEST_SAFE_MUTATIONS=1`
 the ViewModel drives the *same* Core coordinator over **safe fakes**, so the automated suite exercises
 the full **Move → progress → Move-back** (and create) flow WITHOUT touching a real cache, environment
 variable, or disk. Every engine is interface-driven with a `CreateDefault()` factory, and all
 file/environment/VHD access goes through abstractions so unit tests run against in-memory fakes or
 throwaway temp directories.
 
-| Engine | Interface | What it does | Reversible? |
+| Engine | Interface | What it does | Recovery |
 |---|---|---|---|
 | `PackageCacheMover` | `IPackageCacheMover` | Creates the target dir, copies + SHA-256-verifies the cache (with progress), repoints the per-user env var (`IEnvironmentWriter`), records reversibility. | ✅ restore env (+ optional move-back) |
-| `VhdProvisioner` | `IVhdProvisioner` | Orchestrates `virtdisk.dll` (`INativeVhdApi`: `CreateVirtualDisk` → `AttachVirtualDisk`) to create + surface a `.vhdx` and report its disk number. | ✅ detach + delete |
+| `ElevatedVhdProvisioner` | `IVhdProvisioner` | Creates/attaches a new VHDX, binds the exact image to its disk, initializes GPT, partitions, formats with `Format-Volume -DevDrive`, and verifies ReFS/Dev Drive state. | Core recovery path can detach + delete; recovery UI is not yet exposed. |
+| `VolumeResizer` | `IVolumeResizer` | After one confirmation, verifies live disk state, shrinks, partitions, formats, and reads back the new Dev Drive through one elevated helper invocation. | No; separate Storage operations are not atomic. |
 
 Wiring: `PackageCachesViewModel` → `MutationComposition.CreatePackageCacheMoveCoordinator()`;
 `CreateDevDriveViewModel` → `MutationComposition.CreateDevDriveCreationService()`. Supporting
-abstractions: `IFileSystem`, `IEnvironmentWriter`, `IReversibilityStore`, `IPathProbe`, `INativeVhdApi`.
+abstractions: `IFileSystem`, `IEnvironmentWriter`, `IReversibilityStore`, `IPathProbe`, `INativeVhdApi`,
+`IElevatedVhdBroker`, and `IElevatedResizeBroker`.
 Reversibility persists via `JsonFileReversibilityStore` (or in-process `InMemoryReversibilityStore`).
 Read-only tool detection (`InstalledToolDetector` / `IInstalledToolDetector`) probes `--version` and
 PATH (`IProcessRunner` / `IPathProbe`).
@@ -144,9 +144,8 @@ dotnet test DevDriveCore.Tests\DevDriveCore.Tests.csproj --filter "TestCategory!
 
 ---
 
-For deliberate partition self-hosting, build with
-`-p:EnableRealResizeExecute=true`; normal builds remain preview-only. Follow
-[docs/Testing.md](docs/Testing.md#7-real-partition-self-hosting) and use a disposable VM.
+For real storage self-hosting, follow
+[docs/Testing.md](docs/Testing.md#7-real-storage-self-hosting) and use a disposable VM.
 
 ---
 
@@ -157,8 +156,8 @@ For deliberate partition self-hosting, build with
 - Package-cache mutations are preview → explicit confirm → per-user (no admin) → reversible. Detection
   and benchmarks are read-only / scratch-only. Disk partitioning is the documented exception: it
   requires admin and is not automatically reversible.
-- Real resize execution is **gated off by default** (`ResizeFeatureGate`). An explicit self-hosting build
-  can enable it; preview, second confirmation, UAC, and in-helper live safety checks still apply.
+- Real resize uses one explicit confirmation and one UAC prompt; execution authorization, live guard
+  evaluation, identity binding, and immediate in-helper revalidation still apply.
 - **Tests never touch your data:** every test runs against in-memory fakes or unique throwaway temp
   directories (all VHD tests mock `INativeVhdApi`); the UI suite uses a safe-mutation seam.
 - The current UI suite is machine-profile-specific; general self-hosting blockers are tracked in

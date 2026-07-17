@@ -12,8 +12,9 @@ namespace DevDriveCore.Abstractions;
 /// <para>
 /// <b>SAFETY.</b> <see cref="PreviewAsync"/> is a READ-ONLY feasibility check (the helper's
 /// <c>--whatif</c> mode): it queries real reclaimable space and runs every guard, but mutates nothing.
-/// <see cref="ExecuteAsync"/> is the real, destructive shrink &#8594; repartition &#8594; format and
-/// must stay behind the app's default-off feature flag + explicit user confirmation + UAC elevation.
+/// <see cref="VerifyAndExecuteAsync"/> is the normal confirmed UI path: one elevated helper invocation
+/// verifies and binds the live disk identity, revalidates it immediately before mutation, then performs
+/// the destructive shrink &#8594; repartition &#8594; format sequence.
 /// </para>
 /// </remarks>
 public interface IVolumeResizer
@@ -27,10 +28,17 @@ public interface IVolumeResizer
     Task<ResizeFeasibility?> PreviewAsync(ResizePlan plan, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Runs the REAL, destructive resize (shrink &#8594; create partition &#8594; assign letter &#8594;
-    /// <c>Format-Volume -DevDrive</c>) via the elevated helper's <c>--execute</c> mode. The guards run
-    /// again inside the helper, so a rejected plan reports <see cref="ResizeExecuteOutcome.Executed"/>
-    /// <c>= false</c> and changes nothing.
+    /// Runs one confirmed elevated transaction that first verifies every live resize guard and binds the
+    /// exact disk/partition identity, then rechecks that identity immediately before shrinking. A failed
+    /// verification reports <see cref="ResizeExecuteOutcome.Executed"/> <c>= false</c> and changes nothing.
+    /// </summary>
+    Task<ResizeExecuteOutcome> VerifyAndExecuteAsync(
+        ResizePlan plan,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Runs the elevated destructive path for a plan that already carries a verified live identity.
+    /// Retained for callers that explicitly use <see cref="PreviewAsync"/> before execution.
     /// </summary>
     Task<ResizeExecuteOutcome> ExecuteAsync(ResizePlan plan, CancellationToken cancellationToken = default);
 }

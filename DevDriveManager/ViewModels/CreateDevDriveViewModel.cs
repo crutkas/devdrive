@@ -15,23 +15,13 @@ namespace DevDriveManager.ViewModels;
 /// <see cref="ApplySize"/> funnel built on the pure <see cref="DevDriveSizeMath"/>.
 /// </summary>
 /// <remarks>
-/// <para><b>SAFETY.</b> Nothing destructive runs until the user clears the explicit
-/// <see cref="ConfirmRequested"/> dialog. Even then:</para>
+/// <para><b>SAFETY.</b> Nothing destructive runs until the user explicitly confirms it. Even then:</para>
 /// <list type="bullet">
-///   <item><description><b>VHDX</b> — <see cref="ExecuteConfirmedAsync"/> calls the real
-///   <see cref="IDevDriveCreationService.CreateVhdDevDriveAsync"/> (create + attach only; the ReFS
-///   Dev Drive <i>format</i> is a separate admin step, reported as pending). This is never exercised by
-///   automated tests or dev validation because the app is not launched.</description></item>
-///   <item><description><b>Resize preview</b> — <see cref="IVolumeResizer.PreviewAsync"/> runs a real
-///   elevated READ-ONLY feasibility check (the helper's <c>--whatif</c> mode: measures actual
-///   reclaimable space, runs every guard, mutates nothing), falling back to the pure-arithmetic
-///   <see cref="IDevDriveCreationService.SimulateResize"/> when the helper is unavailable or UAC is
-///   declined.</description></item>
-///   <item><description><b>Resize execute</b> — the destructive shrink/repartition/format
-///   (<see cref="IVolumeResizer.ExecuteAsync"/>) is gated THREE ways: the default-off-by-default
-///   <see cref="DevDriveManager.Services.ResizeFeatureGate"/> flag, a second honest confirmation, and
-///   UAC elevation (the helper also re-runs the guards). Only an explicit self-hosting build enables
-///   the flag.</description></item>
+///   <item><description><b>VHDX</b> — <see cref="ExecuteConfirmedAsync"/> creates, attaches, initializes,
+///   partitions, formats, and verifies the new VHDX through one UAC-elevated helper invocation.</description></item>
+///   <item><description><b>Resize</b> — <see cref="IVolumeResizer.VerifyAndExecuteAsync"/> uses one
+///   explicit Create confirmation and one UAC-elevated helper invocation. The helper verifies and binds
+///   live disk identity, revalidates it immediately before mutation, and changes nothing if verification fails.</description></item>
 /// </list>
 /// </remarks>
 public partial class CreateDevDriveViewModel : ObservableObject
@@ -47,8 +37,6 @@ public partial class CreateDevDriveViewModel : ObservableObject
     private char _systemLetter = 'C';
     private SourceVolumeOption? _hostVolume;
     private DevDriveCreationPlan? _pendingPlan;
-    private ResizeFeasibility? _lastFeasibility;
-    private bool _pendingRealResize;
     private bool _isSyncing;
     private bool _initialized;
 
@@ -77,6 +65,9 @@ public partial class CreateDevDriveViewModel : ObservableObject
 
     /// <summary>Raised when the flow should return to Dev Drive management (Cancel / Back / onboarding).</summary>
     public event Action? NavigateBackRequested;
+
+    /// <summary>Raised after a verified creation so the page can refresh shared app state.</summary>
+    public event Func<Task>? DevDriveCreated;
 
     /// <summary>Available drive letters (e.g. "D:"), excluding ones already in use.</summary>
     public ObservableCollection<string> AvailableDriveLetters { get; } = new();
@@ -206,9 +197,6 @@ public partial class CreateDevDriveViewModel : ObservableObject
     public partial bool HasUsableDevDrive { get; set; }
 
     [ObservableProperty]
-    public partial bool CanReturnToForm { get; set; }
-
-    [ObservableProperty]
     public partial bool CanCreate { get; set; }
 
     [ObservableProperty]
@@ -225,18 +213,8 @@ public partial class CreateDevDriveViewModel : ObservableObject
     [ObservableProperty]
     public partial string CompletionMessage { get; set; } = string.Empty;
 
-    public string GuardrailsMessage => ResizeFeatureGate.EnableRealResizeExecute
-        ? "Nothing changes until you confirm. Resizing requires a second destructive confirmation and administrator approval."
-        : "Nothing changes until you confirm. Creating a VHDX is real; resizing a volume is preview-only in this build.";
-
-    /// <summary>
-    /// Whether the gated "Apply resize" (real, destructive) button is offered. Only ever <c>true</c>
-    /// after a successful real preview AND when the default-off <see cref="ResizeFeatureGate"/> is
-    /// enabled by an explicit self-hosting build.
-    /// </summary>
-    [ObservableProperty]
-    [NotifyCanExecuteChangedFor(nameof(ApplyRealResizeCommand))]
-    public partial bool CanApplyRealResize { get; set; }
+    public string GuardrailsMessage =>
+        "Creation requires administrator approval. Drive resizing is verified before any changes are made.";
 
     /// <summary>Chosen drive letter without the colon (e.g. <c>'D'</c>).</summary>
     public char DriveLetterChar =>
@@ -302,23 +280,6 @@ public partial class CreateDevDriveViewModel : ObservableObject
     [RelayCommand]
     private void BackToManagement() => NavigateBackRequested?.Invoke();
 
-    [RelayCommand]
-    private void ReturnToForm()
-    {
-        if (IsBusy)
-        {
-            return;
-        }
-
-        _pendingPlan = null;
-        _lastFeasibility = null;
-        _pendingRealResize = false;
-        CanApplyRealResize = false;
-        CanReturnToForm = false;
-        HasUsableDevDrive = false;
-        IsComplete = false;
-    }
-
     /// <summary>Builds the plan and asks the page to show the gating confirmation dialog. Executes nothing.</summary>
     [RelayCommand]
     private void Create()
@@ -329,35 +290,12 @@ public partial class CreateDevDriveViewModel : ObservableObject
         }
 
         _pendingPlan = BuildPlan();
-        _pendingRealResize = false;
         ConfirmRequested?.Invoke(BuildConfirmRequest(_pendingPlan));
     }
 
     /// <summary>
-    /// DESTRUCTIVE real resize. Gated three ways: it is only reachable when the default-off-by-default
-    /// <see cref="ResizeFeatureGate.EnableRealResizeExecute"/> flag is on AND a real preview said the
-    /// plan can proceed (<see cref="CanApplyRealResize"/>), it raises a second, explicitly honest
-    /// confirmation, and the helper itself still requires UAC elevation and re-runs the guards. The
-    /// normal build keeps the flag off; a deliberate self-hosting build may enable it.
-    /// </summary>
-    [RelayCommand(CanExecute = nameof(CanApplyRealResize))]
-    private void ApplyRealResize()
-    {
-        if (!CanApplyRealResize || _pendingPlan is null)
-        {
-            return;
-        }
-
-        _pendingRealResize = true;
-        ConfirmRequested?.Invoke(BuildRealResizeConfirm(_pendingPlan));
-    }
-
-    /// <summary>
-    /// Runs the operation the user just confirmed. VHDX = real create+attach (gated, never auto-run);
-    /// resize = a real elevated READ-ONLY feasibility preview (falling back to pure simulation when the
-    /// helper is unavailable or UAC is declined). The destructive real resize only runs from the
-    /// separately-gated <see cref="ApplyRealResizeCommand"/> path. Invoked by the page only when the
-    /// confirm dialog's primary button is clicked.
+    /// Runs the operation the user just confirmed. VHDX and resize each use one explicit confirmation
+    /// followed by one complete elevated transaction.
     /// </summary>
     public async Task ExecuteConfirmedAsync()
     {
@@ -366,37 +304,40 @@ public partial class CreateDevDriveViewModel : ObservableObject
             return;
         }
 
-        // DESTRUCTIVE branch: only set by ApplyRealResizeCommand, which requires the explicit opt-in gate.
-        if (_pendingRealResize)
-        {
-            _pendingRealResize = false;
-            await ExecuteRealResizeAsync(_pendingPlan);
-            return;
-        }
-
         IsBusy = true;
         HasError = false;
         ErrorMessage = string.Empty;
         HasUsableDevDrive = false;
-        CanReturnToForm = false;
         try
         {
             if (_pendingPlan.Source == DevDriveCreationSource.Vhdx)
             {
                 // SAFETY: the creation service runs only here, after explicit confirmation. In production
-                // it is the real provisioner (create + attach the VHDX, no format). Under the
+                // it runs the complete transaction through the elevated helper. Under the
                 // DDM_UITEST_SAFE_MUTATIONS seam it is a SafeFakeVhdProvisioner that simulates the result
                 // with no real disk I/O, so the UI suite can exercise this path safely.
                 DevDriveCreationResult result = await _creationService.CreateVhdDevDriveAsync(_pendingPlan);
                 CompletionTitle = result.Success
-                    ? $"{_pendingPlan.DriveLetter}: \u201C{_pendingPlan.Label}\u201D is almost ready"
-                    : "Couldn't create the Dev Drive";
-                CompletionMessage = result.FormatPending
-                    ? $"{result.Summary} Until it's formatted it shows up as an unformatted disk."
+                    ? $"{result.VhdResult?.DriveLetter ?? _pendingPlan.DriveLetter}: created"
+                    : result.StateUnknown
+                        ? "Creation needs verification"
+                        : "Couldn't create the Dev Drive";
+                ulong createdBytes = result.VhdResult is { SizeBytes: > 0 } vhdResult
+                    ? vhdResult.SizeBytes
+                    : _pendingPlan.SizeBytes;
+                CompletionMessage = result.Success
+                    ? $"{ByteSizeFormatter.Format(createdBytes)} ReFS Dev Drive"
                     : result.Summary;
 
                 if (result.Success)
                 {
+                    HasUsableDevDrive = true;
+                    IsComplete = true;
+                }
+                else if (result.StateUnknown)
+                {
+                    HasUsableDevDrive = false;
+                    CompletionMessage += " Do not retry until you verify the VHDX and disk layout in Disk Management.";
                     IsComplete = true;
                 }
                 else
@@ -408,7 +349,7 @@ public partial class CreateDevDriveViewModel : ObservableObject
             }
             else
             {
-                await PreviewResizeAsync(_pendingPlan);
+                await ExecuteRealResizeAsync(_pendingPlan);
             }
         }
         catch (Exception ex)
@@ -420,78 +361,29 @@ public partial class CreateDevDriveViewModel : ObservableObject
         {
             IsBusy = false;
         }
-    }
 
-    // Real, elevated, READ-ONLY feasibility preview. Asks the helper (--whatif) for the actual
-    // reclaimable space and a go/no-go; falls back to the pure-compute SimulateResize when the helper
-    // is unavailable, missing, or the user declines elevation (PreviewAsync returns null).
-    private async Task PreviewResizeAsync(DevDriveCreationPlan plan)
-    {
-        _lastFeasibility = null;
-        CanApplyRealResize = false;
-
-        ResizeFeasibility? feasibility = await _volumeResizer.PreviewAsync(BuildResizePlan(plan));
-        if (feasibility is null)
+        if (HasUsableDevDrive)
         {
-            // SAFETY: pure arithmetic fallback — no shrink/partition/format API is touched.
-            DevDriveResizeSimulation sim = _creationService.SimulateResize(plan);
-            CompletionTitle = $"Previewed {sim.DevDriveLetter}: \u201C{plan.Label}\u201D (estimated)";
-            CompletionMessage =
-                $"The elevated feasibility check was unavailable, so this is an estimate. Shrinking " +
-                $"{sim.SourceVolumeLetter}: by {ByteSizeFormatter.Format(sim.ShrinkBytes)} would create a " +
-                $"{ByteSizeFormatter.Format(sim.DevDriveBytes)} Dev Drive, leaving {sim.SourceVolumeLetter}: with " +
-                $"{ByteSizeFormatter.Format(sim.NewSourceFreeBytes)} free. No changes were made.";
-            CanReturnToForm = true;
-            IsComplete = true;
-            return;
+            await NotifyDevDriveCreatedAsync();
         }
-
-        _lastFeasibility = feasibility;
-        // Gate the destructive button: only offered when the feature flag is ON and the real check passed.
-        CanApplyRealResize = ResizeFeatureGate.EnableRealResizeExecute && feasibility.CanProceed;
-
-        if (feasibility.CanProceed)
-        {
-            CompletionTitle = $"{feasibility.SourceVolumeLetter}: can be resized for {feasibility.NewDriveLetter}:";
-            CompletionMessage =
-                $"A real feasibility check found {ByteSizeFormatter.Format(feasibility.ReclaimableBytes)} reclaimable on " +
-                $"{feasibility.SourceVolumeLetter}:. Shrinking it by {ByteSizeFormatter.Format(feasibility.AlignedShrinkBytes)} " +
-                $"would create a {ByteSizeFormatter.Format(feasibility.AlignedShrinkBytes)} ReFS Dev Drive at " +
-                $"{feasibility.NewDriveLetter}:. Nothing was changed — this was read-only.";
-        }
-        else
-        {
-            CompletionTitle = $"{feasibility.SourceVolumeLetter}: can't be resized right now";
-            CompletionMessage =
-                $"{feasibility.Reason} Nothing was changed — the feasibility check is read-only.";
-        }
-
-        CanReturnToForm = true;
-        IsComplete = true;
     }
 
     // The destructive shrink → repartition → Format-Volume -DevDrive, via the elevated helper
-    // (--execute). Unreachable unless the self-hosting feature flag is on; the helper re-runs the guards.
+    // (--execute). The helper verifies and binds live disk state before mutation in the same invocation.
     private async Task ExecuteRealResizeAsync(DevDriveCreationPlan plan)
     {
-        if (!ResizeFeatureGate.EnableRealResizeExecute)
-        {
-            // Hard backstop: never run the destructive path while the flag is off, even if invoked.
-            return;
-        }
-
-        IsBusy = true;
         HasError = false;
         ErrorMessage = string.Empty;
-        CanReturnToForm = false;
         try
         {
-            ResizeExecuteOutcome outcome = await _volumeResizer.ExecuteAsync(BuildResizePlan(plan));
+            ResizeExecuteOutcome outcome =
+                await _volumeResizer.VerifyAndExecuteAsync(BuildResizePlan(plan));
             CompletionTitle = outcome.Success
-                ? $"{outcome.NewDriveLetter}: \u201C{plan.Label}\u201D Dev Drive created"
+                ? $"{outcome.NewDriveLetter}: created"
                 : "The resize didn't complete";
-            CompletionMessage = outcome.Message;
-            CanApplyRealResize = false;
+            CompletionMessage = outcome.Success
+                ? $"{ByteSizeFormatter.Format(outcome.DevDriveBytes)} ReFS Dev Drive"
+                : outcome.Message;
 
             if (outcome.Success)
             {
@@ -515,10 +407,20 @@ public partial class CreateDevDriveViewModel : ObservableObject
         {
             HasError = true;
             ErrorMessage = $"Couldn't complete the resize: {ex.Message}";
+            IsComplete = false;
         }
-        finally
+    }
+
+    private async Task NotifyDevDriveCreatedAsync()
+    {
+        if (DevDriveCreated is not { } handlers)
         {
-            IsBusy = false;
+            return;
+        }
+
+        foreach (Func<Task> handler in handlers.GetInvocationList().Cast<Func<Task>>())
+        {
+            await handler();
         }
     }
 
@@ -690,11 +592,15 @@ public partial class CreateDevDriveViewModel : ObservableObject
         {
             TotalBytes = source.SizeBytes;
             UsedBytes = source.UsedBytes;
-            MaximumSelectableBytes = source.FreeBytes;
-            HasEligibleSource = source.FreeBytes >= DevDriveSizeMath.MinimumSizeBytesExact;
+            MaximumSelectableBytes = IsVhdx
+                ? Math.Max(0d, source.FreeBytes - DevDriveSizeMath.VhdContainerHeadroomBytes)
+                : source.FreeBytes;
+            HasEligibleSource = MaximumSelectableBytes >= DevDriveSizeMath.MinimumSizeBytes;
             NoSourceMessage = HasEligibleSource
                 ? string.Empty
-                : $"{source.Letter}: has only {ByteSizeFormatter.Format(source.FreeBytes)} free — a Dev Drive needs at least 50 GB.";
+                : IsVhdx
+                    ? $"{source.Letter}: has only {ByteSizeFormatter.Format(source.FreeBytes)} free — a 50 GB VHDX Dev Drive also needs 128 MB for partition metadata."
+                    : $"{source.Letter}: has only {ByteSizeFormatter.Format(source.FreeBytes)} free — a Dev Drive needs at least 50 GB.";
         }
 
         string usedSize = ByteSizeFormatter.Format(ToUlong(UsedBytes));
@@ -702,7 +608,7 @@ public partial class CreateDevDriveViewModel : ObservableObject
         {
             UsedBarLabel = $"Used \u00B7 {usedSize}";
             SpaceAvailableLabel = "Shrinkable space available";
-            PrimaryActionText = "Preview resize";
+            PrimaryActionText = "Create";
         }
         else
         {
@@ -732,13 +638,13 @@ public partial class CreateDevDriveViewModel : ObservableObject
         {
             char src = SelectedSourceVolume?.Letter ?? _systemLetter;
             SummaryTitle = $"{letter}: \u2014 {size} ReFS Dev Drive";
-            SummaryDetail = $"Shrinks {src}:, keeps {remaining} free. Preview only \u2014 nothing changes.";
+            SummaryDetail = $"Shrinks {src}:, keeps {remaining} free. Verified before changes.";
         }
         else
         {
             string kind = VhdTypeIndex == 0 ? "dynamically expanding" : "fixed-size";
             SummaryTitle = $"{letter}: \u2014 {size} ReFS Dev Drive";
-            SummaryDetail = $"{kind} VHDX. Format needs admin. Host keeps {remaining} free.";
+            SummaryDetail = $"{kind} VHDX. Creates and formats with admin approval. Host keeps {remaining} free.";
         }
     }
 
@@ -802,56 +708,30 @@ public partial class CreateDevDriveViewModel : ObservableObject
 
         if (plan.Source == DevDriveCreationSource.ResizeExistingVolume)
         {
-            DevDriveResizeSimulation sim = _creationService.SimulateResize(plan);
+            char source = plan.SourceVolumeLetter is { } c ? char.ToUpperInvariant(c) : 'C';
+            ulong sourceAfter = plan.SourceVolumeSizeBytes > plan.SizeBytes
+                ? plan.SourceVolumeSizeBytes - plan.SizeBytes
+                : 0UL;
             return new ConfirmRequest
             {
-                Title = "Check resize feasibility?",
+                Title = $"Create {plan.DriveLetter}:?",
                 Message =
-                    $"This runs a READ-ONLY feasibility check on {sim.SourceVolumeLetter}: to measure the real " +
-                    $"reclaimable space and report whether a {size} Dev Drive at {plan.DriveLetter}: is possible. " +
-                    "Windows may prompt for administrator approval. Nothing is shrunk, partitioned, or formatted — " +
-                    "the check only reads the disk layout.",
-                Steps = sim.Steps,
-                ConfirmText = "Check feasibility",
-                IsDestructive = false,
+                    $"Resize {source}: to {ByteSizeFormatter.Format(sourceAfter)}\n" +
+                    $"Create {plan.DriveLetter}: at {size}\n\n" +
+                    "If verification fails, nothing changes.",
+                Steps = Array.Empty<string>(),
+                ConfirmText = "Create",
+                IsDestructive = true,
             };
         }
 
         return new ConfirmRequest
         {
-            Title = "Create Dev Drive?",
-            Message =
-                $"This creates and attaches a raw {size} VHDX at {plan.VhdFilePath}. " +
-                "You then finish in Disk Management (admin): initialize the disk, create a partition, assign a letter, and format it as a ReFS Dev Drive.",
-            Steps = new[]
-            {
-                $"Create a {(plan.VhdIsDynamic ? "dynamically expanding" : "fixed-size")} {size} virtual disk at {plan.VhdFilePath}.",
-                "Attach the disk (Windows re-attaches it at every boot).",
-                "Then in Disk Management (admin): initialize the disk, create a partition, assign a letter, and format it as a ReFS Dev Drive.",
-            },
+            Title = $"Create {plan.DriveLetter}:?",
+            Message = $"Create a {size} Dev Drive at {plan.VhdFilePath}. Windows will request administrator approval.",
+            Steps = Array.Empty<string>(),
             ConfirmText = "Create",
             IsDestructive = false,
-        };
-    }
-
-    // The HONEST second confirmation for the destructive real resize. Only ever raised by
-    // ApplyRealResizeCommand, which requires the explicit self-hosting gate. Plain-language about irreversibility.
-    private ConfirmRequest BuildRealResizeConfirm(DevDriveCreationPlan plan)
-    {
-        ResizeFeasibility? f = _lastFeasibility;
-        char source = plan.SourceVolumeLetter is { } c ? char.ToUpperInvariant(c) : 'C';
-        string size = ByteSizeFormatter.Format(f?.AlignedShrinkBytes is { } a && a > 0 ? a : plan.SizeBytes);
-
-        return new ConfirmRequest
-        {
-            Title = $"Repartition {source}:?",
-            Message =
-                $"This will REALLY shrink {source}: by {size} and create a {size} ReFS Dev Drive at {plan.DriveLetter}:. " +
-                "It repartitions your system drive and is NOT trivially reversible — back up important data first. " +
-                "Windows will prompt for administrator approval before anything changes.",
-            Steps = f?.Steps ?? Array.Empty<string>(),
-            ConfirmText = "Shrink and create",
-            IsDestructive = true,
         };
     }
 

@@ -1,15 +1,12 @@
 using DevDriveCore.Abstractions;
 using DevDriveCore.Models;
-using DevDriveCore.Platform;
 using DevDriveCore.Services;
 using NSubstitute;
 
 namespace DevDriveCore.Tests;
 
 /// <summary>
-/// Tests for <see cref="DevDriveCreationService"/>. The VHDX path is exercised through a REAL
-/// <see cref="VhdProvisioner"/> backed by a mocked <see cref="INativeVhdApi"/> — so no real disk is
-/// ever created/attached — and the resize path is asserted to be pure (it must touch no native API).
+/// Tests for <see cref="DevDriveCreationService"/>. The VHDX provisioner is always mocked.
 /// </summary>
 [TestClass]
 public sealed class DevDriveCreationServiceTests
@@ -18,11 +15,29 @@ public sealed class DevDriveCreationServiceTests
 
     private static ulong Gib(double g) => (ulong)(g * 1024d * 1024d * 1024d);
 
-    private static (DevDriveCreationService Service, INativeVhdApi Api) NewService()
+    private static (DevDriveCreationService Service, IVhdProvisioner Provisioner) NewService()
     {
-        var api = Substitute.For<INativeVhdApi>();
-        var provisioner = new VhdProvisioner(api, new InMemoryFileSystem(), new InMemoryReversibilityStore());
-        return (new DevDriveCreationService(provisioner), api);
+        var provisioner = Substitute.For<IVhdProvisioner>();
+        provisioner
+            .ProvisionAsync(Arg.Any<VhdProvisionPlan>(), Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                VhdProvisionPlan plan = call.Arg<VhdProvisionPlan>();
+                return new VhdProvisionResult
+                {
+                    Success = true,
+                    Executed = true,
+                    Message = $"Created {plan.DriveLetter}: as a ReFS Dev Drive.",
+                    FilePath = plan.FilePath,
+                    PhysicalPath = @"\\.\PhysicalDrive5",
+                    DiskNumber = 5,
+                    DriveLetter = plan.DriveLetter,
+                    SizeBytes = plan.VolumeSizeBytes,
+                    FileSystem = "ReFS",
+                    ReversibilityId = VhdProvisioner.ReversibilityId(plan.FilePath),
+                };
+            });
+        return (new DevDriveCreationService(provisioner), provisioner);
     }
 
     private static DevDriveCreationPlan VhdPlan(bool dynamic = true, ulong? size = null) => new()
@@ -47,38 +62,66 @@ public sealed class DevDriveCreationServiceTests
         SourceVolumeFreeBytes = Gib(420),
     };
 
-    // ---- VHDX orchestration (mock native API only) ---------------------------------------------
+    // ---- VHDX orchestration --------------------------------------------------------------------
 
     [TestMethod]
     public async Task CreateVhdDevDriveAsync_BuildsPlanAndProvisionsViaMockApi()
     {
-        (DevDriveCreationService service, INativeVhdApi api) = NewService();
-        api.AttachVirtualDisk(VhdPath).Returns(@"\\.\PhysicalDrive5");
+        (DevDriveCreationService service, IVhdProvisioner provisioner) = NewService();
 
         DevDriveCreationResult result = await service.CreateVhdDevDriveAsync(VhdPlan());
 
         Assert.IsTrue(result.Success);
         Assert.AreEqual(DevDriveCreationSource.Vhdx, result.Source);
-        Assert.IsTrue(result.FormatPending, "VHDX is created/attached but not yet formatted as a Dev Drive.");
+        Assert.IsFalse(result.StateUnknown);
         Assert.AreEqual(5, result.VhdResult!.DiskNumber);
+        Assert.AreEqual('D', result.VhdResult.DriveLetter);
+        Assert.AreEqual("ReFS", result.VhdResult.FileSystem);
         Assert.AreEqual(@"vhd:" + VhdPath, result.ReversibilityId);
-        // C9: the summary must not claim THIS app assigns/formats the drive letter — that is a manual,
-        // admin Disk Management step.
-        StringAssert.Contains(result.Summary, "Disk Management");
-        Assert.IsFalse(result.Summary.Contains("D:", StringComparison.Ordinal), "Must not claim a drive letter is assigned by this app.");
-        api.Received(1).CreateVirtualDisk(VhdPath, Gib(64), true);
-        api.Received(1).AttachVirtualDisk(VhdPath);
+        StringAssert.Contains(result.Summary, "D:");
+        await provisioner.Received(1).ProvisionAsync(
+            Arg.Is<VhdProvisionPlan>(p =>
+                p.FilePath == VhdPath &&
+                p.MaximumSizeBytes == Gib(64) + DevDriveSizeMath.VhdContainerHeadroomBytesExact &&
+                p.VolumeSizeBytes == Gib(64) &&
+                p.DynamicallyExpanding &&
+                p.DriveLetter == 'D' &&
+                p.Label == "DevDrive"),
+            Arg.Any<CancellationToken>());
     }
 
     [TestMethod]
     public async Task CreateVhdDevDriveAsync_FixedDisk_PassesDynamicFalse()
     {
-        (DevDriveCreationService service, INativeVhdApi api) = NewService();
-        api.AttachVirtualDisk(VhdPath).Returns(@"\\.\PhysicalDrive2");
+        (DevDriveCreationService service, IVhdProvisioner provisioner) = NewService();
 
         await service.CreateVhdDevDriveAsync(VhdPlan(dynamic: false));
 
-        api.Received(1).CreateVirtualDisk(VhdPath, Gib(64), false);
+        await provisioner.Received(1).ProvisionAsync(
+            Arg.Is<VhdProvisionPlan>(p => !p.DynamicallyExpanding),
+            Arg.Any<CancellationToken>());
+    }
+
+    [TestMethod]
+    public async Task CreateVhdDevDriveAsync_StateUnknown_IsPropagated()
+    {
+        (DevDriveCreationService service, IVhdProvisioner provisioner) = NewService();
+        provisioner
+            .ProvisionAsync(Arg.Any<VhdProvisionPlan>(), Arg.Any<CancellationToken>())
+            .Returns(new VhdProvisionResult
+            {
+                Success = false,
+                Executed = true,
+                StateUnknown = true,
+                Message = "Check Disk Management.",
+                FilePath = VhdPath,
+            });
+
+        DevDriveCreationResult result = await service.CreateVhdDevDriveAsync(VhdPlan());
+
+        Assert.IsFalse(result.Success);
+        Assert.IsTrue(result.StateUnknown);
+        Assert.AreEqual("Check Disk Management.", result.Summary);
     }
 
     [TestMethod]
@@ -146,15 +189,15 @@ public sealed class DevDriveCreationServiceTests
     }
 
     [TestMethod]
-    public void SimulateResize_NeverCallsNativeVhdApi()
+    public void SimulateResize_NeverCallsProvisioner()
     {
-        (DevDriveCreationService service, INativeVhdApi api) = NewService();
+        (DevDriveCreationService service, IVhdProvisioner provisioner) = NewService();
 
         service.SimulateResize(ResizePlan());
 
-        api.DidNotReceive().CreateVirtualDisk(Arg.Any<string>(), Arg.Any<ulong>(), Arg.Any<bool>());
-        api.DidNotReceive().AttachVirtualDisk(Arg.Any<string>());
-        api.DidNotReceive().DetachVirtualDisk(Arg.Any<string>());
+        provisioner.DidNotReceive().ProvisionAsync(
+            Arg.Any<VhdProvisionPlan>(),
+            Arg.Any<CancellationToken>());
     }
 
     [TestMethod]
