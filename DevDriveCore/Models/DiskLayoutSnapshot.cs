@@ -42,6 +42,15 @@ public sealed record DiskLayoutSnapshot
     /// <summary>Current size of the source partition in bytes.</summary>
     public ulong PartitionSizeBytes { get; init; }
 
+    /// <summary>Partition number on the source disk.</summary>
+    public int PartitionNumber { get; init; }
+
+    /// <summary>Byte offset of the source partition on its disk.</summary>
+    public ulong PartitionOffsetBytes { get; init; }
+
+    /// <summary>GPT partition GUID when Windows reports one.</summary>
+    public string PartitionGuid { get; init; } = string.Empty;
+
     /// <summary>Smallest size the partition can shrink to (<c>Get-PartitionSupportedSize.SizeMin</c>).</summary>
     public ulong SupportedSizeMinBytes { get; init; }
 
@@ -52,6 +61,9 @@ public sealed record DiskLayoutSnapshot
 
     /// <summary>OS disk number that hosts the source partition.</summary>
     public int DiskNumber { get; init; }
+
+    /// <summary>Stable disk identity reported by <c>Get-Disk.UniqueId</c>.</summary>
+    public string DiskUniqueId { get; init; } = string.Empty;
 
     /// <summary>Partition table style (<c>GPT</c>, <c>MBR</c>, or <c>RAW</c> when not initialized).</summary>
     public string PartitionStyle { get; init; } = string.Empty;
@@ -81,4 +93,9 @@ public sealed record DiskLayoutSnapshot
     /// Empty when not captured (older/unpopulated snapshots), which keeps the guard backward-compatible.
     /// </summary>
     public string DriveLettersInUse { get; init; } = string.Empty;
+
+    /// <summary>
+    /// True only when this Windows build and its inbox Storage module expose Dev Drive formatting.
+    /// </summary>
+    public bool SupportsDevDriveFormat { get; init; }
 }

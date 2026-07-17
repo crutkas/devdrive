@@ -19,9 +19,8 @@ namespace DevDriveCore.Services;
 /// the UI-test seam <c>DDM_UITEST_SAFE_MUTATIONS=1</c> a SAFE fake provisioner is substituted, so the
 /// automated suite never creates a real disk. Every unit test injects a <em>mock</em>
 /// <see cref="INativeVhdApi"/>, so no test creates, mounts, or deletes a real VHD.</para>
-/// <para>This engine deliberately has no UI dependency; surfacing the new disk to the rest of the app
-/// (e.g. initializing the disk and formatting it as a Dev Drive) is a later, separately-wired step the
-/// user performs in Disk Management.</para>
+/// <para>This lower-level engine creates and attaches only. Production invokes it inside the elevated
+/// helper, which immediately applies the separately tested initialization and Dev Drive format script.</para>
 /// </remarks>
 public sealed class VhdProvisioner : IVhdProvisioner
 {
@@ -117,11 +116,19 @@ public sealed class VhdProvisioner : IVhdProvisioner
         {
             _vhdApi.CreateVirtualDisk(filePath, plan.MaximumSizeBytes, plan.DynamicallyExpanding);
         }
-        catch
+        catch (Exception ex)
         {
-            // Creation failed — best-effort delete of any partial file we created, then surface the error.
-            TryDeleteFile(filePath);
-            throw;
+            // CreateVirtualDisk did not report success, so ownership of any file that appeared at this
+            // path is not proven (another process could have won the race after our precheck). Never
+            // delete it. Nothing was attached, and the caller can report the leftover path explicitly.
+            bool fileRemains = _fileSystem.FileExists(filePath);
+            throw new VhdProvisioningException(
+                VhdProvisioningStage.Create,
+                rollbackConfirmed: !fileRemains,
+                fileRemains
+                    ? $"CreateVirtualDisk failed and a file now exists at '{filePath}'. It was not deleted because ownership could not be proven."
+                    : "CreateVirtualDisk failed before a backing file remained.",
+                ex);
         }
 
         // F8 (atomicity): persist the undo receipt BEFORE attaching. AttachVirtualDisk performs a
@@ -154,7 +161,7 @@ public sealed class VhdProvisioner : IVhdProvisioner
             cancellationToken.ThrowIfCancellationRequested();
             physicalPath = _vhdApi.AttachVirtualDisk(filePath);
         }
-        catch
+        catch (Exception ex)
         {
             // F9: AttachVirtualDisk mounts PERMANENT and then resolves the physical path, which can throw
             // AFTER the mount has already taken effect. Detach BEFORE deleting (the backing file is
@@ -162,8 +169,19 @@ public sealed class VhdProvisioner : IVhdProvisioner
             // this operation back, and surface the error.
             TryDetach(filePath);
             TryDeleteFile(filePath);
-            TryRemoveReceipt(entry.Id);
-            throw;
+            bool rollbackConfirmed = !_fileSystem.FileExists(filePath);
+            if (rollbackConfirmed)
+            {
+                TryRemoveReceipt(entry.Id);
+            }
+
+            throw new VhdProvisioningException(
+                VhdProvisioningStage.Attach,
+                rollbackConfirmed,
+                rollbackConfirmed
+                    ? "AttachVirtualDisk failed and the new VHDX was detached and deleted."
+                    : "AttachVirtualDisk failed and cleanup could not be confirmed.",
+                ex);
         }
 
         int? diskNumber = ParseDiskNumber(physicalPath);
@@ -171,6 +189,8 @@ public sealed class VhdProvisioner : IVhdProvisioner
         return new VhdProvisionResult
         {
             Success = true,
+            Executed = true,
+            Message = "Created and attached the VHDX.",
             FilePath = filePath,
             PhysicalPath = physicalPath,
             DiskNumber = diskNumber,

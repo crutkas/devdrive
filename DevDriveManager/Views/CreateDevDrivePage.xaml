@@ -45,7 +45,7 @@
                     IsOpen="True"
                     Message="{x:Bind ViewModel.GuardrailsMessage, Mode=OneTime}"
                     Severity="Informational"
-                    Title="Guarded preview" />
+                    Title="Guarded creation" />
 
                 <ProgressBar
                     AutomationProperties.AutomationId="CreationProgress"
@@ -286,8 +286,7 @@
                             TextWrapping="Wrap" />
                     </StackPanel>
 
-                    <!--  Gated destructive action: collapsed unless a self-hosting build enables the
-                          ResizeFeatureGate and a real preview passes.  -->
+                    <!--  Destructive action: collapsed unless a real live preview passes.  -->
                     <Button
                         HorizontalAlignment="Stretch"
                         HorizontalContentAlignment="Left"

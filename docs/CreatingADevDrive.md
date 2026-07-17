@@ -1,129 +1,137 @@
-# Creating a Dev Drive — the two code paths and every option
+# Creating a Dev Drive
 
-Creating a Dev Drive has **two distinct code paths**, chosen by the **Source** dropdown on the Create
-page:
+The Create page offers two real Windows storage paths:
 
-1. **New VHDX** — create a virtual disk file and attach it as a new drive.
-2. **Resize an existing volume** — shrink a volume (e.g. `C:`) and carve a new partition from the freed
-   space.
+1. **New VHDX** creates a virtual disk file and turns that exact disk into a Dev Drive.
+2. **Resize an existing volume** shrinks a selected partition and creates a Dev Drive in the freed space.
 
-They behave very differently with respect to what is *real* vs. *simulated* — read §3 carefully.
+Neither path requires StorageDsc, WinGet Configuration, a separately installed PowerShell module, the
+.NET runtime, or the Windows App SDK runtime. The app package contains the app and elevated helper;
+privileged storage work uses Windows' inbox Virtual Disk APIs and Storage cmdlets.
+Both paths require Windows 11 build 22621.2338 or later and verify that the inbox
+`Format-Volume` command exposes its `-DevDrive` parameter before mutation.
+
+Key implementation points:
 
 - ViewModel: `DevDriveManager/ViewModels/CreateDevDriveViewModel.cs`
-- Engine: `DevDriveCore/Services/DevDriveCreationService.cs`
-- Size math: `DevDriveCore/Services/DevDriveSizeMath.cs`
-- VHDX provisioning: `DevDriveCore/Platform/VhdProvisioner.cs` (behind `IVhdProvisioner`)
+- Orchestration: `DevDriveCore/Services/DevDriveCreationService.cs`
+- Elevated VHD broker: `DevDriveCore/Services/ElevatedVhdProvisioner.cs`
+- Native VHD stage: `DevDriveCore/Services/VhdProvisioner.cs`
+- VHD format script: `DevDriveCore/Services/VhdPowerShellScript.cs`
+- Elevated helper: `DevDriveManager.FilterProbe/Program.cs`
 
----
-
-## 1. Options on the Create page
+## 1. Options
 
 | Option | Applies to | Default | Notes |
 | --- | --- | --- | --- |
-| **Source** | both | New VHDX | `0` = new VHDX, `1` = resize an existing volume (`SourceIndex`). |
-| **Name / label** | both | `DevDrive` | The volume label. |
-| **Drive letter** | both | `D:` | Chosen from `AvailableDriveLetters` (letters already in use are excluded). |
-| **Size** | both | — | See §2. Minimum **50 GiB**; maximum = the source's free/shrinkable space. |
-| **VHDX file path** | VHDX | — | Where the `.vhdx` is written. |
-| **VHDX type** | VHDX | Dynamically expanding | `0` = dynamically expanding, `1` = fixed size (`VhdTypeIndex`). |
-| **Source volume** | Resize | — | Chosen from `AvailableSourceVolumes` — NTFS/ReFS volumes with at least 50 GB free that can be shrunk. |
+| **Source** | both | New VHDX | Select VHDX creation or resize. |
+| **Name / label** | both | `DevDrive` | Sanitized before it crosses the elevation boundary. |
+| **Drive letter** | both | first free letter from `D:` onward | Rechecked immediately before mutation. |
+| **Size** | both | up to 256 GiB, clamped to available space | Minimum is 50 GiB. A VHDX adds 128 MiB of internal GPT/alignment headroom so the partition still equals the selected size. |
+| **VHDX file path** | VHDX | `C:\DevDrives\DevDrive.vhdx` | Must be a new, fully qualified `.vhdx` path outside reparse points. |
+| **VHDX type** | VHDX | dynamically expanding | Fixed size preallocates the requested capacity. |
+| **Source volume** | resize | system volume when eligible | Only detected NTFS/ReFS volumes with at least 50 GiB free are offered. |
 
-### The size control
+`SelectedBytes` is the single size value behind the slider, number box, unit picker, and disk bar.
+`DevDriveSizeMath` applies the 50 GiB platform minimum and clamps the request to the selected source.
 
-The size is one value — `SelectedBytes` — kept in sync across a **Slider**, a **NumberBox**, a **GB/MB
-unit** dropdown, and a draggable **disk‑bar**. All of the conversions and clamps are pure functions in
-`DevDriveSizeMath` (so they're unit‑tested without any XAML):
+## 2. Confirmation and elevation
 
-- Sizes are **binary** (1024‑based) to match Windows' "GB"/"MB" labelling.
-- The hard **minimum is 50 GiB** (`MinimumSizeBytes`) — this mirrors the platform's
-  `c_minimumSizeForDevVolumeInBytes = 50 << 30`. A request below it drives a *"Minimum 50 GB"* message.
-- The **maximum** selectable size equals the source's free/shrinkable space; a request above it drives a
-  *"Not enough space"* message.
-- The disk‑bar shows three segments — **used + protected**, **remaining free/shrinkable**, and the
-  carved **Dev Drive** chunk — with the drag handle on the boundary between *remaining* and *Dev Drive*.
-  Dragging left grows the Dev Drive; dragging right shrinks it.
+Editing options changes nothing.
 
----
+- VHDX creation has one explicit confirmation followed by one UAC prompt.
+- Resize first runs an elevated, read-only live feasibility preview. A passing preview exposes
+  **Apply resize**, which requires a second destructive confirmation and another UAC prompt.
+- `DDM_UITEST_SAFE_MUTATIONS=1` replaces both production engines with safe fakes.
 
-## 2. The flow: configure → preview → **Confirm**
+The elevated helper accepts base64-encoded JSON plans on its command line, not mutable plan files. A
+create or resize execution plan must also carry an authorization flag set by the production service.
 
-Nothing is created while you are editing. You configure the options, the app shows a **preview**, and a
-mutating action only happens behind an **explicit Confirm**. Cancel/Back always returns to Dev Drive
-management without side effects.
+## 3. New VHDX: complete transaction
 
----
+After confirmation, `ElevatedVhdProvisioner` writes a per-user recovery receipt before invoking the
+bundled helper. The helper then performs these stages:
 
-## 3. What is real vs. simulated  *(the important part)*
+1. Verify Dev Drive formatting support, then refuse an existing file, a non-`.vhdx` path, a path below
+   a junction/symlink, an undersized request, or a target letter outside `D:` through `Z:`.
+2. Create and permanently attach the new VHDX with `CreateVirtualDisk` and `AttachVirtualDisk`.
+3. Resolve the native physical disk number.
+4. Resolve the same backing file through `Get-DiskImage`, then require that it maps to that exact disk
+   number and is still RAW, empty, online, writable, and the expected size.
+5. Recheck the target drive letter.
+6. Run `Initialize-Disk -PartitionStyle GPT`.
+7. Run `New-Partition -Size <selected size>` with the selected letter; the VHD container has separate
+   metadata/alignment headroom.
+8. Run `Format-Volume -DevDrive -FileSystem ReFS`.
+9. Read back the image, disk, partition, filesystem, size, and `fsutil devdrv query` result before
+   reporting success.
 
-### New VHDX — **real create + attach** (format is a separate, pending step)
+The helper imports the inbox Storage module from its absolute System32 path and resolves `fsutil.exe`
+from `Environment.SystemDirectory`; it does not trust `PATH` or a user PowerShell module location.
 
-`DevDriveCreationService.CreateVhdDevDriveAsync`:
+### Failure behavior
 
-- Builds a `VhdProvisionPlan` and runs it through the **real** `IVhdProvisioner`, which **creates and
-  attaches** the `.vhdx` using public Windows VirtualDisk APIs. This genuinely happens once you confirm.
-- The provisioning is **reversible** — the result carries a `ReversibilityId`.
-- **The Dev Drive *format* is not yet wired.** Marking a volume as a trusted Dev Drive requires
-  `Format-Volume -DevDrive` (the underlying `FMIFS_FORMAT_DEV_VOLUME` flag is internal, so this is the
-  only public path) **and administrator**. The engine therefore reports `FormatPending = true` and a
-  summary telling you to finish by formatting the new letter as a ReFS Dev Drive. So after a confirmed
-  VHDX creation you have a real attached virtual disk, but the *"make it a Dev Drive"* format is a
-  deliberate, separate, admin‑gated step that this build does not perform for you.
+The VHDX is new and isolated from existing partitions, so a confirmed failure after attachment can be
+rolled back safely by detaching and deleting that new VHDX. The helper reports that rollback explicitly.
 
-Guards: the plan must be a VHDX plan, must have a file path, and must be **≥ 50 GiB**, or the call
-throws before doing anything.
+If a timeout, process interruption, output failure, or cleanup failure makes the state uncertain, the
+app does not claim success or "nothing changed." It retains the recovery receipt and tells the user to
+inspect Disk Management before retrying. A native create failure never deletes a file whose ownership
+was not proven.
 
-### Resize an existing volume — gated, **off by default**
+## 4. Resize an existing volume
 
-`DevDriveCreationService.SimulateResize` builds a `DevDriveResizeSimulation` preview, and the app can run
-a **real, read-only feasibility check** for it.
+Resize uses the same inbox Storage module but cannot be made atomic.
 
-- **Preview is real and read‑only.** When the elevated helper is available, the app runs
-  `IVolumeResizer.PreviewAsync` → the broker's `--whatif` mode, which queries the *actual* reclaimable
-  space (`Get-PartitionSupportedSize`) and runs the safety guards — it changes nothing. If the helper or
-  UAC is unavailable it falls back to the pure‑computation `SimulateResize`.
-- **Execute is real but OFF BY DEFAULT.** The destructive shrink→repartition→format path is gated behind
-  `ResizeFeatureGate.EnableRealResizeExecute` (an `AppContext` switch that defaults to **false**), an
-  explicit confirm, **UAC elevation**, and in‑helper guards (`ResizeGuard` refuses system / EFI / recovery
-  / removable / RAW volumes and enforces the 50 GiB minimum + alignment). A deliberate self-hosting build
-  enables the switch with `-p:EnableRealResizeExecute=true`; normal builds remain preview-only.
-- **Execution re-checks live state.** Immediately before shrink, the elevated helper re-queries the source
-  partition, disk identity, filesystem, supported minimum size, reclaimable bytes, and target drive
-  letter. If they changed after preview, execution stops before `Resize-Partition`.
-- Repartitioning your system drive is **destructive and not trivially reversible** — the confirm copy
-  says so plainly.
+### Read-only preview
 
-The execute path uses only **public Storage cmdlets** (no internal engines):
+`IVolumeResizer.PreviewAsync` invokes helper mode `resize --whatif`. It queries the live partition,
+disk, filesystem, supported minimum size, reclaimable bytes, bus type, protected status, and used drive
+letters. It changes nothing. If elevation is unavailable or declined, the UI shows a clearly marked
+arithmetic estimate and does not expose execution.
 
-1. Shrink the source (e.g. `C:`) with `Resize-Partition`.
-2. Carve a new partition of the freed size with `New-Partition` and assign the chosen drive letter.
-3. Format the new letter as ReFS with the Dev Drive flag (`Format-Volume -DevDrive`; requires admin).
+### Execute
 
-These are separate operations, not one atomic transaction. If partition creation or formatting fails
-after shrink, inspect Disk Management and do not retry until the layout is understood. Real execution is
-therefore restricted to the disposable-VM self-hosting lane in [Testing.md](Testing.md#7-real-partition-self-hosting).
+After a passing live preview and second confirmation, helper mode `resize --execute` re-runs every
+check immediately before mutation, then:
 
----
+1. `Resize-Partition` shrinks the selected source.
+2. `New-Partition` creates the requested partition and assigns the selected letter.
+3. `Format-Volume -DevDrive -FileSystem ReFS` formats it.
+4. The helper verifies the final disk, partition, letter, size, ReFS filesystem, and
+   `fsutil devdrv query` result before reporting success.
 
-## 4. Which Windows APIs are public (and which aren't)
+The helper refuses RAW/unknown disks, removable media, offline/read-only disks, protected
+system/recovery/reserved partitions, unsupported filesystems, a disk/partition identity that differs
+from the successful preview, a changed aligned size or reclaimable space, and a newly occupied target
+letter.
 
-A summary of which Windows APIs are public vs. internal:
+These three mutation commands are separate. A failure after shrink can leave a smaller source,
+unallocated space, or an unformatted partition. Do not retry an outcome marked partial or unknown until
+the layout is understood. Real resize testing belongs only on the disposable profile in
+[Testing.md](Testing.md#7-real-storage-self-hosting).
 
-| Operation | Status |
+## 5. Public Windows surface
+
+| Operation | Surface used |
 | --- | --- |
-| Create + attach a VHDX | **Public** (Windows VirtualDisk APIs) — used by the VHDX path. |
-| Partitioning / shrink (`Resize-Partition`, `New-Partition`) | **Public** — used by the gated, default-off resize execute path. |
-| Detect a Dev Drive (`FSCTL_QUERY_PERSISTENT_VOLUME_STATE`) | **Public** — used everywhere for detection. |
-| Format a volume *as a Dev Drive* (`FMIFS_FORMAT_DEV_VOLUME`) | **Internal** — so the only public way to do it is `Format-Volume -DevDrive` (admin). This app uses only that public cmdlet. |
+| Create, attach, detach VHDX | `virtdisk.dll` public APIs |
+| Bind backing file to disk | `Get-DiskImage` piped to `Get-Disk` |
+| Initialize and partition | `Initialize-Disk`, `New-Partition` |
+| Shrink an existing partition | `Get-PartitionSupportedSize`, `Resize-Partition` |
+| Format as a Dev Drive | `Format-Volume -DevDrive -FileSystem ReFS` |
+| Verify Dev Drive state | `fsutil devdrv query` and the existing volume detector |
 
----
+`FMIFS_FORMAT_DEV_VOLUME` is internal; the app does not call it. `Format-Volume -DevDrive` is the
+supported public path.
 
-## 5. Safety summary for creation
+## 6. Safety summary
 
-- Editing options changes nothing; a mutation requires an explicit **Confirm**.
-- **VHDX:** create + attach is real and **reversible**; the Dev Drive *format* is a separate admin step
-  the app does not perform (it reports `FormatPending`).
-- **Resize:** the **preview** is real but **read-only** (it only queries reclaimable space); the
-  destructive execute is **off by default** (gated by `ResizeFeatureGate` + confirm + UAC + in-helper
-  guards) — the default UI never repartitions.
-- Unit tests exercise the VHDX path exclusively against a **mock** native API, so no test creates,
-  attaches, or formats a real disk.
+- A mutation requires explicit confirmation and UAC.
+- The helper validates live state after elevation and immediately before mutation.
+- VHD initialization is bound to both the exact image path and native physical disk number.
+- Pre-existing VHDX files are never overwritten.
+- VHD failures are rolled back when safe; uncertain state is surfaced and retains its receipt.
+- Resize requires a passing preview and second confirmation, but remains non-atomic and is not
+  automatically reversible.
+- Unit and safe UI tests never create, attach, shrink, partition, or format a real disk.

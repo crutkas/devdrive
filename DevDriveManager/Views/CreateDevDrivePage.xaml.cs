@@ -17,8 +17,8 @@ namespace DevDriveManager.Views;
 /// <remarks>
 /// <b>SAFETY:</b> the page never executes anything on its own. <see cref="OnConfirmRequested"/> shows a
 /// blocking dialog whose primary button is the only path to <see cref="CreateDevDriveViewModel.ExecuteConfirmedAsync"/>
-/// — and even that creates/attaches only for VHDX and is pure simulation for resize. The app is not
-/// launched during development/validation, so the real provisioner is never exercised here.
+/// — VHDX creation then crosses UAC once for its complete guarded transaction, while resize first performs
+/// a read-only preview and requires a second confirmation before its elevated mutation.
 /// </remarks>
 public sealed partial class CreateDevDrivePage : Page
 {

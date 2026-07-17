@@ -226,6 +226,7 @@ public sealed class ElevatedResizeBroker : IElevatedResizeBroker
         {
             Success = false,
             Executed = true,
+            StateUnknown = true,
             Message = message,
             SourceVolumeLetter = source,
             NewDriveLetter = target,

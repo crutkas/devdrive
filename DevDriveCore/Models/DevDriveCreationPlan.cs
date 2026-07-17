@@ -1,3 +1,5 @@
+using DevDriveCore.Services;
+
 namespace DevDriveCore.Models;
 
 /// <summary>
@@ -47,7 +49,10 @@ public sealed record DevDriveCreationPlan
     public VhdProvisionPlan ToVhdProvisionPlan() => new()
     {
         FilePath = VhdFilePath,
-        MaximumSizeBytes = SizeBytes,
+        MaximumSizeBytes = checked(SizeBytes + DevDriveSizeMath.VhdContainerHeadroomBytesExact),
+        VolumeSizeBytes = SizeBytes,
         DynamicallyExpanding = VhdIsDynamic,
+        DriveLetter = char.ToUpperInvariant(DriveLetter),
+        Label = string.IsNullOrWhiteSpace(Label) ? "DevDrive" : Label.Trim(),
     };
 }

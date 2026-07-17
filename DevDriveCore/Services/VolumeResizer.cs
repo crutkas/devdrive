@@ -14,8 +14,8 @@ namespace DevDriveCore.Services;
 /// <para>
 /// <b>SAFETY.</b> <see cref="PreviewAsync"/> only ever requests <see cref="ResizeMode.WhatIf"/> &#8212;
 /// the helper's READ-ONLY feasibility check. <see cref="ExecuteAsync"/> requests
-/// <see cref="ResizeMode.Execute"/>, the real destructive path; the app keeps that behind a default-off
-/// feature flag + explicit confirmation + UAC. Every unit test injects a MOCK
+/// <see cref="ResizeMode.Execute"/>, the real destructive path; the app keeps that behind a successful
+/// live preview, a second explicit confirmation, and UAC. Every unit test injects a MOCK
 /// <see cref="IElevatedResizeBroker"/> returning canned JSON, so no test spawns the helper or touches a
 /// real disk.
 /// </para>
@@ -37,8 +37,7 @@ public sealed class VolumeResizer : IVolumeResizer
 
     /// <summary>
     /// Convenience factory wiring the REAL <see cref="DevDriveCore.Platform.ElevatedResizeBroker"/>
-    /// (UAC-elevated helper). The app composes this only after the user opts in; the UI-test seam
-    /// substitutes a safe fake instead.
+    /// (UAC-elevated helper). The UI-test seam substitutes a safe fake instead.
     /// </summary>
     public static VolumeResizer CreateDefault() => new(new Platform.ElevatedResizeBroker());
 
@@ -60,7 +59,15 @@ public sealed class VolumeResizer : IVolumeResizer
 
         try
         {
-            return JsonSerializer.Deserialize<ResizeFeasibility>(resultJson, JsonOptions);
+            ResizeFeasibility? feasibility =
+                JsonSerializer.Deserialize<ResizeFeasibility>(resultJson, JsonOptions);
+            return feasibility is { CanProceed: true } && !ResizeGuard.HasPreviewIdentity(feasibility)
+                ? feasibility with
+                {
+                    CanProceed = false,
+                    Reason = "The elevated helper did not return a stable disk and partition identity.",
+                }
+                : feasibility;
         }
         catch (JsonException)
         {
@@ -72,6 +79,12 @@ public sealed class VolumeResizer : IVolumeResizer
     public async Task<ResizeExecuteOutcome> ExecuteAsync(ResizePlan plan, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(plan);
+        if (!ResizeGuard.HasExpectedPreviewIdentity(plan))
+        {
+            return NotExecuted(
+                plan,
+                "Resize execution requires a complete successful preview. Nothing was changed.");
+        }
 
         // F3: stamp the execute-authorization flag ONLY on this gated path, immediately before serializing.
         // The helper refuses a `--execute` request whose plan lacks it, so a bare command-line `--execute`
@@ -91,7 +104,7 @@ public sealed class VolumeResizer : IVolumeResizer
         {
             ResizeExecuteOutcome? outcome =
                 JsonSerializer.Deserialize<ResizeExecuteOutcome>(resultJson, JsonOptions);
-            return IsTrustworthy(outcome)
+            return IsTrustworthy(outcome, plan)
                 ? outcome!
                 : StateUnknown(plan, "The elevated helper returned an incomplete resize result.");
         }
@@ -101,23 +114,43 @@ public sealed class VolumeResizer : IVolumeResizer
         }
     }
 
-    private static bool IsTrustworthy(ResizeExecuteOutcome? outcome) =>
-        outcome is not null &&
-        !string.IsNullOrWhiteSpace(outcome.Message) &&
-        IsDriveLetter(outcome.SourceVolumeLetter) &&
-        IsDriveLetter(outcome.NewDriveLetter) &&
-        (!outcome.Success || outcome.Executed);
-
-    private static bool IsDriveLetter(char letter)
+    private static bool IsTrustworthy(ResizeExecuteOutcome? outcome, ResizePlan plan)
     {
-        char normalized = char.ToUpperInvariant(letter);
-        return normalized is >= 'A' and <= 'Z';
+        if (outcome is null ||
+            string.IsNullOrWhiteSpace(outcome.Message) ||
+            char.ToUpperInvariant(outcome.SourceVolumeLetter) != char.ToUpperInvariant(plan.SourceVolumeLetter) ||
+            char.ToUpperInvariant(outcome.NewDriveLetter) != char.ToUpperInvariant(plan.NewDriveLetter) ||
+            (outcome.Success && !outcome.Executed))
+        {
+            return false;
+        }
+
+        if (!outcome.Success)
+        {
+            return true;
+        }
+
+        if (outcome.StateUnknown ||
+            outcome.DiskNumber != plan.ExpectedDiskNumber ||
+            outcome.PartitionNumber is not > 0 ||
+            outcome.FileSystem is null ||
+            !outcome.FileSystem.Equals("ReFS", StringComparison.OrdinalIgnoreCase) ||
+            !outcome.IsDevDrive)
+        {
+            return false;
+        }
+
+        ulong finalSize = outcome.DevDriveBytes;
+        ulong expectedSize = plan.ExpectedAlignedShrinkBytes!.Value;
+        ulong sizeDelta = finalSize > expectedSize ? finalSize - expectedSize : expectedSize - finalSize;
+        return sizeDelta <= ResizeGuard.DefaultAlignmentBytes;
     }
 
     private static ResizeExecuteOutcome StateUnknown(ResizePlan plan, string reason) => new()
     {
         Success = false,
         Executed = true,
+        StateUnknown = true,
         Message = $"{reason} State is unknown — check Disk Management before retrying.",
         SourceVolumeLetter = char.ToUpperInvariant(plan.SourceVolumeLetter),
         NewDriveLetter = char.ToUpperInvariant(plan.NewDriveLetter),
@@ -128,6 +161,7 @@ public sealed class VolumeResizer : IVolumeResizer
     {
         Success = false,
         Executed = false,
+        StateUnknown = false,
         Message = message,
         SourceVolumeLetter = char.ToUpperInvariant(plan.SourceVolumeLetter),
         NewDriveLetter = char.ToUpperInvariant(plan.NewDriveLetter),

@@ -60,6 +60,11 @@ public static class ResizeGuard
             RequestedShrinkBytes = plan.ShrinkBytes,
             ReclaimableBytes = reclaimable,
             SourceSizeBytesBefore = snapshot.PartitionSizeBytes,
+            DiskNumber = snapshot.DiskNumber,
+            DiskUniqueId = snapshot.DiskUniqueId,
+            PartitionNumber = snapshot.PartitionNumber,
+            PartitionOffsetBytes = snapshot.PartitionOffsetBytes,
+            PartitionGuid = snapshot.PartitionGuid,
             IsReadOnlyProbe = true,
         };
 
@@ -98,6 +103,44 @@ public static class ResizeGuard
         if (!snapshot.SourceResolved)
         {
             return Deny($"Couldn't find volume {source}: on this system.");
+        }
+
+        if (char.ToUpperInvariant(snapshot.SourceVolumeLetter) != source)
+        {
+            return Deny("The resolved source volume does not match the requested drive letter.");
+        }
+
+        if (!snapshot.SupportsDevDriveFormat)
+        {
+            return Deny(
+                "This Windows build or its inbox Storage module does not support Dev Drive formatting. " +
+                "Windows 11 build 22621.2338 or later is required.");
+        }
+
+        if (string.IsNullOrWhiteSpace(snapshot.DiskUniqueId) ||
+            snapshot.PartitionNumber <= 0 ||
+            snapshot.PartitionOffsetBytes == 0)
+        {
+            return Deny("Windows did not provide a stable disk and partition identity for this volume.");
+        }
+
+        // An execute request must remain bound to the exact disk and partition approved by preview.
+        if (plan.ExecuteAuthorized)
+        {
+            if (!HasExpectedPreviewIdentity(plan))
+            {
+                return Deny("The execute request is missing the successful preview identity.");
+            }
+
+            if (snapshot.DiskNumber != plan.ExpectedDiskNumber ||
+                !IdentityEquals(snapshot.DiskUniqueId, plan.ExpectedDiskUniqueId) ||
+                snapshot.PartitionNumber != plan.ExpectedPartitionNumber ||
+                snapshot.PartitionOffsetBytes != plan.ExpectedPartitionOffsetBytes ||
+                (!string.IsNullOrWhiteSpace(plan.ExpectedPartitionGuid) &&
+                 !IdentityEquals(snapshot.PartitionGuid, plan.ExpectedPartitionGuid)))
+            {
+                return Deny("The source disk or partition identity changed after preview. Run the preview again.");
+            }
         }
 
         // 3. Disk-level guards — never repartition an unsafe disk.
@@ -157,6 +200,11 @@ public static class ResizeGuard
                 $"A Dev Drive must be at least {Format(MinimumDevDriveBytes)}; after alignment only {Format(aligned)} is available.");
         }
 
+        if (plan.ExecuteAuthorized && plan.ExpectedAlignedShrinkBytes != aligned)
+        {
+            return Deny("The aligned Dev Drive size changed after preview. Run the preview again.");
+        }
+
         // Go. Describe exactly what the real (elevated) operation would do.
         ulong before = snapshot.PartitionSizeBytes;
         ulong after = before > aligned ? before - aligned : 0UL;
@@ -179,9 +227,36 @@ public static class ResizeGuard
             ReclaimableBytes = reclaimable,
             SourceSizeBytesBefore = before,
             SourceSizeBytesAfter = after,
+            DiskNumber = snapshot.DiskNumber,
+            DiskUniqueId = snapshot.DiskUniqueId,
+            PartitionNumber = snapshot.PartitionNumber,
+            PartitionOffsetBytes = snapshot.PartitionOffsetBytes,
+            PartitionGuid = snapshot.PartitionGuid,
             Steps = steps,
             IsReadOnlyProbe = true,
         };
+    }
+
+    /// <summary>True when an execute plan carries the complete stable identity from a passing preview.</summary>
+    public static bool HasExpectedPreviewIdentity(ResizePlan plan)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        return plan.ExpectedDiskNumber is >= 0 &&
+               !string.IsNullOrWhiteSpace(plan.ExpectedDiskUniqueId) &&
+               plan.ExpectedPartitionNumber is > 0 &&
+               plan.ExpectedPartitionOffsetBytes is > 0 &&
+               plan.ExpectedAlignedShrinkBytes is >= MinimumDevDriveBytes;
+    }
+
+    /// <summary>True when a passing preview returned the stable identity required by execution.</summary>
+    public static bool HasPreviewIdentity(ResizeFeasibility feasibility)
+    {
+        ArgumentNullException.ThrowIfNull(feasibility);
+        return feasibility.DiskNumber is >= 0 &&
+               !string.IsNullOrWhiteSpace(feasibility.DiskUniqueId) &&
+               feasibility.PartitionNumber is > 0 &&
+               feasibility.PartitionOffsetBytes is > 0 &&
+               feasibility.AlignedShrinkBytes >= MinimumDevDriveBytes;
     }
 
     /// <summary>
@@ -264,6 +339,9 @@ public static class ResizeGuard
 
     private static string NormalizeGuid(string? raw) =>
         string.IsNullOrWhiteSpace(raw) ? string.Empty : raw.Trim().Trim('{', '}').ToLowerInvariant();
+
+    private static bool IdentityEquals(string? left, string? right) =>
+        string.Equals(left?.Trim(), right?.Trim(), StringComparison.OrdinalIgnoreCase);
 
     private static string Format(ulong bytes) => ByteSizeFormatter.Format(bytes);
 }

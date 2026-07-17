@@ -6,20 +6,22 @@
     the whole app as administrator (the "Iso app" pattern).
 
     It started life strictly READ-ONLY (`fsutil devdrv query <X:>` => JSON), and that `query` verb still
-    performs NO mutation. It now ALSO hosts the gated resize broker: the `resize` whatif mode is
+    performs NO mutation. It also hosts the resize and VHDX brokers: the `resize` whatif mode is
     READ-ONLY (feasibility only), while the `resize` execute mode is the single DESTRUCTIVE path
     (shrink => carve => Format-Volume DevDrive). The destructive path is reached only via an explicit,
-    authorized execute request that the app keeps behind a default-off feature flag, an explicit user
-    confirmation, and UAC elevation; before it runs, ResizeGuard re-validates the plan against a fresh
-    read-only disk snapshot. See Program.cs for the full safety model.
+    authorized execute request after a successful preview, an explicit second confirmation, and UAC
+    elevation; before it runs, ResizeGuard re-validates the plan against a fresh read-only disk snapshot.
+    The `vhd` verb creates or reverts only an explicitly authorized VHDX path. See Program.cs for the
+    full safety model.
 
-    Self-contained net10.0 win-x64/win-arm64. It ships INSIDE the MSIX next to DevDriveManager.exe (see
+    Self-contained Windows net10.0 win-x64/win-arm64. It ships INSIDE the MSIX next to DevDriveManager.exe (see
     the copy target in DevDriveManager.csproj), so when launched it resolves the .NET runtime that the
     main app carries in that same directory.
   -->
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
     <RootNamespace>DevDriveManager.FilterProbe</RootNamespace>
     <AssemblyName>DevDriveManager.FilterProbe</AssemblyName>
     <Platforms>x64;ARM64</Platforms>
@@ -45,21 +47,10 @@
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
   </PropertyGroup>
 
-  <!--
-    Shared, dependency-free Core sources linked in (NOT a project reference) so the helper reuses the
-    EXACT same resize models + guard logic as the app without taking a Windows-TFM dependency on
-    DevDriveCore (which would break this helper's lean self-contained net10.0 packaging). The wire format
-    across the elevation boundary is JSON, so compiling its own copy of these types is harmless. These
-    files use only System.* + System.Text.Json, so they compile cleanly under plain net10.0.
-  -->
+  <!-- The helper uses the exact tested Core guards, VHD API, scripts, and wire contracts. DevDriveCore.dll
+       already ships beside the main app, so this adds no duplicate package payload. -->
   <ItemGroup>
-    <Compile Include="..\DevDriveCore\ByteSizeFormatter.cs" Link="Shared\ByteSizeFormatter.cs" />
-    <Compile Include="..\DevDriveCore\Models\ResizePlan.cs" Link="Shared\ResizePlan.cs" />
-    <Compile Include="..\DevDriveCore\Models\DiskLayoutSnapshot.cs" Link="Shared\DiskLayoutSnapshot.cs" />
-    <Compile Include="..\DevDriveCore\Models\ResizeFeasibility.cs" Link="Shared\ResizeFeasibility.cs" />
-    <Compile Include="..\DevDriveCore\Models\ResizeExecuteOutcome.cs" Link="Shared\ResizeExecuteOutcome.cs" />
-    <Compile Include="..\DevDriveCore\Services\ResizeGuard.cs" Link="Shared\ResizeGuard.cs" />
-    <Compile Include="..\DevDriveCore\Services\ResizePowerShellScript.cs" Link="Shared\ResizePowerShellScript.cs" />
+    <ProjectReference Include="..\DevDriveCore\DevDriveCore.csproj" />
   </ItemGroup>
 
 </Project>

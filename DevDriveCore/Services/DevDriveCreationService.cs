@@ -8,18 +8,15 @@ namespace DevDriveCore.Services;
 /// <list type="bullet">
 ///   <item><description><b>VHDX</b> — <see cref="CreateVhdDevDriveAsync"/> builds a
 ///   <see cref="VhdProvisionPlan"/> and runs it through an injected
-///   <see cref="DevDriveCore.Abstractions.IVhdProvisioner"/> (create + attach the disk).</description></item>
+///   <see cref="DevDriveCore.Abstractions.IVhdProvisioner"/>.</description></item>
 ///   <item><description><b>Resize</b> — <see cref="SimulateResize"/> only ever computes a
 ///   <see cref="DevDriveResizeSimulation"/> preview; it never calls a shrink/partition API.</description></item>
 /// </list>
 /// </summary>
 /// <remarks>
-/// <b>SAFETY:</b> the resize path is simulation-only by construction. The VHDX path is gated behind an
-/// explicit user confirmation in the UI and never auto-executes; unit tests exercise it exclusively
-/// against a mock <see cref="DevDriveCore.Abstractions.INativeVhdApi"/>, so no test creates, attaches,
-/// or formats a real disk. Even when confirmed, this engine only creates and attaches the VHDX — the
-/// ReFS dev-volume <i>format</i> (<c>Format-Volume -DevDrive</c>, which requires admin) is a separate,
-/// not-yet-wired step, so <see cref="DevDriveCreationResult.FormatPending"/> is reported.
+/// <b>SAFETY:</b> the resize method here remains pure preview arithmetic. The VHDX path runs only after
+/// explicit UI confirmation; production delegates the complete operation to the bundled elevated helper,
+/// while unit and UI tests inject safe fakes and never touch a real disk.
 /// </remarks>
 public sealed class DevDriveCreationService : IDevDriveCreationService
 {
@@ -32,12 +29,9 @@ public sealed class DevDriveCreationService : IDevDriveCreationService
     }
 
     /// <summary>
-    /// Convenience factory wiring the REAL <see cref="VhdProvisioner"/>. The app composes this so a
-    /// confirmed VHDX creation can run; nothing executes until the user confirms, and the resize path
-    /// never touches it. Inject a different <see cref="DevDriveCore.Abstractions.IVhdProvisioner"/> to
-    /// neutralise real I/O.
+    /// Convenience factory wiring the complete elevated VHDX provisioner.
     /// </summary>
-    public static DevDriveCreationService CreateDefault() => new(VhdProvisioner.CreateDefault());
+    public static DevDriveCreationService CreateDefault() => new(ElevatedVhdProvisioner.CreateDefault());
 
     /// <inheritdoc />
     public async Task<DevDriveCreationResult> CreateVhdDevDriveAsync(DevDriveCreationPlan plan, CancellationToken cancellationToken = default)
@@ -58,17 +52,18 @@ public sealed class DevDriveCreationService : IDevDriveCreationService
             .ProvisionAsync(plan.ToVhdProvisionPlan(), cancellationToken)
             .ConfigureAwait(false);
 
-        string disk = vhd.DiskNumber is int n ? $"disk {n}" : "the new disk";
         return new DevDriveCreationResult
         {
             Success = vhd.Success,
             Source = DevDriveCreationSource.Vhdx,
             VhdResult = vhd,
             ReversibilityId = vhd.ReversibilityId,
-            FormatPending = true,
-            Summary =
-                $"Created and attached a raw {ByteSizeFormatter.Format(plan.SizeBytes)} VHDX at {plan.VhdFilePath} as {disk}. " +
-                "Finish in Disk Management (admin): initialize the disk, create a partition, assign a letter, then format it as a ReFS Dev Drive.",
+            StateUnknown = vhd.StateUnknown,
+            Summary = string.IsNullOrWhiteSpace(vhd.Message)
+                ? vhd.Success
+                    ? $"Created {plan.DriveLetter}: as a ReFS Dev Drive backed by {plan.VhdFilePath}."
+                    : "The VHDX Dev Drive was not created."
+                : vhd.Message,
         };
     }
 

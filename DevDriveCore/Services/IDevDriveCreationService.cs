@@ -10,9 +10,8 @@ namespace DevDriveCore.Services;
 public interface IDevDriveCreationService
 {
     /// <summary>
-    /// Creates and attaches the VHDX described by <paramref name="plan"/> (which must have
-    /// <see cref="DevDriveCreationPlan.Source"/> == <see cref="DevDriveCreationSource.Vhdx"/>). Does
-    /// NOT format the volume; <see cref="DevDriveCreationResult.FormatPending"/> is set.
+    /// Creates, attaches, initializes, partitions, and formats the VHDX described by
+    /// <paramref name="plan"/> as a ReFS Dev Drive.
     /// </summary>
     Task<DevDriveCreationResult> CreateVhdDevDriveAsync(DevDriveCreationPlan plan, CancellationToken cancellationToken = default);
 

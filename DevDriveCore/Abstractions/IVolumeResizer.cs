@@ -13,7 +13,7 @@ namespace DevDriveCore.Abstractions;
 /// <b>SAFETY.</b> <see cref="PreviewAsync"/> is a READ-ONLY feasibility check (the helper's
 /// <c>--whatif</c> mode): it queries real reclaimable space and runs every guard, but mutates nothing.
 /// <see cref="ExecuteAsync"/> is the real, destructive shrink &#8594; repartition &#8594; format and
-/// must stay behind the app's default-off feature flag + explicit user confirmation + UAC elevation.
+/// must stay behind a successful live preview + explicit user confirmation + UAC elevation.
 /// </para>
 /// </remarks>
 public interface IVolumeResizer

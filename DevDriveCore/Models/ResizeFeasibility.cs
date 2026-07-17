@@ -35,6 +35,21 @@ public sealed record ResizeFeasibility
     /// <summary>Source partition size after the shrink.</summary>
     public ulong SourceSizeBytesAfter { get; init; }
 
+    /// <summary>Disk number bound to this preview.</summary>
+    public int DiskNumber { get; init; }
+
+    /// <summary>Stable disk identity bound to this preview.</summary>
+    public string DiskUniqueId { get; init; } = string.Empty;
+
+    /// <summary>Partition number bound to this preview.</summary>
+    public int PartitionNumber { get; init; }
+
+    /// <summary>Partition byte offset bound to this preview.</summary>
+    public ulong PartitionOffsetBytes { get; init; }
+
+    /// <summary>GPT partition GUID bound to this preview, when available.</summary>
+    public string PartitionGuid { get; init; } = string.Empty;
+
     /// <summary>Ordered, human-readable description of what the real (elevated) operation would perform.</summary>
     public IReadOnlyList<string> Steps { get; init; } = Array.Empty<string>();
 

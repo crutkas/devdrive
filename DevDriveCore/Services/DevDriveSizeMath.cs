@@ -32,6 +32,14 @@ public static class DevDriveSizeMath
     public const ulong MinimumSizeBytesExact = 50UL * 1024UL * 1024UL * 1024UL;
 
     /// <summary>
+    /// Extra VHD container capacity reserved for GPT metadata/alignment so the formatted partition can
+    /// still equal the user-selected Dev Drive size, including at the 50 GiB minimum.
+    /// </summary>
+    public const ulong VhdContainerHeadroomBytesExact = 128UL * 1024UL * 1024UL;
+
+    public const double VhdContainerHeadroomBytes = VhdContainerHeadroomBytesExact;
+
+    /// <summary>
     /// Clamps <paramref name="requestedBytes"/> into the valid Dev Drive range
     /// <c>[<see cref="MinimumSizeBytes"/>, <paramref name="maximumSelectableBytes"/>]</c>. When the
     /// source can't even fit the minimum the minimum is returned (and callers should flag the source

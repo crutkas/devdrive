@@ -32,18 +32,6 @@ its disk operation is active, but the main-page operation lifetime is still unre
 **Next:** own operations above reloadable row collections and gate refresh/navigation on one shared busy
 state.
 
-### SH-003: VHDX creation does not finish a Dev Drive
-
-**Severity:** Error  
-**Evidence:** `DevDriveCore/Services/DevDriveCreationService.cs`,
-`DevDriveManager/ViewModels/CreateDevDriveViewModel.cs`
-
-The VHD path creates and attaches a raw virtual disk. Initialization, partition creation, drive-letter
-assignment, and `Format-Volume -DevDrive` remain manual, so this path is not end-to-end self-hosting.
-
-**Next:** add an elevated, guarded initialization/partition/format broker with the same preview,
-confirmation, and read-back model as resize.
-
 ### SH-004: Partition execution is not atomic and has no automatic recovery
 
 **Severity:** Error  
@@ -55,11 +43,11 @@ after shrink can leave a smaller source volume, unallocated space, or an unforma
 Management, but it cannot safely roll the layout back.
 
 **Next:** validate interruption cases in a disposable VM and publish a reviewed recovery runbook before
-enabling this outside the explicit self-hosting build.
+broad release.
 
 ### SH-005: Persistent reversibility state is not cross-process serialized
 
-**Severity:** Warning  
+**Severity:** Warning
 **Evidence:** `DevDriveCore/Platform/JsonFileReversibilityStore.cs`
 
 Writes are atomic, but two app instances can both read the old JSON and then replace it, losing one
@@ -133,7 +121,8 @@ user types, which can block the UI on unavailable network paths.
 
 **Severity:** Warning  
 **Evidence:** `DevDriveManager.FilterProbe/Program.cs`,
-`DevDriveCore.Tests/ResizePowerShellScriptTests.cs`
+`DevDriveCore.Tests/ResizePowerShellScriptTests.cs`,
+`DevDriveCore.Tests/VhdPowerShellScriptTests.cs`
 
 The generated privileged scripts and pure guard are unit-tested, but argument dispatch, output-path
 hardening, elevation, PowerShell execution, and partial-failure reporting are not exercised together.
@@ -163,6 +152,20 @@ reflection-based `System.Text.Json`. This preserves runtime correctness but incr
 **Next:** add source-generated JSON contexts for all persisted/elevation types, test a published Release,
 then reconsider trimming.
 
+### SH-015: VHDX recovery receipts have no UI
+
+**Severity:** Warning
+**Evidence:** `DevDriveCore/Services/ElevatedVhdProvisioner.cs`,
+`DevDriveManager/ViewModels/CreateDevDriveViewModel.cs`
+
+VHDX creation records enough information to run the elevated detach/delete recovery path, and the core
+implements that path, but the app has no surface that lists those receipts or lets the user invoke it.
+An uncertain-state outcome therefore still sends the user to Disk Management.
+
+**Next:** add a recovery page that distinguishes successful attached Dev Drives from incomplete VHDX
+operations, previews detach/delete, requires confirmation and UAC, and removes a receipt only after
+verified cleanup.
+
 ## Resolved in the self-hosting readiness branch
 
 | Item | Resolution |
@@ -178,5 +181,13 @@ then reconsider trimming.
 | Lost or malformed execute output could report that nothing changed | Nonzero helper exits, missing output, and malformed execute results now report state unknown and require disk inspection before retry. |
 | Live preflight failures were reported as partial disk mutations | The script flushes a mutation-start marker immediately before `Resize-Partition`, distinguishing safe preflight rejection from possible partial execution. |
 | Over-the-shoulder elevation rejected the caller's temp output root | The broker trims `%TEMP%`'s trailing separator before quoting `--allowed-root`, so Windows argument parsing preserves the root path. |
-| Resize gate had no supported activation path | `/p:EnableRealResizeExecute=true` emits the AppContext switch for deliberate self-hosting builds. |
+| SH-003: VHDX creation stopped at a raw attached disk | One elevated helper transaction now creates, attaches, binds to the exact image/disk, initializes GPT, partitions, formats with `-DevDrive`, and verifies the final ReFS Dev Drive. |
+| VHD attach required elevation before formatting could even begin | The bundled self-contained helper now owns native create/attach and the Storage-cmdlet finalization under one UAC prompt. |
+| Normal builds could not apply a passing resize preview | The production UI now exposes execute after a successful live preview while retaining a second destructive confirmation, UAC, authorization, and immediate helper-side revalidation. |
+| Privileged Storage commands relied on normal command discovery | The helper imports the inbox Storage module from its absolute System32 path and resolves executables from System32. |
+| Native VHD create failure could delete a raced-in target file | Failed create no longer deletes a path whose ownership was not proven; attach rollback retains its receipt unless cleanup is confirmed. |
 | Resize used stale preview values at execution | The helper re-queries live disk identity, filesystem, supported size, free letter, and reclaimable bytes immediately before shrink. |
+| Resize execution was not bound to the exact successful preview | Execute plans now carry the disk unique ID, partition number/offset/GUID, and aligned size; the helper rejects any mismatch before mutation. |
+| Unsupported Windows builds could reach shrink before `Format-Volume -DevDrive` failed | VHD and resize paths verify build 22621.2338+ using the real Windows UBR and the inbox command's `DevDrive` parameter before mutation. |
+| Resize success trusted incomplete final readback | Success now requires matching disk, letter, size, ReFS, and a successful `fsutil devdrv query`; malformed output becomes unknown state. |
+| A partial native VHD create could discard its recovery receipt | Unconfirmed cleanup is now reported as executed/unknown so the receipt is retained for recovery. |

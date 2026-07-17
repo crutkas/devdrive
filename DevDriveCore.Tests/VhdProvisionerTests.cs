@@ -97,7 +97,7 @@ public sealed class VhdProvisionerTests
     // ---- failure / rollback --------------------------------------------------------------------
 
     [TestMethod]
-    public async Task ProvisionAsync_CreateFails_DeletesPartialFile_NoAttach_NoEntry()
+    public async Task ProvisionAsync_CreateFails_DoesNotDeleteUnownedRaceFile()
     {
         var api = Substitute.For<INativeVhdApi>();
         var fs = new InMemoryFileSystem();
@@ -111,9 +111,12 @@ public sealed class VhdProvisionerTests
         var store = new InMemoryReversibilityStore();
         var provisioner = new VhdProvisioner(api, fs, store);
 
-        await Assert.ThrowsExactlyAsync<Win32Exception>(async () => await provisioner.ProvisionAsync(Plan()));
+        VhdProvisioningException error = await Assert.ThrowsExactlyAsync<VhdProvisioningException>(
+            async () => await provisioner.ProvisionAsync(Plan()));
 
-        Assert.IsFalse(fs.FileExists(VhdPath), "Self-created partial file must be cleaned up.");
+        Assert.AreEqual(VhdProvisioningStage.Create, error.Stage);
+        Assert.IsFalse(error.RollbackConfirmed);
+        Assert.IsTrue(fs.FileExists(VhdPath), "A file whose ownership is unproven must never be deleted.");
         api.DidNotReceive().AttachVirtualDisk(Arg.Any<string>());
         Assert.IsEmpty(store.GetAll());
     }
@@ -159,8 +162,11 @@ public sealed class VhdProvisionerTests
         var store = new InMemoryReversibilityStore();
         var provisioner = new VhdProvisioner(api, fs, store);
 
-        await Assert.ThrowsExactlyAsync<Win32Exception>(async () => await provisioner.ProvisionAsync(Plan()));
+        VhdProvisioningException error = await Assert.ThrowsExactlyAsync<VhdProvisioningException>(
+            async () => await provisioner.ProvisionAsync(Plan()));
 
+        Assert.AreEqual(VhdProvisioningStage.Attach, error.Stage);
+        Assert.IsTrue(error.RollbackConfirmed);
         Assert.IsFalse(fs.FileExists(VhdPath), "Created file must be deleted when surfacing fails.");
         Assert.IsEmpty(store.GetAll());
     }
@@ -195,7 +201,8 @@ public sealed class VhdProvisionerTests
         var store = new InMemoryReversibilityStore();
         var provisioner = new VhdProvisioner(api, fs, store);
 
-        await Assert.ThrowsExactlyAsync<Win32Exception>(async () => await provisioner.ProvisionAsync(Plan()));
+        VhdProvisioningException error = await Assert.ThrowsExactlyAsync<VhdProvisioningException>(
+            async () => await provisioner.ProvisionAsync(Plan()));
 
         // Must DETACH the possibly-mounted disk BEFORE deleting the (otherwise locked) backing file.
         Received.InOrder(() =>
@@ -203,6 +210,7 @@ public sealed class VhdProvisionerTests
             api.AttachVirtualDisk(VhdPath);
             api.DetachVirtualDisk(VhdPath);
         });
+        Assert.IsTrue(error.RollbackConfirmed);
         Assert.IsFalse(fs.FileExists(VhdPath), "The backing file must be deleted after detaching.");
         Assert.IsEmpty(store.GetAll(), "A fully rolled-back provision leaves no receipt.");
     }
