@@ -114,6 +114,12 @@ public sealed partial class CreateDevDrivePage : Page
             if (result == ContentDialogResult.Primary)
             {
                 await ViewModel.ExecuteConfirmedAsync();
+                if (ViewModel.HasUsableDevDrive)
+                {
+                    // All top-level pages bind to App.Shared, so this is the same reload as the
+                    // Dashboard's Refresh button and updates drives, caches, benchmarks, and health.
+                    await App.Shared.LoadCommand.ExecuteAsync(null);
+                }
             }
         }
         finally
