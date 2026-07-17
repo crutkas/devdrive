@@ -40,8 +40,9 @@ Key implementation points:
 Editing options changes nothing.
 
 - VHDX creation has one explicit confirmation followed by one UAC prompt.
-- Resize first runs an elevated, read-only live feasibility preview. A passing preview exposes
-  **Apply resize**, which requires a second destructive confirmation and another UAC prompt.
+- Resize first runs an elevated, read-only live feasibility preview. A passing preview shows the final
+  source and target sizes with **Cancel** and **Create**. Selecting **Create** is the destructive
+  confirmation and triggers another UAC prompt.
 - `DDM_UITEST_SAFE_MUTATIONS=1` replaces both production engines with safe fakes.
 
 The elevated helper accepts base64-encoded JSON plans on its command line, not mutable plan files. A
@@ -87,13 +88,13 @@ Resize uses the same inbox Storage module but cannot be made atomic.
 
 `IVolumeResizer.PreviewAsync` invokes helper mode `resize --whatif`. It queries the live partition,
 disk, filesystem, supported minimum size, reclaimable bytes, bus type, protected status, and used drive
-letters. It changes nothing. If elevation is unavailable or declined, the UI shows a clearly marked
-arithmetic estimate and does not expose execution.
+letters. It changes nothing. If elevation is unavailable or declined, the UI reports that the check was
+unavailable and does not expose execution.
 
 ### Execute
 
-After a passing live preview and second confirmation, helper mode `resize --execute` re-runs every
-check immediately before mutation, then:
+After a passing live preview and selecting **Create**, helper mode `resize --execute` re-runs every check
+immediately before mutation, then:
 
 1. `Resize-Partition` shrinks the selected source.
 2. `New-Partition` creates the requested partition and assigns the selected letter.
