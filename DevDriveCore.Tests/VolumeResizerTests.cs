@@ -108,6 +108,64 @@ public sealed class VolumeResizerTests
     // ---- execute (--execute) -------------------------------------------------------------------
 
     [TestMethod]
+    public async Task VerifyAndExecuteAsync_RequestsOneExecuteWithoutPreviewIdentity()
+    {
+        var expected = new ResizeExecuteOutcome
+        {
+            Success = true,
+            Executed = true,
+            Message = "done",
+            SourceVolumeLetter = 'C',
+            NewDriveLetter = 'D',
+            DevDriveBytes = 100UL * Gib,
+            DiskNumber = 7,
+            PartitionNumber = 4,
+            FileSystem = "ReFS",
+            IsDevDrive = true,
+        };
+        var broker = new RecordingBroker(JsonSerializer.Serialize(expected));
+        var resizer = new VolumeResizer(broker);
+
+        ResizeExecuteOutcome outcome = await resizer.VerifyAndExecuteAsync(Plan());
+
+        Assert.IsTrue(outcome.Success);
+        Assert.AreEqual(1, broker.CallCount);
+        Assert.AreEqual(ResizeMode.Execute, broker.LastRequest!.Mode);
+        ResizePlan sent = JsonSerializer.Deserialize<ResizePlan>(broker.LastRequest.PlanJson)!;
+        Assert.IsTrue(sent.ExecuteAuthorized);
+        Assert.IsNull(sent.ExpectedDiskNumber);
+        Assert.IsTrue(string.IsNullOrEmpty(sent.ExpectedDiskUniqueId));
+    }
+
+    [TestMethod]
+    public async Task VerifyAndExecuteAsync_NullResponse_ReportsNotExecuted()
+    {
+        var resizer = new VolumeResizer(new RecordingBroker(null));
+
+        ResizeExecuteOutcome outcome = await resizer.VerifyAndExecuteAsync(Plan());
+
+        Assert.IsFalse(outcome.Success);
+        Assert.IsFalse(outcome.Executed, "A null helper response before mutation must not claim execution.");
+        StringAssert.Contains(outcome.Message, "Nothing was changed", StringComparison.OrdinalIgnoreCase);
+    }
+
+    [TestMethod]
+    [DataRow("garbage")]
+    [DataRow("{ broken")]
+    [DataRow("{}")]
+    public async Task VerifyAndExecuteAsync_UntrustworthyResponse_ReportsStateUnknown(string response)
+    {
+        var resizer = new VolumeResizer(new RecordingBroker(response));
+
+        ResizeExecuteOutcome outcome = await resizer.VerifyAndExecuteAsync(Plan());
+
+        Assert.IsTrue(outcome.Executed, "An unusable execute response must conservatively report unknown state.");
+        Assert.IsTrue(outcome.StateUnknown);
+        Assert.IsFalse(outcome.Success);
+        StringAssert.Contains(outcome.Message, "State is unknown", StringComparison.OrdinalIgnoreCase);
+    }
+
+    [TestMethod]
     public async Task ExecuteAsync_RequestsExecute_AndParsesOutcome()
     {
         var expected = new ResizeExecuteOutcome
@@ -204,6 +262,7 @@ public sealed class VolumeResizerTests
     {
         var resizer = new VolumeResizer(new RecordingBroker(null));
         await Assert.ThrowsExactlyAsync<ArgumentNullException>(async () => await resizer.PreviewAsync(null!));
+        await Assert.ThrowsExactlyAsync<ArgumentNullException>(async () => await resizer.VerifyAndExecuteAsync(null!));
         await Assert.ThrowsExactlyAsync<ArgumentNullException>(async () => await resizer.ExecuteAsync(null!));
     }
 

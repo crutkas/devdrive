@@ -4,10 +4,9 @@ A Windows desktop app (WinUI 3 / Windows App SDK) that helps developers discover
 plan a move to a [Dev Drive](https://learn.microsoft.com/windows/dev-drive/) — a ReFS volume tuned
 for developer workloads (package caches, source trees, build output).
 
-> **Safety-first design.** Changes require an explicit confirmation; destructive resize also requires a
-> live read-only preview and a second confirmation. Package-cache moves stay per-user and reversible.
-> Storage creation crosses a narrow UAC-elevated helper that revalidates live state immediately before
-> mutation and reports partial or unknown outcomes instead of claiming success.
+> **Safety-first design.** Changes require an explicit confirmation. For destructive resize, that one
+> confirmation starts an elevated helper that verifies and binds live disk state before mutation, then
+> revalidates it immediately before shrinking. Package-cache moves stay per-user and reversible.
 
 ---
 
@@ -81,7 +80,7 @@ throwaway temp directories.
 |---|---|---|---|
 | `PackageCacheMover` | `IPackageCacheMover` | Creates the target dir, copies + SHA-256-verifies the cache (with progress), repoints the per-user env var (`IEnvironmentWriter`), records reversibility. | ✅ restore env (+ optional move-back) |
 | `ElevatedVhdProvisioner` | `IVhdProvisioner` | Creates/attaches a new VHDX, binds the exact image to its disk, initializes GPT, partitions, formats with `Format-Volume -DevDrive`, and verifies ReFS/Dev Drive state. | Core recovery path can detach + delete; recovery UI is not yet exposed. |
-| `VolumeResizer` | `IVolumeResizer` | Runs a live read-only preview, then after a second confirmation shrinks, partitions, formats, and reads back the new Dev Drive through the elevated helper. | No; separate Storage operations are not atomic. |
+| `VolumeResizer` | `IVolumeResizer` | After one confirmation, verifies live disk state, shrinks, partitions, formats, and reads back the new Dev Drive through one elevated helper invocation. | No; separate Storage operations are not atomic. |
 
 Wiring: `PackageCachesViewModel` → `MutationComposition.CreatePackageCacheMoveCoordinator()`;
 `CreateDevDriveViewModel` → `MutationComposition.CreateDevDriveCreationService()`. Supporting
@@ -157,8 +156,8 @@ For real storage self-hosting, follow
 - Package-cache mutations are preview → explicit confirm → per-user (no admin) → reversible. Detection
   and benchmarks are read-only / scratch-only. Disk partitioning is the documented exception: it
   requires admin and is not automatically reversible.
-- Real resize execution is exposed only after a passing live preview; a second confirmation, UAC,
-  execution authorization, and in-helper live safety checks still apply.
+- Real resize uses one explicit confirmation and one UAC prompt; execution authorization, live guard
+  evaluation, identity binding, and immediate in-helper revalidation still apply.
 - **Tests never touch your data:** every test runs against in-memory fakes or unique throwaway temp
   directories (all VHD tests mock `INativeVhdApi`); the UI suite uses a safe-mutation seam.
 - The current UI suite is machine-profile-specific; general self-hosting blockers are tracked in

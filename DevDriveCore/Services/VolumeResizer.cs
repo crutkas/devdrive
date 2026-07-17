@@ -13,9 +13,9 @@ namespace DevDriveCore.Services;
 /// <remarks>
 /// <para>
 /// <b>SAFETY.</b> <see cref="PreviewAsync"/> only ever requests <see cref="ResizeMode.WhatIf"/> &#8212;
-/// the helper's READ-ONLY feasibility check. <see cref="ExecuteAsync"/> requests
-/// <see cref="ResizeMode.Execute"/>, the real destructive path; the app keeps that behind a successful
-/// live preview, a second explicit confirmation, and UAC. Every unit test injects a MOCK
+/// the helper's READ-ONLY feasibility check. <see cref="VerifyAndExecuteAsync"/> requests
+/// <see cref="ResizeMode.Execute"/> after the user's explicit Create confirmation; the helper verifies
+/// and binds live identity before mutation in that one UAC-elevated invocation. Every unit test injects a MOCK
 /// <see cref="IElevatedResizeBroker"/> returning canned JSON, so no test spawns the helper or touches a
 /// real disk.
 /// </para>
@@ -76,19 +76,37 @@ public sealed class VolumeResizer : IVolumeResizer
     }
 
     /// <inheritdoc />
-    public async Task<ResizeExecuteOutcome> ExecuteAsync(ResizePlan plan, CancellationToken cancellationToken = default)
+    public Task<ResizeExecuteOutcome> VerifyAndExecuteAsync(
+        ResizePlan plan,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        return InvokeExecuteAsync(plan, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public Task<ResizeExecuteOutcome> ExecuteAsync(
+        ResizePlan plan,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(plan);
         if (!ResizeGuard.HasExpectedPreviewIdentity(plan))
         {
-            return NotExecuted(
+            return Task.FromResult(NotExecuted(
                 plan,
-                "Resize execution requires a complete successful preview. Nothing was changed.");
+                "Resize execution requires a complete successful preview. Nothing was changed."));
         }
 
+        return InvokeExecuteAsync(plan, cancellationToken);
+    }
+
+    private async Task<ResizeExecuteOutcome> InvokeExecuteAsync(
+        ResizePlan plan,
+        CancellationToken cancellationToken)
+    {
         // F3: stamp the execute-authorization flag ONLY on this gated path, immediately before serializing.
         // The helper refuses a `--execute` request whose plan lacks it, so a bare command-line `--execute`
-        // (or a reused preview plan) can't reach the destructive path. Defence in depth — see ResizePlan.
+        // can't reach the destructive path. Defence in depth — see ResizePlan.
         ResizePlan authorizedPlan = plan with { ExecuteAuthorized = true };
         string planJson = JsonSerializer.Serialize(authorizedPlan, JsonOptions);
         string? resultJson = await _broker
@@ -131,7 +149,8 @@ public sealed class VolumeResizer : IVolumeResizer
         }
 
         if (outcome.StateUnknown ||
-            outcome.DiskNumber != plan.ExpectedDiskNumber ||
+            outcome.DiskNumber is not >= 0 ||
+            (plan.ExpectedDiskNumber is { } expectedDisk && outcome.DiskNumber != expectedDisk) ||
             outcome.PartitionNumber is not > 0 ||
             outcome.FileSystem is null ||
             !outcome.FileSystem.Equals("ReFS", StringComparison.OrdinalIgnoreCase) ||
@@ -141,7 +160,13 @@ public sealed class VolumeResizer : IVolumeResizer
         }
 
         ulong finalSize = outcome.DevDriveBytes;
-        ulong expectedSize = plan.ExpectedAlignedShrinkBytes!.Value;
+        ulong expectedSize = plan.ExpectedAlignedShrinkBytes ??
+            ResizeGuard.RoundDownToAlignment(plan.ShrinkBytes, ResizeGuard.DefaultAlignmentBytes);
+        if (expectedSize < ResizeGuard.MinimumDevDriveBytes)
+        {
+            return false;
+        }
+
         ulong sizeDelta = finalSize > expectedSize ? finalSize - expectedSize : expectedSize - finalSize;
         return sizeDelta <= ResizeGuard.DefaultAlignmentBytes;
     }

@@ -26,9 +26,9 @@ truth; every claim below is grounded in a named file you can open and verify.
   lets the logic later drop into the real Settings handler.
 - **Safety-first.** Detection and inspection are **real**. Package-cache changes are explicitly
   confirmed, per-user, recorded, and reversible. Storage creation requires confirmation and UAC;
-  resize additionally requires a passing live preview and second destructive confirmation. The bundled
-  helper revalidates live state immediately before mutation. Benchmarks run in bounded, self-cleaning
-  temporary folders and never touch real caches, settings, or partitions.
+  resize uses one confirmation and one elevated helper transaction that verifies and binds live disk
+  identity before mutation. The helper revalidates that identity immediately before shrinking. Benchmarks
+  run in bounded, self-cleaning temporary folders and never touch real caches, settings, or partitions.
 - **Honest numbers.** The app uses your actual machine and tools. It never fabricates a metric, and
   it surfaces the caveats that explain a result (for example, whether Defender performance mode is in
   effect). Where it can't determine something, it says so instead of guessing.

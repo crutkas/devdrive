@@ -14,8 +14,9 @@
 //  * `resize --execute` is the existing-volume destructive path and must be requested explicitly and authorized:
 //    the plan must carry ExecuteAuthorized=true (set only by VolumeResizer.ExecuteAsync after confirmation),
 //    so a bare command-line `--execute` against a preview/hand-written plan is refused. Before it runs,
-//    ResizeGuard re-validates the plan against a fresh read-only disk snapshot (defence in depth): a
-//    crafted/garbage plan is rejected and NOTHING is touched. As an extra valve, setting
+//    ResizeGuard validates a fresh read-only disk snapshot, binds that exact identity inside this elevated
+//    process, and revalidates it immediately before mutation (defence in depth): a crafted/garbage plan is
+//    rejected and NOTHING is touched. As an extra valve, setting
 //    DDM_RESIZE_DRYRUN=1 makes --execute build the real commands but NOT run them.
 //  * `vhd --create` also requires authorization. It refuses existing/reparse-point paths, creates and
 //    attaches only that new VHDX, then binds Get-DiskImage to the native physical disk number before
@@ -183,8 +184,8 @@ static int RunResize(string[] args)
         return WriteJson(outputPath, failure) ? 0 : 3;
     }
 
-    // F3: --execute must be authorized by the gated UI path (VolumeResizer.ExecuteAsync sets the flag on
-    // the plan it serializes). A bare command-line --execute against a preview/hand-written plan is refused
+    // F3: --execute must be authorized by the gated UI path (VolumeResizer sets the flag on
+    // the plan it serializes). A bare command-line --execute against a hand-written plan is refused
     // here BEFORE any disk query. The read-only --whatif feasibility never needs authorization.
     if (execute && !plan.ExecuteAuthorized)
     {
@@ -202,7 +203,11 @@ static int RunResize(string[] args)
 
     // Build a fresh READ-ONLY snapshot of the source volume/partition/disk, then run the guards.
     DiskLayoutSnapshot snapshot = QueryDiskLayout(char.ToUpperInvariant(plan.SourceVolumeLetter));
-    ResizeFeasibility feasibility = ResizeGuard.Evaluate(plan, snapshot);
+    bool hasBoundIdentity = ResizeGuard.HasExpectedPreviewIdentity(plan);
+    ResizePlan verificationPlan = execute && !hasBoundIdentity
+        ? plan with { ExecuteAuthorized = false }
+        : plan;
+    ResizeFeasibility feasibility = ResizeGuard.Evaluate(verificationPlan, snapshot);
 
     if (!execute)
     {
@@ -210,7 +215,16 @@ static int RunResize(string[] args)
         return WriteJson(outputPath, feasibility) ? 0 : 3;
     }
 
-    ResizeExecuteOutcome outcome = ExecuteResize(plan, snapshot, feasibility);
+    ResizePlan executionPlan = plan;
+    if (feasibility.CanProceed && !hasBoundIdentity)
+    {
+        // The normal one-confirmation path arrives without a separate preview identity. Bind the exact
+        // live snapshot here, inside the same elevated helper, then run the authorized guard again.
+        executionPlan = ResizeGuard.BindForExecution(plan, feasibility);
+        feasibility = ResizeGuard.Evaluate(executionPlan, snapshot);
+    }
+
+    ResizeExecuteOutcome outcome = ExecuteResize(executionPlan, snapshot, feasibility);
     return WriteJson(outputPath, outcome) ? 0 : 3;
 }
 
@@ -716,7 +730,7 @@ static ResizeExecuteOutcome ExecuteResize(ResizePlan plan, DiskLayoutSnapshot sn
     }
 
     // The real, destructive sequence (shrink → carve → Format-Volume -DevDrive). Only reached via an
-    // explicit, AUTHORIZED --execute + a passing live preview + second confirmation + real elevation.
+    // explicit, AUTHORIZED --execute + one user confirmation + real elevation.
     // F7: once this begins mutating we must NOT kill it on timeout (aborting a
     // shrink/format mid-flight can corrupt the disk), so killOnTimeout is false and the timeout is generous.
     (int exitCode, string stdout, string stderr) = RunPowerShell(script, killOnTimeout: false, timeoutMs: 480_000);

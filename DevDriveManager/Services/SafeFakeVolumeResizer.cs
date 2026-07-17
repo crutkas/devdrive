@@ -30,6 +30,12 @@ public sealed class SafeFakeVolumeResizer : IVolumeResizer
     }
 
     /// <inheritdoc />
+    public Task<ResizeExecuteOutcome> VerifyAndExecuteAsync(
+        ResizePlan plan,
+        CancellationToken cancellationToken = default) =>
+        ExecuteAsync(plan, cancellationToken);
+
+    /// <inheritdoc />
     public Task<ResizeExecuteOutcome> ExecuteAsync(ResizePlan plan, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(plan);

@@ -286,30 +286,6 @@
                             TextWrapping="Wrap" />
                     </StackPanel>
 
-                    <ProgressBar
-                        AutomationProperties.AutomationId="ResizeCreationProgress"
-                        IsIndeterminate="True"
-                        Visibility="{x:Bind local:CreateDevDrivePage.BoolToVisibility(ViewModel.IsBusy), Mode=OneWay}" />
-
-                    <StackPanel
-                        HorizontalAlignment="Right"
-                        Orientation="Horizontal"
-                        Spacing="12"
-                        Visibility="{x:Bind local:CreateDevDrivePage.BoolToVisibility(ViewModel.CanReturnToForm), Mode=OneWay}">
-                        <Button
-                            AutomationProperties.AutomationId="CancelResizeButton"
-                            Command="{x:Bind ViewModel.ReturnToFormCommand}"
-                            Content="Cancel"
-                            IsEnabled="{x:Bind local:CreateDevDrivePage.Not(ViewModel.IsBusy), Mode=OneWay}" />
-                        <Button
-                            AutomationProperties.AutomationId="ApplyRealResizeButton"
-                            Command="{x:Bind ViewModel.ApplyRealResizeCommand}"
-                            Content="Create"
-                            IsEnabled="{x:Bind local:CreateDevDrivePage.Not(ViewModel.IsBusy), Mode=OneWay}"
-                            Style="{StaticResource AccentButtonStyle}"
-                            Visibility="{x:Bind local:CreateDevDrivePage.BoolToVisibility(ViewModel.CanApplyRealResize), Mode=OneWay}" />
-                    </StackPanel>
-
                     <StackPanel
                         Spacing="8"
                         Visibility="{x:Bind local:CreateDevDrivePage.BoolToVisibility(ViewModel.HasUsableDevDrive), Mode=OneWay}">
@@ -348,8 +324,7 @@
                         Command="{x:Bind ViewModel.BackToManagementCommand}"
                         Content="Done"
                         IsEnabled="{x:Bind local:CreateDevDrivePage.Not(ViewModel.IsBusy), Mode=OneWay}"
-                        Style="{StaticResource AccentButtonStyle}"
-                        Visibility="{x:Bind local:CreateDevDrivePage.InvertBoolToVisibility(ViewModel.CanReturnToForm), Mode=OneWay}" />
+                        Style="{StaticResource AccentButtonStyle}" />
                 </StackPanel>
             </Border>
         </StackPanel>

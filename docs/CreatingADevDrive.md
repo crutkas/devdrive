@@ -40,9 +40,8 @@ Key implementation points:
 Editing options changes nothing.
 
 - VHDX creation has one explicit confirmation followed by one UAC prompt.
-- Resize first runs an elevated, read-only live feasibility preview. A passing preview shows the final
-  source and target sizes with **Cancel** and **Create**. Selecting **Create** is the destructive
-  confirmation and triggers another UAC prompt.
+- Resize has one explicit **Create** confirmation showing the planned final source and target sizes,
+  followed by one UAC prompt. The elevated helper verifies the live disk before making any change.
 - `DDM_UITEST_SAFE_MUTATIONS=1` replaces both production engines with safe fakes.
 
 The elevated helper accepts base64-encoded JSON plans on its command line, not mutable plan files. A
@@ -84,17 +83,14 @@ was not proven.
 
 Resize uses the same inbox Storage module but cannot be made atomic.
 
-### Read-only preview
+### Verify and execute
 
-`IVolumeResizer.PreviewAsync` invokes helper mode `resize --whatif`. It queries the live partition,
-disk, filesystem, supported minimum size, reclaimable bytes, bus type, protected status, and used drive
-letters. It changes nothing. If elevation is unavailable or declined, the UI reports that the check was
-unavailable and does not expose execution.
+After **Create**, `IVolumeResizer.VerifyAndExecuteAsync` invokes helper mode `resize --execute` once. Inside
+that elevated process, the helper queries the live partition, disk, filesystem, supported minimum size,
+reclaimable bytes, bus type, protected status, and used drive letters. It runs every guard and binds the
+exact disk/partition identity. If verification fails, it reports the reason and changes nothing.
 
-### Execute
-
-After a passing live preview and selecting **Create**, helper mode `resize --execute` re-runs every check
-immediately before mutation, then:
+The helper then re-queries and compares that bound identity immediately before mutation:
 
 1. `Resize-Partition` shrinks the selected source.
 2. `New-Partition` creates the requested partition and assigns the selected letter.
@@ -103,9 +99,10 @@ immediately before mutation, then:
    `fsutil devdrv query` result before reporting success.
 
 The helper refuses RAW/unknown disks, removable media, offline/read-only disks, protected
-system/recovery/reserved partitions, unsupported filesystems, a disk/partition identity that differs
-from the successful preview, a changed aligned size or reclaimable space, and a newly occupied target
-letter.
+system/recovery/reserved partitions, unsupported filesystems, a disk/partition identity that changes
+between verification and mutation, a changed aligned size or reclaimable space, and a newly occupied
+target letter. `IVolumeResizer.PreviewAsync` and helper mode `resize --whatif` remain available for
+read-only diagnostics, but the creation UI does not require a separate preview round trip.
 
 These three mutation commands are separate. A failure after shrink can leave a smaller source,
 unallocated space, or an unformatted partition. Do not retry an outcome marked partial or unknown until
@@ -133,6 +130,6 @@ supported public path.
 - VHD initialization is bound to both the exact image path and native physical disk number.
 - Pre-existing VHDX files are never overwritten.
 - VHD failures are rolled back when safe; uncertain state is surfaced and retains its receipt.
-- Resize requires a passing preview and second confirmation, but remains non-atomic and is not
-  automatically reversible.
+- Resize requires one explicit confirmation, UAC, live verification, and immediate revalidation, but
+  remains non-atomic and is not automatically reversible.
 - Unit and safe UI tests never create, attach, shrink, partition, or format a real disk.

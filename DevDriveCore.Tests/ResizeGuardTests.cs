@@ -190,6 +190,34 @@ public sealed class ResizeGuardTests
     }
 
     [TestMethod]
+    public void BindForExecution_CopiesVerifiedIdentity_AndPassesAuthorizedGuard()
+    {
+        ResizePlan plan = Plan() with { ExecuteAuthorized = true };
+        DiskLayoutSnapshot snapshot = HealthySnapshot();
+        ResizeFeasibility verification = ResizeGuard.Evaluate(
+            plan with { ExecuteAuthorized = false },
+            snapshot);
+
+        ResizePlan bound = ResizeGuard.BindForExecution(plan, verification);
+
+        Assert.AreEqual(0, bound.ExpectedDiskNumber);
+        Assert.AreEqual("NVME-DISK-0", bound.ExpectedDiskUniqueId);
+        Assert.AreEqual(3, bound.ExpectedPartitionNumber);
+        Assert.AreEqual(Mib, bound.ExpectedPartitionOffsetBytes);
+        Assert.AreEqual(100UL * Gib, bound.ExpectedAlignedShrinkBytes);
+        Assert.IsTrue(ResizeGuard.Evaluate(bound, snapshot).CanProceed);
+    }
+
+    [TestMethod]
+    public void BindForExecution_RejectsUnauthorizedPlan()
+    {
+        ResizeFeasibility verification = ResizeGuard.Evaluate(Plan(), HealthySnapshot());
+
+        Assert.ThrowsExactly<InvalidOperationException>(
+            () => ResizeGuard.BindForExecution(Plan(), verification));
+    }
+
+    [TestMethod]
     public void Evaluate_AuthorizedPlanWithChangedIdentity_Denied()
     {
         ResizePlan plan = Plan() with

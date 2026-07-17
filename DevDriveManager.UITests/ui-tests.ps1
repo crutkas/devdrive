@@ -16,10 +16,9 @@
       (6) audits accessibility (every app-authored interactive control exposes an AutomationId);
       (7) screenshots every page for visual review.
 
-    This suite is READ-ONLY with respect to the user's machine: it never confirms a real cache move
-    (that is gated behind an explicit inline Confirm, exercised only under the
-    DDM_UITEST_SAFE_MUTATIONS in-memory seam). Switching the app theme is safe and reversible, and
-    the suite restores "System default" at the end.
+    This suite is READ-ONLY with respect to the user's machine: mutation scenarios run only under the
+    DDM_UITEST_SAFE_MUTATIONS in-memory seam. Switching the app theme is safe and reversible, and the
+    suite restores "System default" at the end.
 
     Usage:
       # Set DDM_UITEST_SAFE_MUTATIONS=1 at user scope, launch the app, verify the visible safe-mode
@@ -169,11 +168,38 @@ Test-UI "Drives: C: row reports NTFS" {
 winapp ui screenshot -a $AppPid -o "screenshots\04-drives.png" 2>$null | Out-Null
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  (6) Create Dev Drive — hosted in the shell (guarded preview; nothing changes until confirm).
+#  (6) Create Dev Drive — one confirmation verifies and executes through the safe in-memory seam.
 # ─────────────────────────────────────────────────────────────────────────────
 Test-UI "Navigate to Create Dev Drive"       { Goto "NavCreate" "SourceComboBox" }
 Test-UI "Create: guardrails info bar present"{ winapp ui wait-for "GuardrailsInfoBar" -a $AppPid -t 3000 }
 winapp ui screenshot -a $AppPid -o "screenshots\05-create.png" 2>$null | Out-Null
+
+Select-Combo "SourceComboBox" "ResizeSourceItem"
+Test-UI "Create: resize action is Create" {
+    winapp ui wait-for "ResizeSourceComboBox" -a $AppPid -t 3000 2>$null | Out-Null
+    if ((Get-Name "CreateButton") -ne "Create") { throw "Resize action is not Create." }
+    winapp ui wait-for "CreateButton" -a $AppPid -p IsEnabled --value "True" -t 3000
+}
+winapp ui screenshot -a $AppPid -o "screenshots\06-create-resize.png" 2>$null | Out-Null
+
+Test-UI "Create: resize uses one concise confirmation" {
+    winapp ui invoke "CreateButton" -a $AppPid 2>$null | Out-Null
+    winapp ui wait-for "ConfirmCreateDialog" -a $AppPid -t 3000 2>$null | Out-Null
+    $matches = winapp ui search "Resize" -a $AppPid --json 2>$null | Out-String | ConvertFrom-Json
+    $text = (($matches.matches | ForEach-Object { $_.name }) -join "`n")
+    if ($text -notmatch 'Resize [A-Z]: to [0-9]') { throw "Final source size is missing." }
+    if ($text -notmatch 'Create [A-Z]: at [0-9]') { throw "Target Dev Drive size is missing." }
+    if ($text -notmatch 'If verification fails, nothing changes\.') { throw "Verification guarantee is missing." }
+    winapp ui wait-for "PrimaryButton" -a $AppPid -t 3000
+}
+winapp ui screenshot -a $AppPid -o "screenshots\07-create-confirm.png" 2>$null | Out-Null
+
+Test-UI "Create: resize completes without another confirmation" {
+    winapp ui invoke "PrimaryButton" -a $AppPid 2>$null | Out-Null
+    winapp ui wait-for "GoToManagementButton" -a $AppPid -t 5000 2>$null | Out-Null
+    winapp ui wait-for "PrimaryButton" -a $AppPid --gone -t 3000
+}
+winapp ui screenshot -a $AppPid -o "screenshots\08-create-complete.png" 2>$null | Out-Null
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  (7) Settings — the one real preference: Light/Dark/System theme override (applied live).
@@ -186,20 +212,20 @@ Test-UI "Navigate to Settings" {
 Test-UI "Settings: Rescan present"           { winapp ui wait-for "RescanButton"          -a $AppPid -t 3000 }
 Test-UI "Settings: Create present"           { winapp ui wait-for "SettingsCreateButton"  -a $AppPid -t 3000 }
 Test-UI "Settings: Windows Security present" { winapp ui wait-for "SettingsOpenWindowsSecurityButton" -a $AppPid -t 3000 }
-winapp ui screenshot -a $AppPid -o "screenshots\06-settings.png" 2>$null | Out-Null
+winapp ui screenshot -a $AppPid -o "screenshots\09-settings.png" 2>$null | Out-Null
 
 # Theme override: Dark, then Light, then back to System default. Assert the ComboBox reflects each.
 Select-Combo "ThemeSelector" "ThemeOptionDark"
 Test-UI "Theme override -> Dark" {
     winapp ui wait-for "ThemeSelector" -a $AppPid --value "Dark" -t 3000
 }
-winapp ui screenshot -a $AppPid -o "screenshots\07-settings-dark.png" 2>$null | Out-Null
+winapp ui screenshot -a $AppPid -o "screenshots\10-settings-dark.png" 2>$null | Out-Null
 
 Select-Combo "ThemeSelector" "ThemeOptionLight"
 Test-UI "Theme override -> Light" {
     winapp ui wait-for "ThemeSelector" -a $AppPid --value "Light" -t 3000
 }
-winapp ui screenshot -a $AppPid -o "screenshots\08-settings-light.png" 2>$null | Out-Null
+winapp ui screenshot -a $AppPid -o "screenshots\11-settings-light.png" 2>$null | Out-Null
 
 Select-Combo "ThemeSelector" "ThemeOptionSystem"
 Test-UI "Theme override -> System default (restored)" {

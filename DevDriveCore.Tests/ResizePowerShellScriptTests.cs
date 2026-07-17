@@ -47,12 +47,19 @@ public sealed class ResizePowerShellScriptTests
         StringAssert.Contains(script, "$updateBuildRevision -ge 2338");
         StringAssert.Contains(script, "$currentReclaimable -lt [uint64]107374182400");
         StringAssert.Contains(script, "Get-Volume -DriveLetter 'D' -ErrorAction SilentlyContinue");
-        StringAssert.Contains(script, "New-Partition -DiskNumber $currentDiskNumber -Size 107374182400");
-        StringAssert.Contains(script, "Format-Volume -DriveLetter 'D' -DevDrive -FileSystem ReFS");
+        StringAssert.Contains(script, "Get-Volume -Partition $currentPartition");
+        StringAssert.Contains(script, "Get-PartitionSupportedSize -InputObject $currentPartition");
+        StringAssert.Contains(script, "Resize-Partition -InputObject $currentPartition");
+        StringAssert.Contains(script, "New-Partition -InputObject $currentDisk -Size 107374182400");
+        StringAssert.Contains(script, "Format-Volume -Partition $newPartition -DevDrive -FileSystem ReFS");
+        StringAssert.Contains(script, "Get-Partition -UniqueId $newPartitionUniqueId");
+        StringAssert.Contains(script, "Get-Volume -Partition $fp");
         StringAssert.Contains(script, "& $fsutil devdrv query 'D:'");
         StringAssert.Contains(script, "FinalDiskNumber=[int]$fp.DiskNumber");
         StringAssert.Contains(script, "IsDevDrive=$true");
         StringAssert.Contains(script, "Storage\\Resize-Partition");
+        Assert.DoesNotContain("Resize-Partition -DriveLetter", script);
+        Assert.DoesNotContain("Format-Volume -DriveLetter", script);
     }
 
     [TestMethod]

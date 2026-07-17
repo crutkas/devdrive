@@ -15,8 +15,8 @@ namespace DevDriveManager.Views;
 /// folder pickers). All logic and state live in the view model and the unit-tested core.
 /// </summary>
 /// <remarks>
-/// <b>SAFETY:</b> VHDX creation starts only from the blocking confirmation dialog. Resize first performs
-/// a read-only preview; the resulting Create button is the explicit confirmation before UAC and guarded mutation.
+/// <b>SAFETY:</b> VHDX and resize creation start only from the blocking confirmation dialog. The resize
+/// helper verifies and binds live disk state before mutation in the same elevated invocation.
 /// </remarks>
 public sealed partial class CreateDevDrivePage : Page
 {
@@ -98,7 +98,7 @@ public sealed partial class CreateDevDrivePage : Page
                 },
                 PrimaryButtonText = request.ConfirmText,
                 CloseButtonText = "Cancel",
-                DefaultButton = ContentDialogButton.Close, // safe default: Cancel is highlighted
+                DefaultButton = ContentDialogButton.Primary,
                 XamlRoot = XamlRoot,
             };
 

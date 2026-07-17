@@ -7,7 +7,8 @@ namespace DevDriveCore.Models;
 /// SAFE description only — building one changes nothing on the machine. The (gated, confirmed)
 /// orchestration in <see cref="DevDriveCore.Services.DevDriveCreationService"/> turns a
 /// <see cref="DevDriveCreationSource.Vhdx"/> plan into a real <see cref="VhdProvisionPlan"/>; a
-/// <see cref="DevDriveCreationSource.ResizeExistingVolume"/> plan is only ever <em>simulated</em>.
+/// <see cref="DevDriveCreationSource.ResizeExistingVolume"/> plan is projected onto
+/// <see cref="ResizePlan"/> and handled by <see cref="DevDriveCore.Abstractions.IVolumeResizer"/>.
 /// </summary>
 public sealed record DevDriveCreationPlan
 {

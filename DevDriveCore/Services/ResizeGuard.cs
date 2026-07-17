@@ -124,12 +124,12 @@ public static class ResizeGuard
             return Deny("Windows did not provide a stable disk and partition identity for this volume.");
         }
 
-        // An execute request must remain bound to the exact disk and partition approved by preview.
+        // An execute request must remain bound to the exact disk and partition verified by the helper.
         if (plan.ExecuteAuthorized)
         {
             if (!HasExpectedPreviewIdentity(plan))
             {
-                return Deny("The execute request is missing the successful preview identity.");
+                return Deny("The execute request is missing its verified live disk identity.");
             }
 
             if (snapshot.DiskNumber != plan.ExpectedDiskNumber ||
@@ -139,7 +139,7 @@ public static class ResizeGuard
                 (!string.IsNullOrWhiteSpace(plan.ExpectedPartitionGuid) &&
                  !IdentityEquals(snapshot.PartitionGuid, plan.ExpectedPartitionGuid)))
             {
-                return Deny("The source disk or partition identity changed after preview. Run the preview again.");
+                return Deny("The source disk or partition identity changed during verification. Try again.");
             }
         }
 
@@ -202,7 +202,7 @@ public static class ResizeGuard
 
         if (plan.ExecuteAuthorized && plan.ExpectedAlignedShrinkBytes != aligned)
         {
-            return Deny("The aligned Dev Drive size changed after preview. Run the preview again.");
+            return Deny("The aligned Dev Drive size changed during verification. Try again.");
         }
 
         // Go. Describe exactly what the real (elevated) operation would do.
@@ -237,7 +237,7 @@ public static class ResizeGuard
         };
     }
 
-    /// <summary>True when an execute plan carries the complete stable identity from a passing preview.</summary>
+    /// <summary>True when an execute plan carries the complete stable identity from live verification.</summary>
     public static bool HasExpectedPreviewIdentity(ResizePlan plan)
     {
         ArgumentNullException.ThrowIfNull(plan);
@@ -248,7 +248,36 @@ public static class ResizeGuard
                plan.ExpectedAlignedShrinkBytes is >= MinimumDevDriveBytes;
     }
 
-    /// <summary>True when a passing preview returned the stable identity required by execution.</summary>
+    /// <summary>
+    /// Binds an authorized execute plan to the exact live identity returned by a passing guard evaluation.
+    /// The helper calls this inside the elevated process before its immediate pre-mutation revalidation.
+    /// </summary>
+    public static ResizePlan BindForExecution(ResizePlan plan, ResizeFeasibility feasibility)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        ArgumentNullException.ThrowIfNull(feasibility);
+        if (!plan.ExecuteAuthorized)
+        {
+            throw new InvalidOperationException("Only an authorized resize plan can be bound for execution.");
+        }
+
+        if (!feasibility.CanProceed || !HasPreviewIdentity(feasibility))
+        {
+            throw new InvalidOperationException("A passing live verification is required before execution.");
+        }
+
+        return plan with
+        {
+            ExpectedDiskNumber = feasibility.DiskNumber,
+            ExpectedDiskUniqueId = feasibility.DiskUniqueId,
+            ExpectedPartitionNumber = feasibility.PartitionNumber,
+            ExpectedPartitionOffsetBytes = feasibility.PartitionOffsetBytes,
+            ExpectedPartitionGuid = feasibility.PartitionGuid,
+            ExpectedAlignedShrinkBytes = feasibility.AlignedShrinkBytes,
+        };
+    }
+
+    /// <summary>True when a guard result contains the stable identity required by execution.</summary>
     public static bool HasPreviewIdentity(ResizeFeasibility feasibility)
     {
         ArgumentNullException.ThrowIfNull(feasibility);

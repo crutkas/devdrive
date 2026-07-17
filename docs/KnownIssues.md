@@ -183,11 +183,11 @@ verified cleanup.
 | Over-the-shoulder elevation rejected the caller's temp output root | The broker trims `%TEMP%`'s trailing separator before quoting `--allowed-root`, so Windows argument parsing preserves the root path. |
 | SH-003: VHDX creation stopped at a raw attached disk | One elevated helper transaction now creates, attaches, binds to the exact image/disk, initializes GPT, partitions, formats with `-DevDrive`, and verifies the final ReFS Dev Drive. |
 | VHD attach required elevation before formatting could even begin | The bundled self-contained helper now owns native create/attach and the Storage-cmdlet finalization under one UAC prompt. |
-| Normal builds could not apply a passing resize preview | The production UI now exposes execute after a successful live preview while retaining a second destructive confirmation, UAC, authorization, and immediate helper-side revalidation. |
+| Resize required two confirmations and two elevated round trips | The production UI now uses one Create confirmation and one UAC-elevated helper transaction that verifies, binds, revalidates, and then executes. |
 | Privileged Storage commands relied on normal command discovery | The helper imports the inbox Storage module from its absolute System32 path and resolves executables from System32. |
 | Native VHD create failure could delete a raced-in target file | Failed create no longer deletes a path whose ownership was not proven; attach rollback retains its receipt unless cleanup is confirmed. |
 | Resize used stale preview values at execution | The helper re-queries live disk identity, filesystem, supported size, free letter, and reclaimable bytes immediately before shrink. |
-| Resize execution was not bound to the exact successful preview | Execute plans now carry the disk unique ID, partition number/offset/GUID, and aligned size; the helper rejects any mismatch before mutation. |
+| Resize execution was not bound to a stable live identity | The elevated helper binds disk unique ID, partition number/offset/GUID, and aligned size during verification, then rejects any mismatch before mutation. |
 | Unsupported Windows builds could reach shrink before `Format-Volume -DevDrive` failed | VHD and resize paths verify build 22621.2338+ using the real Windows UBR and the inbox command's `DevDrive` parameter before mutation. |
 | Resize success trusted incomplete final readback | Success now requires matching disk, letter, size, ReFS, and a successful `fsutil devdrv query`; malformed output becomes unknown state. |
 | A partial native VHD create could discard its recovery receipt | Unconfirmed cleanup is now reported as executed/unknown so the receipt is retained for recovery. |

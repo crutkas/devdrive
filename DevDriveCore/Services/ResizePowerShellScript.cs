@@ -86,7 +86,7 @@ try {
         string label = SanitizeLabel(plan.Label);
         if (!ResizeGuard.HasExpectedPreviewIdentity(plan))
         {
-            throw new ArgumentException("Resize execution requires a complete successful preview identity.", nameof(plan));
+            throw new ArgumentException("Resize execution requires a complete verified live identity.", nameof(plan));
         }
 
         string expectedDiskUniqueId = EscapePowerShellLiteral(plan.ExpectedDiskUniqueId);
@@ -111,8 +111,8 @@ if (Storage\Get-Volume -DriveLetter '{{target}}' -ErrorAction SilentlyContinue) 
 # authoritative for the shrink that follows.
 $currentPartition = Storage\Get-Partition -DriveLetter '{{source}}' -ErrorAction Stop
 $currentDisk = Storage\Get-Disk -Number $currentPartition.DiskNumber -ErrorAction Stop
-$currentVolume = Storage\Get-Volume -DriveLetter '{{source}}' -ErrorAction Stop
-$currentSupported = Storage\Get-PartitionSupportedSize -DriveLetter '{{source}}' -ErrorAction Stop
+$currentVolume = Storage\Get-Volume -Partition $currentPartition -ErrorAction Stop
+$currentSupported = Storage\Get-PartitionSupportedSize -InputObject $currentPartition -ErrorAction Stop
 $currentDiskNumber = [int]$currentDisk.Number
 $currentFileSystem = [string]$currentVolume.FileSystem
 $currentPartitionType = [string]$currentPartition.Type
@@ -122,11 +122,11 @@ $currentPartitionNumber = [int]$currentPartition.PartitionNumber
 $currentPartitionOffset = [uint64]$currentPartition.Offset
 $currentPartitionGuid = [string]$currentPartition.Guid
 
-if ($currentDiskNumber -ne {{expectedDiskNumber}}) { throw "The source volume moved to a different disk. Retry the preview." }
-if (-not [string]::Equals($currentDiskUniqueId.Trim(), '{{expectedDiskUniqueId}}'.Trim(), [StringComparison]::OrdinalIgnoreCase)) { throw "The source disk identity changed. Retry the preview." }
-if ($currentPartitionNumber -ne {{plan.ExpectedPartitionNumber!.Value}}) { throw "The source partition number changed. Retry the preview." }
-if ($currentPartitionOffset -ne [uint64]{{plan.ExpectedPartitionOffsetBytes!.Value}}) { throw "The source partition offset changed. Retry the preview." }
-if ('{{expectedPartitionGuid}}' -and -not [string]::Equals($currentPartitionGuid.Trim(), '{{expectedPartitionGuid}}'.Trim(), [StringComparison]::OrdinalIgnoreCase)) { throw "The source partition identity changed. Retry the preview." }
+if ($currentDiskNumber -ne {{expectedDiskNumber}}) { throw "The source volume moved to a different disk. Try again." }
+if (-not [string]::Equals($currentDiskUniqueId.Trim(), '{{expectedDiskUniqueId}}'.Trim(), [StringComparison]::OrdinalIgnoreCase)) { throw "The source disk identity changed. Try again." }
+if ($currentPartitionNumber -ne {{plan.ExpectedPartitionNumber!.Value}}) { throw "The source partition number changed. Try again." }
+if ($currentPartitionOffset -ne [uint64]{{plan.ExpectedPartitionOffsetBytes!.Value}}) { throw "The source partition offset changed. Try again." }
+if ('{{expectedPartitionGuid}}' -and -not [string]::Equals($currentPartitionGuid.Trim(), '{{expectedPartitionGuid}}'.Trim(), [StringComparison]::OrdinalIgnoreCase)) { throw "The source partition identity changed. Try again." }
 if ([bool]$currentDisk.IsOffline) { throw "The source disk is offline." }
 if ([bool]$currentDisk.IsReadOnly) { throw "The source disk is read-only." }
 if ($currentBusType -in @('USB','SD','MMC')) { throw "Refusing to repartition a removable disk." }
@@ -138,22 +138,26 @@ $currentSize = [uint64]$currentPartition.Size
 $currentMinimum = [uint64]$currentSupported.SizeMin
 if ($currentSize -le $currentMinimum) { throw "The source volume no longer has reclaimable space." }
 $currentReclaimable = $currentSize - $currentMinimum
-if ($currentReclaimable -lt [uint64]{{devDriveSize}}) { throw "Reclaimable space changed. Retry the preview." }
+if ($currentReclaimable -lt [uint64]{{devDriveSize}}) { throw "Reclaimable space changed. Try again." }
 $newSourceSize = $currentSize - [uint64]{{devDriveSize}}
 
 $mutationMarker = [Console]::Error
 $mutationMarker.WriteLine('{{MutationStartedMarker}}')
 $mutationMarker.Flush()
-Storage\Resize-Partition -DriveLetter '{{source}}' -Size $newSourceSize
-$null = Storage\New-Partition -DiskNumber $currentDiskNumber -Size {{devDriveSize}} -DriveLetter '{{target}}'
-Storage\Format-Volume -DriveLetter '{{target}}' -DevDrive -FileSystem ReFS -NewFileSystemLabel '{{label}}' -Confirm:$false | Out-Null
-$fp = Storage\Get-Partition -DriveLetter '{{target}}' -ErrorAction Stop
-$fv = Storage\Get-Volume -DriveLetter '{{target}}' -ErrorAction Stop
+Storage\Resize-Partition -InputObject $currentPartition -Size $newSourceSize
+$newPartition = Storage\New-Partition -InputObject $currentDisk -Size {{devDriveSize}} -DriveLetter '{{target}}'
+$newPartitionUniqueId = [string]$newPartition.UniqueId
+if ([string]::IsNullOrWhiteSpace($newPartitionUniqueId)) { throw "Windows did not return a stable identity for the new partition." }
+Storage\Format-Volume -Partition $newPartition -DevDrive -FileSystem ReFS -NewFileSystemLabel '{{label}}' -Confirm:$false | Out-Null
+$fp = Storage\Get-Partition -UniqueId $newPartitionUniqueId -ErrorAction Stop
+$fv = Storage\Get-Volume -Partition $fp -ErrorAction Stop
 $finalSize=[uint64]$fp.Size
 $finalSizeDelta=if ($finalSize -gt [uint64]{{devDriveSize}}) { $finalSize - [uint64]{{devDriveSize}} } else { [uint64]{{devDriveSize}} - $finalSize }
-if ([int]$fp.DiskNumber -ne $currentDiskNumber) { throw "The new partition is not on the previewed disk." }
+if ([int]$fp.DiskNumber -ne $currentDiskNumber) { throw "The new partition is not on the verified disk." }
+if ([int]$fp.PartitionNumber -ne [int]$newPartition.PartitionNumber) { throw "The new partition identity changed." }
+if ([uint64]$fp.Offset -ne [uint64]$newPartition.Offset) { throw "The new partition offset changed." }
 if ([string]$fp.DriveLetter -ne '{{target}}') { throw "The new partition has an unexpected drive letter." }
-if ($finalSizeDelta -gt [uint64]1048576) { throw "The new partition size does not match the preview." }
+if ($finalSizeDelta -gt [uint64]1048576) { throw "The new partition size does not match the verified size." }
 if ([string]$fv.FileSystem -ne 'ReFS') { throw "The new volume is not ReFS." }
 $fsutil=[System.IO.Path]::Combine([Environment]::SystemDirectory,'fsutil.exe')
 $devDriveQuery=& $fsutil devdrv query '{{target}}:' 2>&1 | Out-String

@@ -174,9 +174,8 @@ fakes.
 ## 7. Real storage self-hosting
 
 The normal self-contained build supports complete VHDX creation and resize execution. This does not
-bypass safeguards: VHDX creation requires explicit confirmation and UAC; resize additionally requires a
-successful elevated read-only preview and an explicit **Create** action. The helper rechecks live identity
-and safety conditions after elevation and immediately before mutation.
+bypass safeguards: VHDX creation and resize each require explicit confirmation and UAC. For resize, the
+helper verifies and binds live identity after elevation, then rechecks it immediately before mutation.
 
 Use this machine profile:
 
@@ -211,9 +210,9 @@ it reports unknown state, do not retry: inspect both `Get-DiskImage` and Disk Ma
 Exercise only against the secondary test volume:
 
 1. Select **Resize an existing volume** and choose the secondary test volume.
-2. Request at least 50 GiB and run the read-only preview.
-3. Verify the displayed final source size and target Dev Drive size.
-4. Select **Create** and approve UAC.
+2. Request at least 50 GiB and select **Create**.
+3. Verify the confirmation shows the planned final source size and target Dev Drive size.
+4. Confirm **Create** and approve the single UAC prompt.
 5. Verify the new volume with `Get-Volume`, `Get-Partition`, and `fsutil devdrv query <letter>:` from an
    elevated shell.
 6. Reboot and verify the source and new Dev Drive still mount correctly.

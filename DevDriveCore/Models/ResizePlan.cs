@@ -26,22 +26,22 @@ public sealed record ResizePlan
     /// <summary>Volume label for the new Dev Drive.</summary>
     public string Label { get; init; } = "DevDrive";
 
-    /// <summary>Disk number observed by the successful read-only preview.</summary>
+    /// <summary>Disk number observed by the helper's successful live verification.</summary>
     public int? ExpectedDiskNumber { get; init; }
 
-    /// <summary>Stable disk identity observed by the successful read-only preview.</summary>
+    /// <summary>Stable disk identity observed by the helper's successful live verification.</summary>
     public string ExpectedDiskUniqueId { get; init; } = string.Empty;
 
-    /// <summary>Partition number observed by the successful read-only preview.</summary>
+    /// <summary>Partition number observed by the helper's successful live verification.</summary>
     public int? ExpectedPartitionNumber { get; init; }
 
-    /// <summary>Partition byte offset observed by the successful read-only preview.</summary>
+    /// <summary>Partition byte offset observed by the helper's successful live verification.</summary>
     public ulong? ExpectedPartitionOffsetBytes { get; init; }
 
-    /// <summary>GPT partition identity observed by preview, when Windows reports one.</summary>
+    /// <summary>GPT partition identity observed by live verification, when Windows reports one.</summary>
     public string ExpectedPartitionGuid { get; init; } = string.Empty;
 
-    /// <summary>Aligned carve size approved by the successful read-only preview.</summary>
+    /// <summary>Aligned carve size approved by the successful live verification.</summary>
     public ulong? ExpectedAlignedShrinkBytes { get; init; }
 
     /// <summary>
@@ -49,11 +49,11 @@ public sealed record ResizePlan
     /// <see cref="DevDriveCore.Services.VolumeResizer.ExecuteAsync"/>) immediately before the plan is
     /// serialized and handed to the elevated helper. The helper REFUSES a <c>--execute</c> request whose
     /// plan does not carry this flag, so a bare command-line <c>--execute</c> against a hand-written or
-    /// preview (<c>--whatif</c>) plan can't trigger the destructive path.
+    /// unconfirmed plan can't trigger the destructive path.
     /// <para>
     /// <b>Defence in depth only.</b> A caller able to craft the plan JSON could also set this flag; it is
-    /// NOT the security boundary. The real firewall remains the read-only <see cref="ResizeMode.WhatIf"/>
-    /// default, stable preview identity, ResizeGuard re-validation, and the UAC elevation prompt.
+    /// NOT the security boundary. The real firewall remains UAC, stable identity bound inside the helper,
+    /// <see cref="DevDriveCore.Services.ResizeGuard"/> validation, and immediate pre-mutation revalidation.
     /// </para>
     /// </summary>
     public bool ExecuteAuthorized { get; init; }

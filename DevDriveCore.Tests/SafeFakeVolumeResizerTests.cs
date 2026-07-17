@@ -42,11 +42,11 @@ public sealed class SafeFakeVolumeResizerTests
     }
 
     [TestMethod]
-    public async Task ExecuteAsync_ReportsSimulatedSuccess_WithoutTouchingDisk()
+    public async Task VerifyAndExecuteAsync_ReportsSimulatedSuccess_WithoutTouchingDisk()
     {
         var resizer = new SafeFakeVolumeResizer();
 
-        ResizeExecuteOutcome outcome = await resizer.ExecuteAsync(Plan());
+        ResizeExecuteOutcome outcome = await resizer.VerifyAndExecuteAsync(Plan());
 
         Assert.IsTrue(outcome.Success);
         Assert.IsTrue(outcome.Executed);
@@ -61,6 +61,7 @@ public sealed class SafeFakeVolumeResizerTests
     {
         var resizer = new SafeFakeVolumeResizer();
         await Assert.ThrowsExactlyAsync<ArgumentNullException>(async () => await resizer.PreviewAsync(null!));
+        await Assert.ThrowsExactlyAsync<ArgumentNullException>(async () => await resizer.VerifyAndExecuteAsync(null!));
         await Assert.ThrowsExactlyAsync<ArgumentNullException>(async () => await resizer.ExecuteAsync(null!));
     }
 
