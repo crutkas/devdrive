@@ -35,23 +35,38 @@ internal static class NativeDirectoryEnumerator
     private const uint OpenExisting = 3;
     private const uint FileFlagBackupSemantics = 0x02000000;
 
-    // FILE_INFO_BY_HANDLE_CLASS values.
+    // FILE_INFO_BY_HANDLE_CLASS values. The extended classes (FILE_ID_EXTD_DIR_INFO) carry a
+    // 128-bit FileId and are the ReFS-native shape; the "Both" classes carry only a 64-bit FileId,
+    // which some ReFS configurations reject — dropping us silently onto the slow managed fallback.
+    // We therefore try the extended class first and fall back to the Both class, then to managed.
     private const int FileIdBothDirectoryInfo = 10;
     private const int FileIdBothDirectoryRestartInfo = 11;
+    private const int FileIdExtdDirectoryInfo = 19;
+    private const int FileIdExtdDirectoryRestartInfo = 20;
 
     private const int ErrorSuccess = 0;
     private const int ErrorNoMoreFiles = 18;
 
-    // FILE_ID_BOTH_DIR_INFO field offsets (x64 layout), verified against the SDK header.
+    // Shared field offsets are byte-identical between FILE_ID_BOTH_DIR_INFO and
+    // FILE_ID_EXTD_DIR_INFO through EaSize (offset 64); only the trailing FileName offset differs
+    // (the extended struct has a wider FileId and no short name). Verified against the SDK header.
     private const int OffsetNextEntry = 0;
     private const int OffsetLastWriteTime = 24;
     private const int OffsetEndOfFile = 40;
     private const int OffsetAllocationSize = 48;
     private const int OffsetFileAttributes = 56;
     private const int OffsetFileNameLength = 60;
-    private const int OffsetFileName = 104;
+    private const int OffsetFileNameBoth = 104;
+    private const int OffsetFileNameExtd = 88;
 
     private const int BufferSize = 64 * 1024;
+
+    /// <summary>Ordered enumeration strategies: extended (ReFS-safe) first, then Both.</summary>
+    private static readonly (int Restart, int Continue, int NameOffset)[] Strategies =
+    [
+        (FileIdExtdDirectoryRestartInfo, FileIdExtdDirectoryInfo, OffsetFileNameExtd),
+        (FileIdBothDirectoryRestartInfo, FileIdBothDirectoryInfo, OffsetFileNameBoth),
+    ];
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "CreateFileW")]
     private static extern SafeFileHandle CreateFile(
@@ -91,22 +106,38 @@ internal static class NativeDirectoryEnumerator
         IntPtr buffer = Marshal.AllocHGlobal(BufferSize);
         try
         {
-            var collected = new List<NativeDirEntry>();
-            int infoClass = FileIdBothDirectoryRestartInfo;
-            while (GetFileInformationByHandleEx(handle, infoClass, buffer, BufferSize))
+            foreach ((int restart, int continueClass, int nameOffset) in Strategies)
             {
-                infoClass = FileIdBothDirectoryInfo;
-                ParseBuffer(buffer, collected);
+                var collected = new List<NativeDirEntry>();
+                bool any = false;
+                int infoClass = restart;
+                while (GetFileInformationByHandleEx(handle, infoClass, buffer, BufferSize))
+                {
+                    any = true;
+                    infoClass = continueClass;
+                    ParseBuffer(buffer, nameOffset, collected);
+                }
+
+                int error = Marshal.GetLastWin32Error();
+                if (any)
+                {
+                    // This info class was accepted. NO_MORE_FILES is the clean end; any other
+                    // error mid-enumeration means an incomplete read, so fall back to managed.
+                    if (error is ErrorNoMoreFiles or ErrorSuccess)
+                    {
+                        entries = collected;
+                        return true;
+                    }
+
+                    return false;
+                }
+
+                // The very first call failed (e.g. ERROR_INVALID_PARAMETER when the filesystem
+                // rejects this info class). Try the next strategy on the same handle; a restart
+                // class always re-reads from the beginning.
             }
 
-            int error = Marshal.GetLastWin32Error();
-            if (error is not (ErrorNoMoreFiles or ErrorSuccess))
-            {
-                return false;
-            }
-
-            entries = collected;
-            return true;
+            return false;
         }
         catch (Exception)
         {
@@ -120,7 +151,7 @@ internal static class NativeDirectoryEnumerator
         }
     }
 
-    private static void ParseBuffer(IntPtr buffer, List<NativeDirEntry> entries)
+    private static void ParseBuffer(IntPtr buffer, int nameOffset, List<NativeDirEntry> entries)
     {
         int offset = 0;
         while (true)
@@ -134,7 +165,7 @@ internal static class NativeDirectoryEnumerator
             int nameLengthBytes = Marshal.ReadInt32(record, OffsetFileNameLength);
 
             string name = nameLengthBytes > 0
-                ? Marshal.PtrToStringUni(record + OffsetFileName, nameLengthBytes / 2) ?? string.Empty
+                ? Marshal.PtrToStringUni(record + nameOffset, nameLengthBytes / 2) ?? string.Empty
                 : string.Empty;
 
             if (name is not ("" or "." or ".."))

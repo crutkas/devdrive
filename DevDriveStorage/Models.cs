@@ -131,7 +131,12 @@ public sealed record StorageNode
 
 public sealed record ScanCoverage
 {
-    public ScanCoverage(long coveredBytes, long totalBytes, IEnumerable<string> deniedPaths)
+    public ScanCoverage(
+        long coveredBytes,
+        long totalBytes,
+        IEnumerable<string> deniedPaths,
+        long? totalAllocatedBytes = null,
+        long? totalApparentBytes = null)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(coveredBytes);
         ArgumentOutOfRangeException.ThrowIfNegative(totalBytes);
@@ -141,8 +146,20 @@ public sealed record ScanCoverage
                 nameof(coveredBytes), "Covered bytes cannot exceed total bytes.");
         }
 
+        if (totalAllocatedBytes is long allocated)
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(allocated, nameof(totalAllocatedBytes));
+        }
+
+        if (totalApparentBytes is long apparent)
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(apparent, nameof(totalApparentBytes));
+        }
+
         CoveredBytes = coveredBytes;
         TotalBytes = totalBytes;
+        TotalAllocatedBytes = totalAllocatedBytes;
+        TotalApparentBytes = totalApparentBytes;
         DeniedPaths = deniedPaths?.ToImmutableArray()
             ?? throw new ArgumentNullException(nameof(deniedPaths));
         if (DeniedPaths.Any(string.IsNullOrWhiteSpace))
@@ -155,7 +172,34 @@ public sealed record ScanCoverage
 
     public long TotalBytes { get; }
 
+    /// <summary>
+    /// Sum of every scanned file's on-disk <c>AllocationSize</c> (cluster slack included), or
+    /// <see langword="null"/> when the source did not compute it (the mock path leaves it null).
+    /// Together with <see cref="TotalApparentBytes"/> this recovers the per-file "size vs size on
+    /// disk" delta that is otherwise folded into <see cref="StorageNode.SizeBytes"/> and lost —
+    /// letting a caller state a single "N bytes in cluster slack" fact with zero per-row noise.
+    /// </summary>
+    public long? TotalAllocatedBytes { get; }
+
+    /// <summary>
+    /// Sum of every scanned file's apparent (logical) length, or <see langword="null"/> when the
+    /// source did not compute it. Compare against <see cref="TotalAllocatedBytes"/> via
+    /// <see cref="AllocatedMinusApparentBytes"/>.
+    /// </summary>
+    public long? TotalApparentBytes { get; }
+
     public ImmutableArray<string> DeniedPaths { get; }
+
+    /// <summary>
+    /// Signed on-disk-minus-apparent aggregate. Positive means cluster slack dominates (real disk
+    /// usage exceeds apparent — the common dev-tree, millions-of-tiny-files case, exaggerated on
+    /// ReFS/NTFS cluster boundaries); negative means sparse/compressed/cloned savings dominate.
+    /// <see langword="null"/> when either aggregate is unavailable.
+    /// </summary>
+    public long? AllocatedMinusApparentBytes =>
+        TotalAllocatedBytes is long allocated && TotalApparentBytes is long apparent
+            ? allocated - apparent
+            : null;
 
     public double Ratio => TotalBytes == 0 ? 1 : (double)CoveredBytes / TotalBytes;
 

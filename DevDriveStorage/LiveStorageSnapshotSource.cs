@@ -25,6 +25,15 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
     private readonly int _maxChildrenPerFolder;
     private readonly TimeSpan _progressInterval;
 
+    /// <summary>
+    /// Number of directories on the most recent scan whose fast per-directory enumeration failed
+    /// yet were still readable through the managed fallback. This isolates the ReFS 64-bit-FileId
+    /// failure mode (a silent drop to the ~30x-slower path) from ordinary access denials, which
+    /// surface separately in <see cref="ScanCoverage.DeniedPaths"/>. Expected to be 0; a non-zero
+    /// value is a performance warning, not a correctness one.
+    /// </summary>
+    public int LastFastPathFallbackCount { get; private set; }
+
     public LiveStorageSnapshotSource(
         int maxChildrenPerFolder = DefaultMaxChildrenPerFolder,
         TimeSpan? progressInterval = null)
@@ -106,6 +115,18 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
         bool partial = deniedPaths.Length > 0 ||
             (referenceTotalBytes is long reference && covered < reference - reference / 1000);
 
+        LastFastPathFallbackCount = context.FastPathFallbacks;
+        if (LastFastPathFallbackCount > 0)
+        {
+            // Observable rather than silent: if this fires on a Dev Drive it almost certainly means
+            // the fast directory-info path was rejected and the scan quietly ran ~30x slower.
+            Trace.TraceWarning(
+                "LiveStorageSnapshotSource: {0} directories fell back from the fast enumeration " +
+                "path to managed enumeration during scan of '{1}'.",
+                LastFastPathFallbackCount,
+                fullRoot);
+        }
+
         progress?.Report(new StorageScanProgress(1, "Scan complete", Math.Max(0, context.ProcessedBytes),
             Math.Max(covered, total)));
 
@@ -116,7 +137,12 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
             rootId,
             DateTimeOffset.UtcNow,
             partial ? SnapshotCompletion.Partial : SnapshotCompletion.Complete,
-            new ScanCoverage(covered, total, deniedPaths),
+            new ScanCoverage(
+                covered,
+                total,
+                deniedPaths,
+                context.TotalAllocatedBytes,
+                context.TotalApparentBytes),
             nodes);
     }
 
@@ -139,7 +165,7 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
         // The directory could not be opened for a fast scan (denied, gone, or an unexpected
         // native failure). Fall back to managed enumeration, which records denials the same way
         // and still reports allocation via GetCompressedFileSizeW.
-        EnumerateManaged(directory, order, stack, context, cancellationToken);
+        EnumerateManaged(directory, order, stack, context, cancellationToken, viaFallback: true);
     }
 
     private static void EnumerateFromNative(
@@ -188,7 +214,7 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
 
             directory.Children.Add(leaf);
             order.Add(leaf);
-            context.OnFileProcessed(allocated, directory.Path);
+            context.OnFileProcessed(allocated, apparent, directory.Path);
         }
     }
 
@@ -197,7 +223,8 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
         List<ScanEntry> order,
         Stack<ScanEntry> stack,
         ScanContext context,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool viaFallback)
     {
         List<FileSystemInfo> entries;
         try
@@ -208,6 +235,14 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
         {
             context.RecordDenied(directory.Path);
             return;
+        }
+
+        // We opened and listed the directory through the managed path, so if we only got here
+        // because the fast path failed, this is a genuine (readable) fast-path fallback — the
+        // observable ReFS-class-rejection signal, kept distinct from the denial case above.
+        if (viaFallback)
+        {
+            context.RecordFastPathFallback();
         }
 
         int counter = 0;
@@ -247,7 +282,7 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
 
             directory.Children.Add(leaf);
             order.Add(leaf);
-            context.OnFileProcessed(allocated, directory.Path);
+            context.OnFileProcessed(allocated, apparent, directory.Path);
         }
     }
 
@@ -501,11 +536,24 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
 
         public long ProcessedBytes { get; private set; }
 
+        /// <summary>Running sum of every file's on-disk AllocationSize (cluster slack included).</summary>
+        public long TotalAllocatedBytes { get; private set; }
+
+        /// <summary>Running sum of every file's apparent (logical) length.</summary>
+        public long TotalApparentBytes { get; private set; }
+
+        /// <summary>Directories that fell back from the fast path to readable managed enumeration.</summary>
+        public int FastPathFallbacks { get; private set; }
+
         public void RecordDenied(string path) => DeniedPaths.Add(path);
 
-        public void OnFileProcessed(long allocated, string directoryPath)
+        public void RecordFastPathFallback() => FastPathFallbacks++;
+
+        public void OnFileProcessed(long allocated, long apparent, string directoryPath)
         {
             ProcessedBytes += allocated;
+            TotalAllocatedBytes += allocated;
+            TotalApparentBytes += apparent;
             _fileCount++;
             MaybeReport(directoryPath);
         }

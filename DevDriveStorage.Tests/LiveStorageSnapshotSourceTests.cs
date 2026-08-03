@@ -242,6 +242,100 @@ public sealed class LiveStorageSnapshotSourceTests
     }
 
     [TestMethod]
+    public async Task SnapshotAggregatesRecoverClusterSlack()
+    {
+        // Every dense file rounds 5000 apparent bytes up to a full cluster on disk. That per-file
+        // slack is folded into SizeBytes and (correctly) hidden per row, so the only way a caller
+        // can recover it is the snapshot-level aggregate.
+        const int fileCount = 8;
+        const long apparent = 5000;
+        for (int i = 0; i < fileCount; i++)
+        {
+            _fixture.File($"dense{i:D2}.bin", apparent);
+        }
+
+        StorageSnapshot snapshot = await ScanAsync(_fixture.Root);
+        ScanCoverage coverage = snapshot.Coverage;
+
+        Assert.IsNotNull(coverage.TotalAllocatedBytes, "live scans must publish the allocated aggregate");
+        Assert.IsNotNull(coverage.TotalApparentBytes, "live scans must publish the apparent aggregate");
+
+        // The allocated aggregate is the honest on-disk total and matches the root's rolled-up size.
+        Assert.AreEqual(snapshot.Root.SizeBytes, coverage.TotalAllocatedBytes!.Value);
+        Assert.AreEqual(fileCount * apparent, coverage.TotalApparentBytes!.Value);
+
+        // Cluster slack is positive (allocated > apparent) and is exactly what was discarded before.
+        Assert.IsNotNull(coverage.AllocatedMinusApparentBytes);
+        Assert.IsGreaterThan(
+            0,
+            coverage.AllocatedMinusApparentBytes!.Value,
+            "cluster slack across the tree must be recoverable as a positive aggregate delta");
+        Assert.AreEqual(
+            coverage.TotalAllocatedBytes!.Value - coverage.TotalApparentBytes!.Value,
+            coverage.AllocatedMinusApparentBytes!.Value);
+
+        // Recovering the aggregate must not make any individual row noisy.
+        Assert.IsFalse(
+            snapshot.Nodes.Any(n => n is { Kind: StorageNodeKind.File } && n.HasLogicalDifference),
+            "sub-cluster slack must stay hidden per row");
+    }
+
+    [TestMethod]
+    public async Task SnapshotAggregatesReflectSparseSavings()
+    {
+        const long denseApparent = 5000;
+        const long sparseApparent = 8 * 1024 * 1024;
+        _fixture.File("dense.bin", denseApparent);
+        _fixture.SparseFile("empty.sparse", sparseApparent);
+
+        StorageSnapshot snapshot = await ScanAsync(_fixture.Root);
+        ScanCoverage coverage = snapshot.Coverage;
+
+        Assert.AreEqual(snapshot.Root.SizeBytes, coverage.TotalAllocatedBytes!.Value);
+        Assert.AreEqual(denseApparent + sparseApparent, coverage.TotalApparentBytes!.Value);
+
+        // The sparse file's near-zero allocation dwarfs the dense file's cluster slack, so the
+        // aggregate delta goes negative: apparent size on this tree exceeds real disk usage.
+        Assert.IsLessThan(
+            0,
+            coverage.AllocatedMinusApparentBytes!.Value,
+            "sparse savings must dominate the aggregate and read as apparent > allocated");
+    }
+
+    [TestMethod]
+    public async Task MockCoverageLeavesAggregatesUnset()
+    {
+        // The aggregate is a live-scan measurement; the mock path never computes it and must
+        // publish null (rather than a misleading zero) so callers can tell "not measured" apart.
+        var coverage = new ScanCoverage(10, 10, []);
+        Assert.IsNull(coverage.TotalAllocatedBytes);
+        Assert.IsNull(coverage.TotalApparentBytes);
+        Assert.IsNull(coverage.AllocatedMinusApparentBytes);
+        await Task.CompletedTask;
+    }
+
+    [TestMethod]
+    public async Task NormalTreeScansEntirelyOnTheFastPath()
+    {
+        // A readable NTFS tree must be served entirely by the per-directory fast path. A non-zero
+        // fallback count here would mean the fast enumeration silently degraded to the slow managed
+        // path (the ReFS 64-bit-FileId failure mode) — this asserts that stays observable and zero.
+        _fixture.File("a\\one.bin", 4096);
+        _fixture.File("a\\b\\two.bin", 8192);
+        _fixture.File("c\\three.bin", 1234);
+
+        var source = new LiveStorageSnapshotSource();
+        StorageSnapshot snapshot = await source.GetSnapshotAsync(
+            new StorageSnapshotRequest(_fixture.Root), null, CancellationToken.None);
+
+        Assert.AreEqual(SnapshotCompletion.Complete, snapshot.Completion);
+        Assert.AreEqual(
+            0,
+            source.LastFastPathFallbackCount,
+            "a readable tree must never fall back from the fast enumeration path");
+    }
+
+    [TestMethod]
     public async Task LargeFolderRollsUpBeyondThreshold()
     {
         for (int i = 0; i < 10; i++)
