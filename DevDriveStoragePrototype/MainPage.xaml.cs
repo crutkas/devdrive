@@ -19,15 +19,47 @@ public sealed partial class MainPage : Page
 
     public MainPage()
     {
+        var mock = new MockStorageSnapshotSource(_catalog, TimeSpan.FromMilliseconds(140));
         ViewModel = new StorageExplorerViewModel(
-            new MockStorageSnapshotSource(_catalog, TimeSpan.FromMilliseconds(140)));
-        ScenarioOptions = _catalog.Scenarios;
+            new RoutingStorageSnapshotSource(mock, new LiveStorageSnapshotSource()));
+        ScenarioOptions = BuildScenarioChoices();
         InitializeComponent();
     }
 
     public StorageExplorerViewModel ViewModel { get; }
 
-    public IReadOnlyList<MockStorageScenario> ScenarioOptions { get; }
+    public IReadOnlyList<ScenarioChoice> ScenarioOptions { get; }
+
+    /// <summary>
+    /// Builds the scenario picker: every mock scenario first (unchanged display names and
+    /// order, so the UI suite keeps selecting them by name), then one live entry per fixed
+    /// volume. Mock stays the default because index 0 is still the first mock scenario.
+    /// </summary>
+    private IReadOnlyList<ScenarioChoice> BuildScenarioChoices()
+    {
+        var choices = new List<ScenarioChoice>();
+        foreach (MockStorageScenario scenario in _catalog.Scenarios)
+        {
+            choices.Add(new ScenarioChoice(scenario.DisplayName, scenario.Id));
+        }
+
+        try
+        {
+            foreach (StorageVolume volume in new SystemVolumeProvider().GetFixedVolumes())
+            {
+                choices.Add(new ScenarioChoice(
+                    $"Live: {volume.DisplayName}",
+                    RoutingStorageSnapshotSource.LiveScenarioId(volume.RootPath)));
+            }
+        }
+        catch (Exception)
+        {
+            // Volume discovery is best-effort; a probe failure must never break the mock
+            // picker that the rest of the prototype (and the UI suite) depends on.
+        }
+
+        return choices;
+    }
 
     public static Visibility BoolToVisibility(bool value) =>
         value ? Visibility.Visible : Visibility.Collapsed;
@@ -58,13 +90,13 @@ public sealed partial class MainPage : Page
         object sender,
         SelectionChangedEventArgs args)
     {
-        if (!_isLoaded || ScenarioComboBox.SelectedItem is not MockStorageScenario scenario)
+        if (!_isLoaded || ScenarioComboBox.SelectedItem is not ScenarioChoice choice)
         {
             return;
         }
 
         FoldersModeItem.IsSelected = true;
-        await ViewModel.LoadScenarioAsync(scenario.Id);
+        await ViewModel.LoadScenarioAsync(choice.ScenarioId);
     }
 
     private void LayoutComboBox_SelectionChanged(object sender, SelectionChangedEventArgs args)
@@ -238,3 +270,11 @@ public sealed partial class MainPage : Page
         }
     }
 }
+
+/// <summary>
+/// Prototype-only picker item pairing a display label with the scenario id the
+/// <see cref="StorageExplorerViewModel"/> forwards to its source. Mock scenarios carry their
+/// catalogue id; live volumes carry a <c>live:&lt;root&gt;</c> id understood by
+/// <see cref="RoutingStorageSnapshotSource"/>.
+/// </summary>
+public sealed record ScenarioChoice(string DisplayName, string ScenarioId);

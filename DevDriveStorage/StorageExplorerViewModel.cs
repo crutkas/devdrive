@@ -341,6 +341,32 @@ public sealed class StorageExplorerViewModel : ObservableObject
 
     public string CoverageSummary => Snapshot?.Coverage.Display ?? "No coverage";
 
+    /// <summary>
+    /// Honest partial-coverage detail for the status bar: how many paths were denied
+    /// when a scan could not read everything, so under-reporting is surfaced rather than
+    /// hidden. Empty when the snapshot is complete.
+    /// </summary>
+    public string CoverageDetail
+    {
+        get
+        {
+            if (Snapshot is not { Completion: SnapshotCompletion.Partial } snapshot)
+            {
+                return string.Empty;
+            }
+
+            int denied = snapshot.Coverage.DeniedPaths.Length;
+            return denied switch
+            {
+                0 => "Partial coverage",
+                1 => "Partial · 1 path denied",
+                _ => $"Partial · {denied:N0} paths denied",
+            };
+        }
+    }
+
+    public bool HasCoverageDetail => CoverageDetail.Length > 0;
+
     public string SnapshotSummary => Snapshot is null
         ? "No snapshot"
         : $"Mock snapshot · {Snapshot.CapturedAtUtc:MMM d, HH:mm} UTC";
@@ -498,6 +524,8 @@ public sealed class StorageExplorerViewModel : ObservableObject
                 : "Mock scan complete";
             ScanState = ExplorerScanState.Completed;
             OnPropertyChanged(nameof(CoverageSummary));
+            OnPropertyChanged(nameof(CoverageDetail));
+            OnPropertyChanged(nameof(HasCoverageDetail));
             OnPropertyChanged(nameof(SnapshotSummary));
             OnPropertyChanged(nameof(ScopeLogicalSummary));
         }

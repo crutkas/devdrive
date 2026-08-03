@@ -812,6 +812,13 @@
                             Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                             Text="{x:Bind ViewModel.SnapshotSummary, Mode=OneWay}" />
                         <TextBlock
+                            Grid.Column="3"
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            AutomationProperties.AutomationId="CoverageDetailText"
+                            Foreground="{ThemeResource SystemFillColorCautionBrush}"
+                            Text="{x:Bind ViewModel.CoverageDetail, Mode=OneWay}"
+                            Visibility="{x:Bind local:MainPage.BoolToVisibility(ViewModel.HasCoverageDetail), Mode=OneWay}" />
+                        <TextBlock
                             Grid.Column="4"
                             Style="{StaticResource CaptionTextBlockStyle}"
                             Foreground="{ThemeResource TextFillColorSecondaryBrush}"
