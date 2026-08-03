@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "DevDriveStoragePrototype (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "DevDriveStoragePrototype (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}

@@ -1,0 +1,839 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Page
+    x:Class="DevDriveStoragePrototype.MainPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:DevDriveStoragePrototype.Controls"
+    xmlns:local="using:DevDriveStoragePrototype"
+    xmlns:storage="using:DevDriveStorage"
+    Background="{ThemeResource WorkbenchSurfaceBrush}"
+    KeyDown="Page_KeyDown"
+    Loaded="Page_Loaded"
+    SizeChanged="Page_SizeChanged">
+
+    <Grid x:Name="RootGrid">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!--  Prototype-only affordances. Never ships with the reusable page.  -->
+        <Expander
+            x:Name="PrototypeControlsExpander"
+            Grid.Row="0"
+            Margin="16,12,16,0"
+            HorizontalAlignment="Stretch"
+            HorizontalContentAlignment="Stretch"
+            AutomationProperties.AutomationId="PrototypeControlsExpander"
+            IsExpanded="False">
+            <Expander.Header>
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <FontIcon FontSize="14" Glyph="&#xE9F5;" />
+                    <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Prototype controls" />
+                    <TextBlock
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        VerticalAlignment="Center"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Text="Mock scenarios, layout and theme" />
+                </StackPanel>
+            </Expander.Header>
+
+            <StackPanel Spacing="12">
+                <StackPanel Orientation="Horizontal" Spacing="16">
+                    <StackPanel Spacing="4">
+                        <TextBlock Style="{StaticResource CaptionTextBlockStyle}" Text="Scenario" />
+                        <ComboBox
+                            x:Name="ScenarioComboBox"
+                            Width="260"
+                            AutomationProperties.AutomationId="ScenarioComboBox"
+                            AutomationProperties.Name="Mock scenario"
+                            DisplayMemberPath="DisplayName"
+                            ItemsSource="{x:Bind ScenarioOptions, Mode=OneTime}"
+                            SelectedIndex="0"
+                            SelectionChanged="ScenarioComboBox_SelectionChanged" />
+                    </StackPanel>
+
+                    <StackPanel Spacing="4">
+                        <TextBlock Style="{StaticResource CaptionTextBlockStyle}" Text="Layout" />
+                        <ComboBox
+                            x:Name="LayoutComboBox"
+                            Width="150"
+                            AutomationProperties.AutomationId="LayoutComboBox"
+                            AutomationProperties.Name="Layout override"
+                            SelectedIndex="0"
+                            SelectionChanged="LayoutComboBox_SelectionChanged">
+                            <ComboBoxItem Content="Auto" Tag="Auto" />
+                            <ComboBoxItem Content="1600 x 900" Tag="Full" />
+                            <ComboBoxItem Content="1280 x 800" Tag="Compact" />
+                        </ComboBox>
+                    </StackPanel>
+
+                    <StackPanel Spacing="4">
+                        <TextBlock Style="{StaticResource CaptionTextBlockStyle}" Text="Theme" />
+                        <ComboBox
+                            x:Name="ThemeComboBox"
+                            Width="150"
+                            AutomationProperties.AutomationId="ThemeComboBox"
+                            AutomationProperties.Name="Theme override"
+                            SelectedIndex="0"
+                            SelectionChanged="ThemeComboBox_SelectionChanged">
+                            <ComboBoxItem Content="System" Tag="System" />
+                            <ComboBoxItem Content="Light" Tag="Light" />
+                            <ComboBoxItem Content="Dark" Tag="Dark" />
+                        </ComboBox>
+                    </StackPanel>
+
+                    <StackPanel VerticalAlignment="Bottom" Orientation="Horizontal" Spacing="8">
+                        <Button
+                            x:Name="ApplySearchTestButton"
+                            AutomationProperties.AutomationId="ApplySearchTestButton"
+                            Click="ApplySearchTestButton_Click"
+                            Content="Search &quot;vhdx&quot;" />
+                        <Button
+                            x:Name="RetryScanButton"
+                            AutomationProperties.AutomationId="RetryScanButton"
+                            Click="RetryScanButton_Click"
+                            Content="Retry scan" />
+                    </StackPanel>
+                </StackPanel>
+
+                <TextBlock
+                    Style="{StaticResource CaptionTextBlockStyle}"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Text="Every number on this page comes from a versioned JSON scenario. The prototype never reads real storage." />
+            </StackPanel>
+        </Expander>
+
+        <SplitView
+            x:Name="InspectorSplitView"
+            Grid.Row="1"
+            DisplayMode="Overlay"
+            IsPaneOpen="False"
+            OpenPaneLength="380"
+            PaneBackground="{ThemeResource WorkbenchCardBrush}"
+            PanePlacement="Right">
+
+            <SplitView.Pane>
+                <Grid BorderBrush="{ThemeResource WorkbenchCardStrokeBrush}" BorderThickness="1,0,0,0">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <Border Grid.Row="0" Style="{StaticResource CardHeaderBorderStyle}">
+                        <Grid>
+                            <TextBlock
+                                VerticalAlignment="Center"
+                                Style="{StaticResource BodyStrongTextBlockStyle}"
+                                Text="Details" />
+                            <Button
+                                x:Name="CloseInspectorButton"
+                                HorizontalAlignment="Right"
+                                AutomationProperties.AutomationId="CloseInspectorButton"
+                                AutomationProperties.Name="Close details"
+                                Background="Transparent"
+                                BorderThickness="0"
+                                Click="CloseInspectorButton_Click">
+                                <FontIcon FontSize="14" Glyph="&#xE711;" />
+                            </Button>
+                        </Grid>
+                    </Border>
+
+                    <controls:InspectorPane
+                        x:Name="DrawerInspector"
+                        Grid.Row="1"
+                        Node="{x:Bind ViewModel.SelectedNode, Mode=OneWay}"
+                        Scope="{x:Bind ViewModel.CurrentScope, Mode=OneWay}" />
+                </Grid>
+            </SplitView.Pane>
+
+            <Grid Padding="16,12,16,12" RowSpacing="12">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <!--  Title, search and scan commands  -->
+                <Grid Grid.Row="0" ColumnSpacing="12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                        <TextBlock Style="{StaticResource SubtitleTextBlockStyle}" Text="Storage explorer" />
+                        <TextBlock
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Text="Physical layout of the drive &#183; mock data" />
+                    </StackPanel>
+
+                    <AutoSuggestBox
+                        x:Name="SearchBox"
+                        Grid.Column="1"
+                        Width="300"
+                        VerticalAlignment="Center"
+                        AutomationProperties.AutomationId="SearchBox"
+                        AutomationProperties.Name="Filter items"
+                        PlaceholderText="Filter this scope (Ctrl+F)"
+                        QueryIcon="Find"
+                        Text="{x:Bind ViewModel.SearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+
+                    <Button
+                        x:Name="RefreshButton"
+                        Grid.Column="2"
+                        VerticalAlignment="Center"
+                        AutomationProperties.AutomationId="RefreshButton"
+                        AutomationProperties.Name="Rescan drive"
+                        Click="RefreshButton_Click"
+                        IsEnabled="{x:Bind local:MainPage.Not(ViewModel.IsScanning), Mode=OneWay}">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <FontIcon FontSize="14" Glyph="&#xE72C;" />
+                            <TextBlock Text="Rescan" />
+                        </StackPanel>
+                    </Button>
+
+                    <Button
+                        x:Name="InspectorDrawerButton"
+                        Grid.Column="3"
+                        VerticalAlignment="Center"
+                        AutomationProperties.AutomationId="InspectorDrawerButton"
+                        AutomationProperties.Name="Show details"
+                        Click="InspectorDrawerButton_Click"
+                        Visibility="Collapsed">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <FontIcon FontSize="14" Glyph="&#xE946;" />
+                            <TextBlock Text="Details" />
+                        </StackPanel>
+                    </Button>
+                </Grid>
+
+                <!--  Scope: breadcrumb on the left, totals on the right  -->
+                <Grid Grid.Row="1" ColumnSpacing="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <Button
+                        x:Name="UpButton"
+                        Grid.Column="0"
+                        Padding="8,4,8,4"
+                        AutomationProperties.AutomationId="UpButton"
+                        AutomationProperties.Name="Go up one level"
+                        Background="Transparent"
+                        BorderThickness="0"
+                        Click="UpButton_Click"
+                        IsEnabled="{x:Bind ViewModel.CanNavigateUp, Mode=OneWay}"
+                        ToolTipService.ToolTip="Go up one level (Alt+Up)">
+                        <FontIcon FontSize="14" Glyph="&#xE74A;" />
+                    </Button>
+
+                    <BreadcrumbBar
+                        x:Name="ScopeBreadcrumbBar"
+                        Grid.Column="1"
+                        VerticalAlignment="Center"
+                        AutomationProperties.AutomationId="ScopeBreadcrumbBar"
+                        AutomationProperties.Name="Scope path"
+                        ItemClicked="ScopeBreadcrumbBar_ItemClicked"
+                        ItemsSource="{x:Bind ViewModel.Breadcrumbs, Mode=OneWay}">
+                        <BreadcrumbBar.ItemTemplate>
+                            <DataTemplate x:DataType="storage:StorageNode">
+                                <TextBlock Style="{StaticResource BodyTextBlockStyle}" Text="{x:Bind Name, Mode=OneTime}" />
+                            </DataTemplate>
+                        </BreadcrumbBar.ItemTemplate>
+                    </BreadcrumbBar>
+
+                    <StackPanel
+                        Grid.Column="2"
+                        VerticalAlignment="Center"
+                        Orientation="Horizontal"
+                        Spacing="12">
+                        <TextBlock
+                            x:Name="ScopeStatusText"
+                            Style="{StaticResource BodyStrongTextBlockStyle}"
+                            AutomationProperties.AutomationId="ScopeStatusText"
+                            Text="{x:Bind ViewModel.ScopeSummary, Mode=OneWay}" />
+                        <TextBlock
+                            Style="{StaticResource BodyTextBlockStyle}"
+                            AutomationProperties.AutomationId="ScopeLogicalText"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Text="{x:Bind ViewModel.ScopeLogicalSummary, Mode=OneWay}" />
+                    </StackPanel>
+                </Grid>
+
+                <InfoBar
+                    x:Name="ErrorInfoBar"
+                    Grid.Row="2"
+                    AutomationProperties.AutomationId="ErrorInfoBar"
+                    IsClosable="False"
+                    IsOpen="{x:Bind ViewModel.HasError, Mode=OneWay}"
+                    Message="{x:Bind ViewModel.ErrorMessage, Mode=OneWay}"
+                    Severity="Error"
+                    Title="Scan failed">
+                    <InfoBar.ActionButton>
+                        <Button
+                            AutomationProperties.AutomationId="ErrorRetryButton"
+                            Click="RetryScanButton_Click"
+                            Content="Retry" />
+                    </InfoBar.ActionButton>
+                </InfoBar>
+
+                <Border
+                    Grid.Row="3"
+                    Padding="16,10,16,10"
+                    Style="{StaticResource WorkbenchCardStyle}"
+                    Visibility="{x:Bind local:MainPage.BoolToVisibility(ViewModel.IsScanning), Mode=OneWay}">
+                    <Grid ColumnSpacing="16">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0" Spacing="6">
+                            <TextBlock
+                                x:Name="ScanProgressText"
+                                Style="{StaticResource BodyTextBlockStyle}"
+                                AutomationProperties.AutomationId="ScanProgressText"
+                                Text="{x:Bind ViewModel.ProgressLabel, Mode=OneWay}" />
+                            <ProgressBar
+                                AutomationProperties.AutomationId="ScanProgressBar"
+                                Maximum="1"
+                                Value="{x:Bind ViewModel.Progress, Mode=OneWay}" />
+                        </StackPanel>
+                        <Button
+                            x:Name="CancelScanButton"
+                            Grid.Column="1"
+                            VerticalAlignment="Center"
+                            AutomationProperties.AutomationId="CancelScanButton"
+                            Click="CancelScanButton_Click"
+                            Content="Cancel" />
+                    </Grid>
+                </Border>
+
+                <!--  Body: folders tree on the left, table + details above the physical map  -->
+                <Grid
+                    x:Name="BodyGrid"
+                    Grid.Row="4"
+                    ColumnSpacing="12"
+                    RowSpacing="12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition x:Name="TreeColumn" Width="288" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*" />
+                        <RowDefinition x:Name="TreemapRow" Height="228" />
+                    </Grid.RowDefinitions>
+
+                    <Border
+                        Grid.Row="0"
+                        Grid.RowSpan="2"
+                        Grid.Column="0"
+                        Style="{StaticResource WorkbenchCardStyle}">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+
+                            <Border Grid.Row="0" Style="{StaticResource CardHeaderBorderStyle}">
+                                <Grid>
+                                    <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Folders" />
+                                    <TextBlock
+                                        HorizontalAlignment="Right"
+                                        VerticalAlignment="Center"
+                                        Style="{StaticResource CaptionTextBlockStyle}"
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                        Text="Allocated" />
+                                </Grid>
+                            </Border>
+
+                            <TreeView
+                                x:Name="FolderTree"
+                                Grid.Row="1"
+                                Padding="4,8,4,8"
+                                AutomationProperties.AutomationId="FolderTree"
+                                AutomationProperties.Name="Folder tree"
+                                CanDragItems="False"
+                                CanReorderItems="False"
+                                ItemsSource="{x:Bind ViewModel.TreeRoots, Mode=OneWay}"
+                                SelectionChanged="FolderTree_SelectionChanged"
+                                SelectionMode="Single">
+                                <TreeView.ItemTemplate>
+                                    <DataTemplate x:DataType="storage:StorageTreeItemViewModel">
+                                        <TreeViewItem
+                                            AutomationProperties.AutomationId="{x:Bind AutomationId, Mode=OneTime}"
+                                            AutomationProperties.Name="{x:Bind AccessibleName, Mode=OneTime}"
+                                            IsExpanded="{x:Bind IsExpanded, Mode=TwoWay}"
+                                            ItemsSource="{x:Bind Children, Mode=OneTime}">
+                                            <Grid ColumnSpacing="8">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <FontIcon
+                                                    Grid.Column="0"
+                                                    FontSize="14"
+                                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                    Glyph="&#xE8B7;" />
+                                                <TextBlock
+                                                    Grid.Column="1"
+                                                    Style="{StaticResource BodyTextBlockStyle}"
+                                                    Text="{x:Bind Name, Mode=OneTime}"
+                                                    TextTrimming="CharacterEllipsis"
+                                                    ToolTipService.ToolTip="{x:Bind Name, Mode=OneTime}" />
+                                                <TextBlock
+                                                    Grid.Column="2"
+                                                    Style="{StaticResource CaptionTextBlockStyle}"
+                                                    VerticalAlignment="Center"
+                                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                    Text="{x:Bind SizeDisplay, Mode=OneTime}" />
+                                            </Grid>
+                                        </TreeViewItem>
+                                    </DataTemplate>
+                                </TreeView.ItemTemplate>
+                            </TreeView>
+                        </Grid>
+                    </Border>
+
+                    <Grid
+                        Grid.Row="0"
+                        Grid.Column="1"
+                        ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition x:Name="InspectorColumn" Width="320" />
+                        </Grid.ColumnDefinitions>
+
+                        <Border Grid.Column="0" Style="{StaticResource WorkbenchCardStyle}">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+
+                                <Border Grid.Row="0" Style="{StaticResource CardHeaderBorderStyle}">
+                                    <Grid ColumnSpacing="12">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+
+                                        <SelectorBar
+                                            x:Name="ViewModeSelector"
+                                            Grid.Column="0"
+                                            AutomationProperties.AutomationId="ViewModeSelector"
+                                            AutomationProperties.Name="Table mode"
+                                            SelectionChanged="ViewModeSelector_SelectionChanged">
+                                            <SelectorBarItem
+                                                x:Name="FoldersModeItem"
+                                                AutomationProperties.AutomationId="FoldersModeItem"
+                                                IsSelected="True"
+                                                Text="Folders" />
+                                            <SelectorBarItem
+                                                x:Name="LargestFilesModeItem"
+                                                AutomationProperties.AutomationId="LargestFilesModeItem"
+                                                Text="Largest files" />
+                                        </SelectorBar>
+
+                                        <TextBlock
+                                            Grid.Column="1"
+                                            VerticalAlignment="Center"
+                                            Style="{StaticResource CaptionTextBlockStyle}"
+                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                            Text="{x:Bind ViewModel.ModeCaption, Mode=OneWay}"
+                                            TextTrimming="CharacterEllipsis" />
+
+                                        <TextBlock
+                                            Grid.Column="2"
+                                            VerticalAlignment="Center"
+                                            Style="{StaticResource CaptionTextBlockStyle}"
+                                            AutomationProperties.AutomationId="ItemCountText"
+                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                            Text="{x:Bind ViewModel.ItemCountSummary, Mode=OneWay}" />
+                                    </Grid>
+                                </Border>
+
+                                <!--  Column headers. Widths mirror the row template below.  -->
+                                <Border
+                                    Grid.Row="1"
+                                    Padding="12,2,16,2"
+                                    BorderBrush="{ThemeResource WorkbenchDividerBrush}"
+                                    BorderThickness="0,0,0,1">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="104" />
+                                            <ColumnDefinition Width="104" />
+                                            <ColumnDefinition Width="86" />
+                                            <ColumnDefinition Width="74" />
+                                            <ColumnDefinition Width="148" />
+                                        </Grid.ColumnDefinitions>
+
+                                        <Button
+                                            x:Name="SortNameButton"
+                                            Grid.Column="0"
+                                            AutomationProperties.AutomationId="SortNameButton"
+                                            Click="SortNameButton_Click"
+                                            Style="{StaticResource ColumnHeaderButtonStyle}">
+                                            <StackPanel Orientation="Horizontal" Spacing="4">
+                                                <TextBlock
+                                                    Style="{StaticResource CaptionTextBlockStyle}"
+                                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                    Text="NAME" />
+                                                <FontIcon
+                                                    FontSize="10"
+                                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                    Glyph="{x:Bind ViewModel.SortGlyphName, Mode=OneWay}" />
+                                            </StackPanel>
+                                        </Button>
+
+                                        <Button
+                                            x:Name="SortSizeButton"
+                                            Grid.Column="1"
+                                            HorizontalContentAlignment="Right"
+                                            AutomationProperties.AutomationId="SortSizeButton"
+                                            Click="SortSizeButton_Click"
+                                            Style="{StaticResource ColumnHeaderButtonStyle}">
+                                            <StackPanel Orientation="Horizontal" Spacing="4">
+                                                <TextBlock
+                                                    Style="{StaticResource CaptionTextBlockStyle}"
+                                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                    Text="ALLOCATED" />
+                                                <FontIcon
+                                                    FontSize="10"
+                                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                    Glyph="{x:Bind ViewModel.SortGlyphSize, Mode=OneWay}" />
+                                            </StackPanel>
+                                        </Button>
+
+                                        <Button
+                                            x:Name="SortLogicalButton"
+                                            Grid.Column="2"
+                                            HorizontalContentAlignment="Right"
+                                            AutomationProperties.AutomationId="SortLogicalButton"
+                                            Click="SortLogicalButton_Click"
+                                            Style="{StaticResource ColumnHeaderButtonStyle}">
+                                            <StackPanel Orientation="Horizontal" Spacing="4">
+                                                <TextBlock
+                                                    Style="{StaticResource CaptionTextBlockStyle}"
+                                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                    Text="LOGICAL" />
+                                                <FontIcon
+                                                    FontSize="10"
+                                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                    Glyph="{x:Bind ViewModel.SortGlyphLogical, Mode=OneWay}" />
+                                            </StackPanel>
+                                        </Button>
+
+                                        <TextBlock
+                                            Grid.Column="3"
+                                            Margin="8,4,8,4"
+                                            HorizontalAlignment="Right"
+                                            Style="{StaticResource CaptionTextBlockStyle}"
+                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                            Text="% SCOPE" />
+
+                                        <Button
+                                            x:Name="SortItemsButton"
+                                            Grid.Column="4"
+                                            HorizontalContentAlignment="Right"
+                                            AutomationProperties.AutomationId="SortItemsButton"
+                                            Click="SortItemsButton_Click"
+                                            Style="{StaticResource ColumnHeaderButtonStyle}">
+                                            <StackPanel Orientation="Horizontal" Spacing="4">
+                                                <TextBlock
+                                                    Style="{StaticResource CaptionTextBlockStyle}"
+                                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                    Text="ITEMS" />
+                                                <FontIcon
+                                                    FontSize="10"
+                                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                    Glyph="{x:Bind ViewModel.SortGlyphItems, Mode=OneWay}" />
+                                            </StackPanel>
+                                        </Button>
+
+                                        <Button
+                                            x:Name="SortContextButton"
+                                            Grid.Column="5"
+                                            AutomationProperties.AutomationId="SortContextButton"
+                                            Click="SortContextButton_Click"
+                                            Style="{StaticResource ColumnHeaderButtonStyle}">
+                                            <StackPanel Orientation="Horizontal" Spacing="4">
+                                                <TextBlock
+                                                    Style="{StaticResource CaptionTextBlockStyle}"
+                                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                    Text="CONTEXT" />
+                                                <FontIcon
+                                                    FontSize="10"
+                                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                    Glyph="{x:Bind ViewModel.SortGlyphContext, Mode=OneWay}" />
+                                            </StackPanel>
+                                        </Button>
+                                    </Grid>
+                                </Border>
+
+                                <ListView
+                                    x:Name="ItemsList"
+                                    Grid.Row="2"
+                                    Padding="0,4,0,8"
+                                    AutomationProperties.AutomationId="ItemsList"
+                                    AutomationProperties.Name="Storage items"
+                                    DoubleTapped="ItemsList_DoubleTapped"
+                                    ItemsSource="{x:Bind ViewModel.VisibleItems, Mode=OneWay}"
+                                    SelectedItem="{x:Bind ViewModel.SelectedRow, Mode=TwoWay}"
+                                    SelectionMode="Single">
+                                    <ListView.ItemContainerStyle>
+                                        <Style TargetType="ListViewItem" BasedOn="{StaticResource DefaultListViewItemStyle}">
+                                            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                            <Setter Property="Padding" Value="12,0,16,0" />
+                                            <Setter Property="MinHeight" Value="36" />
+                                        </Style>
+                                    </ListView.ItemContainerStyle>
+                                    <ListView.ItemTemplate>
+                                        <DataTemplate x:DataType="storage:StorageRowViewModel">
+                                            <Grid
+                                                Height="36"
+                                                AutomationProperties.AutomationId="{x:Bind AutomationId, Mode=OneTime}"
+                                                AutomationProperties.Name="{x:Bind AccessibleDescription, Mode=OneTime}">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="104" />
+                                                    <ColumnDefinition Width="104" />
+                                                    <ColumnDefinition Width="86" />
+                                                    <ColumnDefinition Width="74" />
+                                                    <ColumnDefinition Width="148" />
+                                                </Grid.ColumnDefinitions>
+
+                                                <StackPanel
+                                                    Grid.Column="0"
+                                                    Margin="8,0,8,0"
+                                                    VerticalAlignment="Center"
+                                                    Orientation="Horizontal"
+                                                    Spacing="8">
+                                                    <Rectangle
+                                                        Width="10"
+                                                        Height="10"
+                                                        RadiusX="2"
+                                                        RadiusY="2"
+                                                        Fill="{x:Bind local:MainPage.PaletteBrush(ColorIndex), Mode=OneTime}" />
+                                                    <FontIcon
+                                                        FontSize="14"
+                                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                                                Glyph="{x:Bind local:MainPage.KindGlyph(IsFolder), Mode=OneTime}" />
+                                                    <TextBlock
+                                                        Style="{StaticResource BodyTextBlockStyle}"
+                                                        VerticalAlignment="Center"
+                                                        Text="{x:Bind Name, Mode=OneTime}"
+                                                        TextTrimming="CharacterEllipsis"
+                                                        ToolTipService.ToolTip="{x:Bind PhysicalPath, Mode=OneTime}" />
+                                                </StackPanel>
+
+                                                <TextBlock
+                                                    Grid.Column="1"
+                                                    Margin="12,0,0,0"
+                                                    HorizontalAlignment="Right"
+                                                    VerticalAlignment="Center"
+                                                    Style="{StaticResource BodyStrongTextBlockStyle}"
+                                                    Text="{x:Bind SizeDisplay, Mode=OneTime}" />
+
+                                                <TextBlock
+                                                    Grid.Column="2"
+                                                    Margin="12,0,0,0"
+                                                    HorizontalAlignment="Right"
+                                                    VerticalAlignment="Center"
+                                                    Style="{StaticResource BodyTextBlockStyle}"
+                                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                    Text="{x:Bind LogicalDisplay, Mode=OneTime}" />
+
+                                                <TextBlock
+                                                    Grid.Column="3"
+                                                    Margin="12,0,0,0"
+                                                    HorizontalAlignment="Right"
+                                                    VerticalAlignment="Center"
+                                                    Style="{StaticResource BodyTextBlockStyle}"
+                                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                    Text="{x:Bind ShareDisplay, Mode=OneTime}" />
+
+                                                <TextBlock
+                                                    Grid.Column="4"
+                                                    Margin="12,0,0,0"
+                                                    HorizontalAlignment="Right"
+                                                    VerticalAlignment="Center"
+                                                    Style="{StaticResource BodyTextBlockStyle}"
+                                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                    Text="{x:Bind ItemCountDisplay, Mode=OneTime}" />
+
+                                                <TextBlock
+                                                    Grid.Column="5"
+                                                    Margin="12,0,0,0"
+                                                    VerticalAlignment="Center"
+                                                    Style="{StaticResource CaptionTextBlockStyle}"
+                                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                    Text="{x:Bind ContextDisplay, Mode=OneTime}"
+                                                    TextTrimming="CharacterEllipsis" />
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ListView.ItemTemplate>
+                                </ListView>
+
+                                <StackPanel
+                                    Grid.Row="2"
+                                    Margin="24"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Spacing="8"
+                                    Visibility="{x:Bind local:MainPage.BoolToVisibility(ViewModel.IsEmptyStateVisible), Mode=OneWay}">
+                                    <FontIcon
+                                        FontSize="28"
+                                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                        Glyph="&#xE7C3;" />
+                                    <TextBlock
+                                        x:Name="EmptyStateText"
+                                        HorizontalAlignment="Center"
+                                        Style="{StaticResource BodyStrongTextBlockStyle}"
+                                        AutomationProperties.AutomationId="EmptyStateText"
+                                        Text="Nothing to show here" />
+                                    <TextBlock
+                                        HorizontalAlignment="Center"
+                                        Style="{StaticResource CaptionTextBlockStyle}"
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                        Text="This scope is empty, or the filter matched no items."
+                                        TextAlignment="Center" />
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+
+                        <Border
+                            x:Name="InspectorCard"
+                            Grid.Column="1"
+                            Style="{StaticResource WorkbenchCardStyle}">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+
+                                <Border Grid.Row="0" Style="{StaticResource CardHeaderBorderStyle}">
+                                    <Grid>
+                                        <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Details" />
+                                        <TextBlock
+                                            HorizontalAlignment="Right"
+                                            VerticalAlignment="Center"
+                                            Style="{StaticResource CaptionTextBlockStyle}"
+                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                            Text="Selection" />
+                                    </Grid>
+                                </Border>
+
+                                <controls:InspectorPane
+                                    x:Name="Inspector"
+                                    Grid.Row="1"
+                                    Node="{x:Bind ViewModel.SelectedNode, Mode=OneWay}"
+                                    Scope="{x:Bind ViewModel.CurrentScope, Mode=OneWay}" />
+                            </Grid>
+                        </Border>
+                    </Grid>
+
+                    <Border
+                        Grid.Row="1"
+                        Grid.Column="1"
+                        Style="{StaticResource WorkbenchCardStyle}">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+
+                            <Border Grid.Row="0" Style="{StaticResource CardHeaderBorderStyle}">
+                                <Grid>
+                                    <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Physical map" />
+                                    <TextBlock
+                                        HorizontalAlignment="Right"
+                                        VerticalAlignment="Center"
+                                        Style="{StaticResource CaptionTextBlockStyle}"
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                        Text="Rectangle area = allocated bytes &#183; colour matches the table" />
+                                </Grid>
+                            </Border>
+
+                            <controls:TreemapPane
+                                x:Name="StorageTreemap"
+                                Grid.Row="1"
+                                Padding="8"
+                                AutomationProperties.AutomationId="StorageTreemap"
+                                AutomationProperties.Name="Physical map"
+                                NodeInvoked="StorageTreemap_NodeInvoked"
+                                Rows="{x:Bind ViewModel.VisibleItems, Mode=OneWay}"
+                                SelectedRow="{x:Bind ViewModel.SelectedRow, Mode=OneWay}" />
+                        </Grid>
+                    </Border>
+                </Grid>
+
+                <!--  Status bar  -->
+                <Border
+                    Grid.Row="5"
+                    Padding="16,8,16,8"
+                    Style="{StaticResource WorkbenchCardStyle}">
+                    <Grid ColumnSpacing="16">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <TextBlock
+                            Grid.Column="0"
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            AutomationProperties.AutomationId="CoverageStatusText"
+                            Text="{x:Bind ViewModel.CoverageSummary, Mode=OneWay}" />
+                        <TextBlock
+                            Grid.Column="1"
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            AutomationProperties.AutomationId="ScanStatusText"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Text="{x:Bind ViewModel.ProgressLabel, Mode=OneWay}" />
+                        <TextBlock
+                            Grid.Column="2"
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            AutomationProperties.AutomationId="SnapshotSummaryText"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Text="{x:Bind ViewModel.SnapshotSummary, Mode=OneWay}" />
+                        <TextBlock
+                            Grid.Column="4"
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Text="Ctrl+F filter &#183; F5 rescan &#183; Alt+Up parent &#183; Enter open" />
+                    </Grid>
+                </Border>
+            </Grid>
+        </SplitView>
+
+        <VisualStateManager.VisualStateGroups>
+            <VisualStateGroup x:Name="LayoutStates">
+                <VisualState x:Name="FullLayout" />
+                <VisualState x:Name="CompactLayout">
+                    <VisualState.Setters>
+                        <Setter Target="InspectorCard.Visibility" Value="Collapsed" />
+                        <Setter Target="InspectorColumn.Width" Value="0" />
+                        <Setter Target="InspectorDrawerButton.Visibility" Value="Visible" />
+                        <Setter Target="TreeColumn.Width" Value="232" />
+                        <Setter Target="TreemapRow.Height" Value="188" />
+                    </VisualState.Setters>
+                </VisualState>
+            </VisualStateGroup>
+        </VisualStateManager.VisualStateGroups>
+    </Grid>
+</Page>
