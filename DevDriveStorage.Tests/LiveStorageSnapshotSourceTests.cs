@@ -200,6 +200,48 @@ public sealed class LiveStorageSnapshotSourceTests
     }
 
     [TestMethod]
+    public async Task ClusterSlackIsCapturedInAllocatedSize()
+    {
+        // 5000 is not a multiple of any Windows cluster size (512/4K/8K/16K/32K/64K), so a
+        // dense file of this length is guaranteed to round up on disk. GetCompressedFileSizeW
+        // (the old path) returned exactly the apparent length and lost this slack.
+        const long apparent = 5000;
+        _fixture.File("dense.bin", apparent);
+
+        StorageSnapshot snapshot = await ScanAsync(_fixture.Root);
+
+        StorageNode dense = snapshot.Nodes.Single(n => n.Name == "dense.bin");
+        Assert.IsGreaterThan(
+            apparent,
+            dense.SizeBytes,
+            $"allocated {dense.SizeBytes} must round up past apparent {apparent} to capture cluster slack");
+
+        // Sub-cluster slack is ordinary rounding, not the sparse/compression signal, so it must
+        // not light up the logical-difference UI.
+        Assert.IsFalse(
+            dense.HasLogicalDifference,
+            "cluster slack (allocated > apparent) must stay hidden");
+    }
+
+    [TestMethod]
+    public async Task SparseFileReportsNearZeroAllocated()
+    {
+        // The regression that matters most: an unwritten sparse file occupies ~nothing on disk
+        // even though its apparent length is large. AllocationSize must still report that.
+        const long apparent = 8 * 1024 * 1024;
+        _fixture.SparseFile("empty.sparse", apparent);
+
+        StorageSnapshot snapshot = await ScanAsync(_fixture.Root);
+
+        StorageNode sparse = snapshot.Nodes.Single(n => n.Name == "empty.sparse");
+        Assert.IsLessThanOrEqualTo(
+            64 * 1024L,
+            sparse.SizeBytes,
+            $"an empty {apparent}-byte sparse file should allocate ~0 on disk, got {sparse.SizeBytes}");
+        Assert.AreEqual(apparent, sparse.LogicalBytes, "the apparent length must still be reported");
+    }
+
+    [TestMethod]
     public async Task LargeFolderRollsUpBeyondThreshold()
     {
         for (int i = 0; i < 10; i++)

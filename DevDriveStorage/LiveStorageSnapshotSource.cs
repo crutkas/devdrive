@@ -127,6 +127,78 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
         ScanContext context,
         CancellationToken cancellationToken)
     {
+        // Fast path: one syscall for the whole directory yields each child's on-disk
+        // AllocationSize (cluster slack included) alongside its apparent length, replacing
+        // both the managed enumeration and a per-file GetCompressedFileSizeW call.
+        if (NativeDirectoryEnumerator.TryEnumerate(directory.Path, out List<NativeDirEntry> nativeEntries))
+        {
+            EnumerateFromNative(directory, nativeEntries, order, stack, context, cancellationToken);
+            return;
+        }
+
+        // The directory could not be opened for a fast scan (denied, gone, or an unexpected
+        // native failure). Fall back to managed enumeration, which records denials the same way
+        // and still reports allocation via GetCompressedFileSizeW.
+        EnumerateManaged(directory, order, stack, context, cancellationToken);
+    }
+
+    private static void EnumerateFromNative(
+        ScanEntry directory,
+        List<NativeDirEntry> entries,
+        List<ScanEntry> order,
+        Stack<ScanEntry> stack,
+        ScanContext context,
+        CancellationToken cancellationToken)
+    {
+        int counter = 0;
+        foreach (NativeDirEntry entry in entries)
+        {
+            if (++counter % 256 == 0)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+
+            bool isDirectory = (entry.Attributes & FileAttributes.Directory) != 0;
+            bool isReparse = (entry.Attributes & FileAttributes.ReparsePoint) != 0;
+            string fullPath = Path.Combine(directory.Path, entry.Name);
+
+            if (isDirectory && !isReparse)
+            {
+                var child = new ScanEntry(directory, fullPath, entry.Name, StorageNodeKind.Folder);
+                directory.Children.Add(child);
+                order.Add(child);
+                stack.Push(child);
+                continue;
+            }
+
+            long allocated = entry.AllocationSize;
+            long apparent = entry.EndOfFile;
+            var leaf = new ScanEntry(
+                directory,
+                fullPath,
+                entry.Name,
+                isDirectory ? StorageNodeKind.Folder : StorageNodeKind.File)
+            {
+                Allocated = allocated,
+                Logical = apparent,
+                IsLeaf = true,
+                IsReparsePoint = isReparse,
+                ModifiedAtUtc = new DateTimeOffset(entry.LastWriteTimeUtcTicks, TimeSpan.Zero),
+            };
+
+            directory.Children.Add(leaf);
+            order.Add(leaf);
+            context.OnFileProcessed(allocated, directory.Path);
+        }
+    }
+
+    private static void EnumerateManaged(
+        ScanEntry directory,
+        List<ScanEntry> order,
+        Stack<ScanEntry> stack,
+        ScanContext context,
+        CancellationToken cancellationToken)
+    {
         List<FileSystemInfo> entries;
         try
         {
@@ -274,7 +346,12 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
 
     private static StorageNode ToNode(ScanEntry entry, Guid id, Guid? parentId)
     {
-        long? logical = entry.Logical != entry.Allocated ? entry.Logical : null;
+        // AllocationSize normally rounds *up* past the apparent length (cluster slack), so
+        // allocated >= apparent is the common, uninteresting case and must stay hidden. Only
+        // when the apparent length exceeds the on-disk allocation — sparse VHDX, NTFS
+        // compression, ReFS block cloning — is there a real "size vs size on disk" story worth
+        // surfacing, so LogicalBytes is populated only then.
+        long? logical = entry.Logical > entry.Allocated ? entry.Logical : null;
         StorageProviderContext? provider = LiveProviderCorrelator.Correlate(
             entry.Name, entry.Path, entry.Kind, entry.ModifiedAtUtc);
 
