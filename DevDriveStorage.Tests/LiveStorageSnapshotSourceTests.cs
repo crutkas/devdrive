@@ -58,6 +58,100 @@ public sealed class LiveStorageSnapshotSourceTests
     }
 
     [TestMethod]
+    public async Task StreamedPartialsCarryUsableSnapshotsAndNeverDoubleCount()
+    {
+        // A tree wide enough that the walk crosses several partial-emission points.
+        for (int i = 0; i < 12; i++)
+        {
+            for (int j = 0; j < 6; j++)
+            {
+                _fixture.File($"d{i}/f{j}.bin", 4096);
+            }
+        }
+
+        var reports = new List<StorageScanProgress>();
+        StorageSnapshot final = await ScanAsync(
+            _fixture.Root,
+            new SyncProgress(reports.Add),
+            interval: TimeSpan.Zero);
+
+        StorageScanProgress[] partials = reports.Where(r => r.Partial is not null).ToArray();
+        Assert.IsNotEmpty(partials, "a zero interval must stream partial snapshots");
+
+        foreach (StorageScanProgress report in partials)
+        {
+            StorageSnapshot partial = report.Partial!;
+
+            // The whole point: a partial has to be a real snapshot the room can render.
+            Assert.AreEqual(SnapshotCompletion.Partial, partial.Completion);
+            Assert.AreEqual(final.Root.PhysicalPath, partial.Root.PhysicalPath);
+            Assert.IsLessThanOrEqualTo(final.Root.SizeBytes, partial.Root.SizeBytes,
+                "a partial can never exceed the finished scan — that would mean rollup double-counting");
+
+            // Partials carry folders only, so the room can keep updating on a large volume without
+            // each tick costing the whole walk. Folder totals are still full rollups.
+            Assert.IsFalse(
+                partial.Nodes.Any(node => node.Kind == StorageNodeKind.File),
+                "a streamed partial must not carry file nodes");
+
+            foreach (StorageNode folder in partial.Nodes.Where(n => n.Kind == StorageNodeKind.Folder))
+            {
+                long children = partial.ChildrenOf(folder.Id).Sum(child => child.SizeBytes);
+                Assert.IsLessThanOrEqualTo(folder.SizeBytes, children,
+                    $"'{folder.Name}' holds less than its subfolders, which means it double-counted");
+            }
+        }
+
+        // Sizes must climb toward the answer, never overshoot and settle back.
+        long[] sizes = partials.Select(r => r.Partial!.Root.SizeBytes).ToArray();
+        for (int i = 1; i < sizes.Length; i++)
+        {
+            Assert.IsGreaterThanOrEqualTo(sizes[i - 1], sizes[i], "partial totals must be monotonic");
+        }
+    }
+
+    [TestMethod]
+    public async Task NodeIdentityIsStableAcrossPartialsAndRescans()
+    {
+        _fixture.File("keep/a.bin", 4096);
+        _fixture.File("keep/nested/b.bin", 4096);
+
+        var reports = new List<StorageScanProgress>();
+        StorageSnapshot first = await ScanAsync(
+            _fixture.Root,
+            new SyncProgress(reports.Add),
+            interval: TimeSpan.Zero);
+        StorageSnapshot second = await ScanAsync(_fixture.Root);
+
+        // Selection, scope and expanded folders are all restored by id. If ids moved between
+        // emissions the room would throw the user back to the root on every update.
+        Assert.AreEqual(first.Root.Id, second.Root.Id, "the same path must keep the same id across scans");
+
+        StorageNode nested = first.Nodes.Single(n => n.Name == "nested");
+        Assert.AreEqual(
+            nested.Id,
+            second.Nodes.Single(n => n.Name == "nested").Id,
+            "a folder's id must not depend on when it was scanned");
+
+        foreach (StorageSnapshot partial in reports.Where(r => r.Partial is not null).Select(r => r.Partial!))
+        {
+            Assert.AreEqual(first.Root.Id, partial.Root.Id, "partials must share the final scan's ids");
+        }
+
+        Assert.AreEqual(
+            first.Nodes.Length,
+            first.Nodes.Select(n => n.Id).Distinct().Count(),
+            "hashing paths must still produce unique ids");
+    }
+
+    /// <summary>Applies reports inline so assertions see them in walk order.</summary>
+    private sealed class SyncProgress(Action<StorageScanProgress> onReport)
+        : IProgress<StorageScanProgress>
+    {
+        public void Report(StorageScanProgress value) => onReport(value);
+    }
+
+    [TestMethod]
     public async Task DeniedSubtreeYieldsPartialCoverageWithPath()
     {
         _fixture.File("visible/keep.bin", 4096);

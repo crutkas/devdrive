@@ -114,9 +114,15 @@
                     <Border Grid.Row="0" Style="{StaticResource SmCardHeadStyle}">
                         <Grid ColumnSpacing="10">
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
+                            <!--
+                                Title is Auto and the status takes the slack. The rail is 236 wide
+                                and the two together do not always fit; when something has to give it
+                                must be the status, which is repeated verbatim in the status bar at
+                                the foot of the room. A truncated card title is just a broken card.
+                            -->
                             <TextBlock
                                 Grid.Column="0"
                                 VerticalAlignment="Center"
@@ -124,10 +130,12 @@
                                 Text="What was found" />
                             <TextBlock
                                 Grid.Column="1"
+                                HorizontalAlignment="Right"
                                 VerticalAlignment="Center"
                                 AutomationProperties.AutomationId="ReclaimStatus"
                                 Style="{StaticResource SmCardSubTextStyle}"
-                                Text="{x:Bind ViewModel.StatusText, Mode=OneWay}" />
+                                Text="{x:Bind ViewModel.StatusText, Mode=OneWay}"
+                                TextTrimming="CharacterEllipsis" />
                         </Grid>
                     </Border>
 

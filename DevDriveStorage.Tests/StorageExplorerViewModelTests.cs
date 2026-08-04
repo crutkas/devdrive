@@ -262,6 +262,71 @@ public sealed class StorageExplorerViewModelTests
         }
     }
 
+    [TestMethod]
+    public async Task StreamedPartialFillsTheRoomBeforeTheScanFinishes()
+    {
+        StorageSnapshot partial = StorageTestBuilder.Snapshot(
+            nodes:
+            [
+                StorageTestBuilder.Node(StorageTestBuilder.RootId, null, "root", @"M:\",
+                    StorageNodeKind.Folder, 1000, 1),
+                StorageTestBuilder.Node(StorageTestBuilder.FolderId, StorageTestBuilder.RootId, "src",
+                    @"M:\src", StorageNodeKind.Folder, 1000, 0),
+            ]);
+
+        var viewModel = new StorageExplorerViewModel(
+            new StreamingSource(partial, StorageTestBuilder.Snapshot()));
+        var sawRowsWhileScanning = false;
+
+        viewModel.PropertyChanged += (_, args) =>
+        {
+            // The whole point of streaming: rows exist while the state is still Scanning.
+            if (args.PropertyName == nameof(viewModel.Progress) &&
+                viewModel.ScanState == ExplorerScanState.Scanning &&
+                viewModel.VisibleItems.Count > 0)
+            {
+                sawRowsWhileScanning = true;
+            }
+        };
+
+        await viewModel.LoadScenarioAsync("test");
+
+        Assert.IsTrue(sawRowsWhileScanning, "a partial snapshot must populate the table mid-scan");
+        Assert.AreEqual(ExplorerScanState.Completed, viewModel.ScanState);
+        Assert.AreEqual("src", viewModel.VisibleItems.Single().Name, "the final scan still wins");
+    }
+
+    [TestMethod]
+    public async Task StreamedPartialKeepsScopeAndSelectionPut()
+    {
+        StorageSnapshot snapshot = StorageTestBuilder.Snapshot();
+        var viewModel = new StorageExplorerViewModel(new StreamingSource(snapshot, snapshot));
+
+        await viewModel.LoadScenarioAsync("test");
+        viewModel.NavigateTo(StorageTestBuilder.FolderId);
+        Guid scopeId = viewModel.CurrentScope!.Id;
+
+        // A second scan streams a partial before finishing. Losing the user's place on every
+        // update is the failure mode that makes live results worse than a spinner.
+        await viewModel.RefreshAsync();
+
+        Assert.AreEqual(scopeId, viewModel.CurrentScope?.Id, "a streamed update must not reset the scope");
+    }
+
+    /// <summary>Reports one partial snapshot, then completes with the final one.</summary>
+    private sealed class StreamingSource(StorageSnapshot partial, StorageSnapshot final)
+        : IStorageSnapshotSource
+    {
+        public Task<StorageSnapshot> GetSnapshotAsync(
+            StorageSnapshotRequest request,
+            IProgress<StorageScanProgress>? progress,
+            CancellationToken cancellationToken)
+        {
+            progress?.Report(new StorageScanProgress(0.5, "Scanning", 1, 2, partial));
+            return Task.FromResult(final);
+        }
+    }
+
     /// <summary>
     /// Counts posts that carry a progress payload. Everything is forwarded to the thread pool so
     /// awaited continuations still run and the test cannot deadlock on an unpumped queue.

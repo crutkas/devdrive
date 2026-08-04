@@ -1,4 +1,6 @@
 using DevDriveManager.ViewModels;
+using DevDriveStorage;
+using DevDriveStorage.Live;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Data;
@@ -51,6 +53,16 @@ public partial class App : Application
     /// worse, silently abandon one still running.
     /// </summary>
     public static ReclaimViewModel SharedReclaim { get; } = new();
+
+    /// <summary>
+    /// The shared Space room state, for the same reason as <see cref="SharedReclaim"/>: a cold
+    /// full-volume walk is minutes long, so a scan must outlive the page that started it. WinUI
+    /// rebuilds a page on every navigation to it, so a page-owned view model would throw away a
+    /// finished scan the moment the user looked at another room — and leave an unfinished one
+    /// walking the disk on behalf of a page nobody can see.
+    /// </summary>
+    public static StorageExplorerViewModel SharedSpace { get; } =
+        new(new LiveStorageSnapshotSource());
 
     /// <summary>
     /// Initializes the singleton application object.

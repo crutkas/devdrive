@@ -52,6 +52,8 @@ public sealed partial class SpacePage : Page, INotifyPropertyChanged
     private static readonly string[] DerivedProperties =
     [
         nameof(ShowOverlay),
+        nameof(ShowLiveScanStrip),
+        nameof(LiveScanText),
         nameof(OverlayTitle),
         nameof(OverlayDetail),
         nameof(CoverageBlock),
@@ -74,12 +76,24 @@ public sealed partial class SpacePage : Page, INotifyPropertyChanged
     {
         _volumes = volumes;
 
-        // Live-only by design. The prototype routed through RoutingStorageSnapshotSource so its
-        // scenario picker could reach the mock catalogue; a shipping room that scans real volumes
-        // has no business carrying a mock. The scenario id is simply the root path to scan.
-        ViewModel = new StorageExplorerViewModel(new LiveStorageSnapshotSource());
+        // App-lifetime, not page-owned: see App.SharedSpace. Live-only by design — the prototype
+        // routed through RoutingStorageSnapshotSource so its scenario picker could reach the mock
+        // catalogue; a shipping room that scans real volumes has no business carrying a mock. The
+        // scenario id is simply the root path to scan.
+        ViewModel = App.SharedSpace;
         StripEntries = BuildStrip();
         InitializeComponent();
+
+        // Subscribed on Loaded and released on Unloaded because the ViewModel outlives this page.
+        // Subscribing in the constructor would leave one live handler per visit to the room, each
+        // holding a page the user has already navigated away from.
+        Loaded += OnLoadedSubscribe;
+        Unloaded += (_, _) => ViewModel.PropertyChanged -= ViewModel_PropertyChanged;
+    }
+
+    private void OnLoadedSubscribe(object sender, RoutedEventArgs args)
+    {
+        ViewModel.PropertyChanged -= ViewModel_PropertyChanged;
         ViewModel.PropertyChanged += ViewModel_PropertyChanged;
     }
 
@@ -93,14 +107,28 @@ public sealed partial class SpacePage : Page, INotifyPropertyChanged
     public ObservableCollection<InspectorFact> InspectorFacts { get; } = [];
 
     /// <summary>
-    /// True whenever the centre column has nothing worth showing — before the first scan, during a
-    /// scan, and after a failure.
+    /// True whenever the centre column has nothing worth showing — before the first scan, while a
+    /// scan is still working with nothing to show yet, and after a failure. Once the scan streams
+    /// its first partial the overlay gets out of the way: watching the tree fill in is the point of
+    /// streaming, and it cannot be seen through a full-bleed "Scanning" card.
     /// </summary>
     public bool ShowOverlay =>
         ViewModel.ScanState is ExplorerScanState.Idle
-            or ExplorerScanState.Scanning
             or ExplorerScanState.Failed
-            or ExplorerScanState.Cancelled;
+            or ExplorerScanState.Cancelled ||
+        (ViewModel.ScanState is ExplorerScanState.Scanning && ViewModel.Snapshot is null);
+
+    /// <summary>
+    /// True while a scan is filling the room in place. This is what keeps the progress bar and the
+    /// cancel button reachable after the overlay has stepped aside.
+    /// </summary>
+    public bool ShowLiveScanStrip =>
+        ViewModel.ScanState is ExplorerScanState.Scanning && ViewModel.Snapshot is not null;
+
+    /// <summary>Reminds the reader that live rows are still moving, and offers the way out.</summary>
+    public string LiveScanText => _pendingVolumeLabel is null
+        ? "Scanning — results update as they are found"
+        : $"Scanning {_pendingVolumeLabel} — results update as they are found";
 
     public string OverlayTitle => ViewModel.ScanState switch
     {
@@ -200,7 +228,35 @@ public sealed partial class SpacePage : Page, INotifyPropertyChanged
         }
 
         _isLoaded = true;
+        RestoreScopeSelection();
         UpdateDerived();
+    }
+
+    /// <summary>
+    /// Re-points the volume strip at whatever the shared view model is already showing. The scan
+    /// survives navigation; this page does not, so without this a completed G:\ scan would come
+    /// back with its results intact but no volume card selected and a generic "Scanning" label.
+    /// </summary>
+    private void RestoreScopeSelection()
+    {
+        string scope = ViewModel.ScenarioId;
+        VolumeStripEntry? entry = StripEntries.FirstOrDefault(
+            candidate => string.Equals(
+                candidate.Volume.RootPath,
+                scope,
+                StringComparison.OrdinalIgnoreCase));
+
+        if (entry is null)
+        {
+            return;
+        }
+
+        _pendingVolumeLabel = entry.Volume.DisplayName;
+        foreach (VolumeCard card in FindVolumeCards())
+        {
+            card.IsSelected = card.Volume is StorageVolume volume &&
+                string.Equals(volume.RootPath, scope, StringComparison.OrdinalIgnoreCase);
+        }
     }
 
     /// <summary>

@@ -1,5 +1,7 @@
 using System.Collections.Immutable;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using DevDriveStorage.Live;
 
 namespace DevDriveStorage;
@@ -102,6 +104,13 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
             cancellationToken.ThrowIfCancellationRequested();
             ScanEntry directory = stack.Pop();
             EnumerateDirectory(directory, order, stack, context, cancellationToken);
+
+            // Between directories, not inside one: the tree is consistent here, and a partial is
+            // only worth building once a whole directory's worth of new rows exists.
+            if (context.WantsPartial)
+            {
+                context.PublishPartial(() => BuildPartial(request, root, order, context, referenceTotalBytes));
+            }
         }
 
         Aggregate(order);
@@ -150,6 +159,39 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
                 context.TotalAllocatedBytes,
                 context.TotalApparentBytes,
                 excludedPaths),
+            nodes);
+    }
+
+    /// <summary>
+    /// Freezes the walk so far into a usable snapshot. Always <see cref="SnapshotCompletion.Partial"/>
+    /// — by construction there is more to come — so nothing downstream can mistake it for a result.
+    /// </summary>
+    private StorageSnapshot BuildPartial(
+        StorageSnapshotRequest request,
+        ScanEntry root,
+        List<ScanEntry> order,
+        ScanContext context,
+        long? referenceTotalBytes)
+    {
+        Aggregate(order);
+        ImmutableArray<StorageNode> nodes = Emit(
+            root, correlateProviders: false, foldersOnly: true, out Guid rootId);
+        long covered = root.Allocated;
+
+        return new StorageSnapshot(
+            StorageSnapshot.CurrentSchemaVersion,
+            request.ScenarioId,
+            $"live-partial-{rootId:N}",
+            rootId,
+            DateTimeOffset.UtcNow,
+            SnapshotCompletion.Partial,
+            new ScanCoverage(
+                covered,
+                Math.Max(referenceTotalBytes ?? covered, covered),
+                context.DeniedPaths.Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
+                context.TotalAllocatedBytes,
+                context.TotalApparentBytes,
+                context.ExcludedPaths.Distinct(StringComparer.OrdinalIgnoreCase).ToArray()),
             nodes);
     }
 
@@ -212,11 +254,11 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
                 entry.Name,
                 isDirectory ? StorageNodeKind.Folder : StorageNodeKind.File)
             {
-                Allocated = allocated,
-                Logical = apparent,
+                SelfAllocated = allocated,
+                SelfLogical = apparent,
                 IsLeaf = true,
                 IsReparsePoint = isReparse,
-                ModifiedAtUtc = new DateTimeOffset(entry.LastWriteTimeUtcTicks, TimeSpan.Zero),
+                SelfModifiedAtUtc = new DateTimeOffset(entry.LastWriteTimeUtcTicks, TimeSpan.Zero),
             };
 
             directory.Children.Add(leaf);
@@ -280,11 +322,11 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
                 info.Name,
                 isDirectory ? StorageNodeKind.Folder : StorageNodeKind.File)
             {
-                Allocated = allocated,
-                Logical = apparent,
+                SelfAllocated = allocated,
+                SelfLogical = apparent,
                 IsLeaf = true,
                 IsReparsePoint = isReparse,
-                ModifiedAtUtc = SafeModified(info),
+                SelfModifiedAtUtc = SafeModified(info),
             };
 
             directory.Children.Add(leaf);
@@ -293,8 +335,21 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
         }
     }
 
+    /// <summary>
+    /// Rolls child totals up into their ancestors. Safe to run repeatedly on the same tree — every
+    /// entry is reset to its own contribution first — which is what lets a streaming scan publish
+    /// an aggregated partial and then keep walking.
+    /// </summary>
     private static void Aggregate(List<ScanEntry> order)
     {
+        foreach (ScanEntry entry in order)
+        {
+            entry.Allocated = entry.SelfAllocated;
+            entry.Logical = entry.SelfLogical;
+            entry.ItemCount = 0;
+            entry.ModifiedAtUtc = entry.SelfModifiedAtUtc;
+        }
+
         for (int i = order.Count - 1; i >= 1; i--)
         {
             ScanEntry entry = order[i];
@@ -309,14 +364,37 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
         }
     }
 
-    private ImmutableArray<StorageNode> Emit(ScanEntry root, out Guid rootId)
+    private ImmutableArray<StorageNode> Emit(ScanEntry root, out Guid rootId) =>
+        Emit(root, correlateProviders: true, foldersOnly: false, out rootId);
+
+    /// <summary>
+    /// Freezes the tree into immutable nodes.
+    /// <para>
+    /// <paramref name="correlateProviders"/> is false for streamed partials: provider correlation is
+    /// per-node string matching whose answer is decoration on a result that is about to be replaced.
+    /// </para>
+    /// <para>
+    /// <paramref name="foldersOnly"/> is likewise true only for partials, and is what keeps live
+    /// updates arriving on a large volume. Files are the overwhelming majority of nodes — around
+    /// 95% of a source tree — but mid-scan the room renders folders: the tree rail, the folder
+    /// table and the treemap. Emitting every file on every tick makes each emission cost grow with
+    /// the whole walk, so the updates space themselves further and further apart exactly when the
+    /// scan is long enough to need them. Folder sizes are full rollups either way, so the numbers
+    /// on screen are the same; only the file rows wait for the finished scan.
+    /// </para>
+    /// </summary>
+    private ImmutableArray<StorageNode> Emit(
+        ScanEntry root,
+        bool correlateProviders,
+        bool foldersOnly,
+        out Guid rootId)
     {
         var nodes = ImmutableArray.CreateBuilder<StorageNode>();
         var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        rootId = Guid.NewGuid();
+        rootId = root.Id;
 
         seenPaths.Add(root.Path);
-        nodes.Add(ToNode(root, rootId, null));
+        nodes.Add(ToNode(root, rootId, null, correlateProviders));
 
         var stack = new Stack<(ScanEntry Entry, Guid Id)>();
         stack.Push((root, rootId));
@@ -324,7 +402,11 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
         while (stack.Count > 0)
         {
             (ScanEntry directory, Guid directoryId) = stack.Pop();
-            IReadOnlyList<ScanEntry> emitted = SelectChildren(directory, out ScanEntry? aggregate);
+            IReadOnlyList<ScanEntry> candidates = foldersOnly
+                ? directory.Children.Where(child => child.Kind == StorageNodeKind.Folder).ToList()
+                : directory.Children;
+            IReadOnlyList<ScanEntry> emitted = SelectChildren(
+                directory, candidates, out ScanEntry? aggregate);
 
             foreach (ScanEntry child in emitted)
             {
@@ -333,8 +415,8 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
                     continue;
                 }
 
-                Guid childId = Guid.NewGuid();
-                nodes.Add(ToNode(child, childId, directoryId));
+                Guid childId = child.Id;
+                nodes.Add(ToNode(child, childId, directoryId, correlateProviders));
                 if (child is { IsLeaf: false, Kind: StorageNodeKind.Folder })
                 {
                     stack.Push((child, childId));
@@ -343,22 +425,39 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
 
             if (aggregate is not null && seenPaths.Add(aggregate.Path))
             {
-                nodes.Add(ToNode(aggregate, Guid.NewGuid(), directoryId));
+                nodes.Add(ToNode(aggregate, aggregate.Id, directoryId, correlateProviders));
             }
         }
 
         return nodes.ToImmutable();
     }
 
-    private IReadOnlyList<ScanEntry> SelectChildren(ScanEntry directory, out ScanEntry? aggregate)
+    /// <summary>
+    /// Derives a node's identity from its path instead of minting a fresh one. A streaming scan
+    /// emits the same folder many times as it grows, and a refresh emits it again later; random
+    /// ids would make each emission a brand-new set of nodes, so the room would lose the user's
+    /// scope, selection and expanded folders on every update. Paths are unique within a snapshot
+    /// (the emitter dedupes them), so hashing one is enough to keep ids unique.
+    /// </summary>
+    private static Guid StableId(string path)
+    {
+        Span<byte> digest = stackalloc byte[32];
+        SHA256.HashData(MemoryMarshal.AsBytes(path.ToLowerInvariant().AsSpan()), digest);
+        return new Guid(digest[..16]);
+    }
+
+    private IReadOnlyList<ScanEntry> SelectChildren(
+        ScanEntry directory,
+        IReadOnlyList<ScanEntry> candidates,
+        out ScanEntry? aggregate)
     {
         aggregate = null;
-        if (directory.Children.Count <= _maxChildrenPerFolder)
+        if (candidates.Count <= _maxChildrenPerFolder)
         {
-            return directory.Children;
+            return candidates;
         }
 
-        List<ScanEntry> ranked = directory.Children
+        List<ScanEntry> ranked = candidates
             .OrderByDescending(child => child.Allocated)
             .ToList();
 
@@ -386,7 +485,7 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
         return kept;
     }
 
-    private static StorageNode ToNode(ScanEntry entry, Guid id, Guid? parentId)
+    private static StorageNode ToNode(ScanEntry entry, Guid id, Guid? parentId, bool correlateProviders)
     {
         // AllocationSize normally rounds *up* past the apparent length (cluster slack), so
         // allocated >= apparent is the common, uninteresting case and must stay hidden. Only
@@ -394,8 +493,9 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
         // compression, ReFS block cloning — is there a real "size vs size on disk" story worth
         // surfacing, so LogicalBytes is populated only then.
         long? logical = entry.Logical > entry.Allocated ? entry.Logical : null;
-        StorageProviderContext? provider = LiveProviderCorrelator.Correlate(
-            entry.Name, entry.Path, entry.Kind, entry.ModifiedAtUtc);
+        StorageProviderContext? provider = correlateProviders
+            ? LiveProviderCorrelator.Correlate(entry.Name, entry.Path, entry.Kind, entry.ModifiedAtUtc)
+            : null;
 
         int itemCount = entry.Kind == StorageNodeKind.Folder ? entry.ItemCount : 0;
         return new StorageNode(
@@ -515,8 +615,24 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
 
         public List<ScanEntry> Children { get; } = [];
 
+        /// <summary>
+        /// This entry's own bytes, set once at discovery: a file's allocation size, zero for a
+        /// folder. Kept separate from <see cref="Allocated"/> so a rollup can be recomputed from
+        /// scratch as often as we like — a streaming scan aggregates the same tree repeatedly, and
+        /// rolling up in place would add each file's bytes to its ancestors again every pass.
+        /// </summary>
+        public long SelfAllocated { get; set; }
+
+        /// <summary>This entry's own apparent length. See <see cref="SelfAllocated"/>.</summary>
+        public long SelfLogical { get; set; }
+
+        /// <summary>This entry's own timestamp, before folders take the newest of their contents.</summary>
+        public DateTimeOffset SelfModifiedAtUtc { get; set; } = DateTimeOffset.UnixEpoch;
+
+        /// <summary>Rolled-up total. Recomputed by <c>Aggregate</c>; do not set during the walk.</summary>
         public long Allocated { get; set; }
 
+        /// <summary>Rolled-up total. Recomputed by <c>Aggregate</c>; do not set during the walk.</summary>
         public long Logical { get; set; }
 
         public int ItemCount { get; set; }
@@ -526,6 +642,14 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
         public bool IsReparsePoint { get; set; }
 
         public DateTimeOffset ModifiedAtUtc { get; set; } = DateTimeOffset.UnixEpoch;
+
+        /// <summary>
+        /// Hashed once and kept. A streaming scan re-emits the same entry on every partial, and
+        /// re-hashing a million paths each time is most of what makes an emission expensive.
+        /// </summary>
+        public Guid Id => _id ??= StableId(Path);
+
+        private Guid? _id;
     }
 
     /// <summary>Carries throttled, monotonic progress reporting state through the walk.</summary>
@@ -538,6 +662,8 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
         private TimeSpan _lastReport = TimeSpan.FromSeconds(-1);
         private double _lastFraction;
         private int _fileCount;
+        private TimeSpan _nextPartial = TimeSpan.Zero;
+        private string _lastDirectory = string.Empty;
 
         public List<string> DeniedPaths { get; } = [];
 
@@ -568,12 +694,59 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
 
         public void RecordFastPathFallback() => FastPathFallbacks++;
 
+        /// <summary>True when enough time has passed that another partial snapshot is worth building.</summary>
+        public bool WantsPartial => progress is not null && _stopwatch.Elapsed >= _nextPartial;
+
+        /// <summary>
+        /// Builds and reports a partial, then pushes the next one out by whichever is longer: the
+        /// normal interval, or twice what this one cost. Freezing the tree is O(folders), so on a
+        /// very large volume it stops being free — this caps the price of streaming at roughly a
+        /// third of the scan no matter how big the tree gets, without a tuned node threshold that
+        /// would be wrong on the next machine.
+        /// </summary>
+        public void PublishPartial(Func<StorageSnapshot> build)
+        {
+            if (progress is null)
+            {
+                return;
+            }
+
+            TimeSpan startedAt = _stopwatch.Elapsed;
+            StorageSnapshot partial = build();
+            TimeSpan cost = _stopwatch.Elapsed - startedAt;
+            _nextPartial = _stopwatch.Elapsed + (cost * 2 > interval ? cost * 2 : interval);
+
+            long reportedTotal = referenceTotalBytes is long reference
+                ? Math.Max(reference, ProcessedBytes)
+                : ProcessedBytes;
+
+            progress.Report(new StorageScanProgress(
+                CurrentFraction(),
+                _lastDirectory.Length == 0 ? "Scanning" : $"Scanning {Shorten(_lastDirectory)}",
+                ProcessedBytes,
+                reportedTotal,
+                partial));
+        }
+
+        private double CurrentFraction()
+        {
+            double fraction = referenceTotalBytes is long total && total > 0
+                ? Math.Min(0.99, (double)ProcessedBytes / total)
+                : 1 - 1 / (1 + _fileCount / 10_000.0);
+
+            fraction = Math.Clamp(fraction, 0, 0.99);
+            fraction = Math.Max(fraction, _lastFraction);
+            _lastFraction = fraction;
+            return fraction;
+        }
+
         public void OnFileProcessed(long allocated, long apparent, string directoryPath)
         {
             ProcessedBytes += allocated;
             TotalAllocatedBytes += allocated;
             TotalApparentBytes += apparent;
             _fileCount++;
+            _lastDirectory = directoryPath;
             MaybeReport(directoryPath);
         }
 
@@ -591,20 +764,13 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
             }
 
             _lastReport = now;
-            double fraction = referenceTotalBytes is long total && total > 0
-                ? Math.Min(0.99, (double)ProcessedBytes / total)
-                : 1 - 1 / (1 + _fileCount / 10_000.0);
-
-            fraction = Math.Clamp(fraction, 0, 0.99);
-            fraction = Math.Max(fraction, _lastFraction);
-            _lastFraction = fraction;
 
             long reportedTotal = referenceTotalBytes is long reference
                 ? Math.Max(reference, ProcessedBytes)
                 : ProcessedBytes;
 
             progress.Report(new StorageScanProgress(
-                fraction,
+                CurrentFraction(),
                 $"Scanning {Shorten(directoryPath)}",
                 ProcessedBytes,
                 reportedTotal));

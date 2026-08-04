@@ -420,10 +420,18 @@ public sealed class StorageExplorerViewModel : ObservableObject
 
     public string SortGlyphContext => GlyphFor(ExplorerSortColumn.Context);
 
+    /// <summary>
+    /// What the current snapshot is of — for the live source, the root path being scanned. Exposed
+    /// so a page rebuilt on navigation can restore which scope its chrome is pointing at; the view
+    /// model itself survives, but the page has no other way to learn what it is showing.
+    /// </summary>
+    public string ScenarioId => _scenarioId;
+
     public async Task LoadScenarioAsync(string scenarioId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(scenarioId);
         _scenarioId = scenarioId;
+        OnPropertyChanged(nameof(ScenarioId));
         _refreshOrdinal = 0;
 
         // A scenario switch is a clean slate: never carry scope or selection across
@@ -546,6 +554,11 @@ public sealed class StorageExplorerViewModel : ObservableObject
 
             Progress = update.Fraction;
             ProgressLabel = update.Label;
+
+            if (update.Partial is { } partial)
+            {
+                AdoptSnapshot(partial);
+            }
         }
 
         Action<StorageScanProgress> applyProgress = ApplyProgress;
@@ -568,40 +581,19 @@ public sealed class StorageExplorerViewModel : ObservableObject
         });
 
         Guid? previousScopeId = CurrentScope?.Id;
-        Guid? previousSelectionId = SelectedRow?.Id;
         try
         {
             StorageSnapshot snapshot = await _source.GetSnapshotAsync(
                 new StorageSnapshotRequest(_scenarioId, previousScopeId, _refreshOrdinal),
                 progress,
                 token);
-            Snapshot = snapshot;
-            BuildTree();
+            AdoptSnapshot(snapshot);
 
-            CurrentScope = previousScopeId is Guid scopeId &&
-                snapshot.Find(scopeId) is { Kind: StorageNodeKind.Folder } scope
-                    ? scope
-                    : snapshot.Root;
-
-            RebuildBreadcrumbs();
-            RebuildProjection();
-
-            SelectedRow = previousSelectionId is Guid selectionId &&
-                VisibleItems.FirstOrDefault(row => row.Id == selectionId) is { } restored
-                    ? restored
-                    : CreateRow(CurrentScope, CurrentScope.SizeBytes, -1);
-
-            ExpandTreePath(CurrentScope.Id);
             Progress = 1;
             ProgressLabel = snapshot.Completion == SnapshotCompletion.Partial
                 ? "Scan complete with partial coverage"
                 : "Scan complete";
             ScanState = ExplorerScanState.Completed;
-            OnPropertyChanged(nameof(CoverageSummary));
-            OnPropertyChanged(nameof(CoverageDetail));
-            OnPropertyChanged(nameof(HasCoverageDetail));
-            OnPropertyChanged(nameof(SnapshotSummary));
-            OnPropertyChanged(nameof(ScopeLogicalSummary));
         }
         catch (OperationCanceledException)
         {
@@ -615,6 +607,80 @@ public sealed class StorageExplorerViewModel : ObservableObject
             ProgressLabel = "Scan failed";
             ScanState = ExplorerScanState.Failed;
         }
+    }
+
+    /// <summary>
+    /// Swaps in a new snapshot without moving the user. Called for each streamed partial as well as
+    /// for the final result, so it has to put the room back exactly where it was: same scope, same
+    /// selected row, same expanded folders. That only works because the live source derives node
+    /// ids from paths — with freshly minted ids nothing here would match and every update would
+    /// throw the user back to the root.
+    /// </summary>
+    private void AdoptSnapshot(StorageSnapshot snapshot)
+    {
+        Guid? previousScopeId = CurrentScope?.Id;
+        Guid? previousSelectionId = SelectedRow?.Id;
+        HashSet<Guid> expanded = CollectExpandedIds();
+
+        Snapshot = snapshot;
+        BuildTree();
+
+        CurrentScope = previousScopeId is Guid scopeId &&
+            snapshot.Find(scopeId) is { Kind: StorageNodeKind.Folder } scope
+                ? scope
+                : snapshot.Root;
+
+        RebuildBreadcrumbs();
+        RebuildProjection();
+
+        SelectedRow = previousSelectionId is Guid selectionId &&
+            VisibleItems.FirstOrDefault(row => row.Id == selectionId) is { } restored
+                ? restored
+                : CreateRow(CurrentScope, CurrentScope.SizeBytes, -1);
+
+        expanded.UnionWith(snapshot.AncestorsAndSelf(CurrentScope.Id).Select(node => node.Id));
+        foreach (StorageTreeItemViewModel root in TreeRoots)
+        {
+            Expand(root, expanded);
+        }
+
+        OnPropertyChanged(nameof(CoverageSummary));
+        OnPropertyChanged(nameof(CoverageDetail));
+        OnPropertyChanged(nameof(HasCoverageDetail));
+        OnPropertyChanged(nameof(SnapshotSummary));
+        OnPropertyChanged(nameof(ScopeLogicalSummary));
+    }
+
+    /// <summary>
+    /// The folders the user has opened in the tree rail. Only walks branches that have already been
+    /// materialised — an unexpanded branch cannot contain an expanded one, and touching it would
+    /// force the whole tree into memory to answer a question about a handful of rows.
+    /// </summary>
+    private HashSet<Guid> CollectExpandedIds()
+    {
+        var expanded = new HashSet<Guid>();
+        var pending = new Stack<StorageTreeItemViewModel>(TreeRoots);
+        while (pending.Count > 0)
+        {
+            StorageTreeItemViewModel item = pending.Pop();
+            if (!item.IsExpanded)
+            {
+                continue;
+            }
+
+            expanded.Add(item.Id);
+            if (!item.HasMaterialisedChildren)
+            {
+                continue;
+            }
+
+            foreach (StorageTreeItemViewModel child in item.Children)
+            {
+                pending.Push(child);
+            }
+        }
+
+        return expanded;
     }
 
     private void BuildTree()

@@ -11,7 +11,8 @@ public sealed record StorageScanProgress
         double fraction,
         string label,
         long processedBytes,
-        long totalBytes)
+        long totalBytes,
+        StorageSnapshot? partial = null)
     {
         if (fraction is < 0 or > 1)
         {
@@ -25,6 +26,7 @@ public sealed record StorageScanProgress
         Label = label;
         ProcessedBytes = processedBytes;
         TotalBytes = totalBytes;
+        Partial = partial;
     }
 
     public double Fraction { get; }
@@ -34,6 +36,15 @@ public sealed record StorageScanProgress
     public long ProcessedBytes { get; }
 
     public long TotalBytes { get; }
+
+    /// <summary>
+    /// Everything walked so far, as a usable snapshot, when the source can produce one cheaply
+    /// enough to be worth showing. A cold full-volume walk is minutes long, so a report that says
+    /// only "63%" leaves the room blank for the entire scan; a partial lets the tree, table and
+    /// treemap fill in as the results arrive. Null means the source does not stream — consumers
+    /// must keep working with progress alone.
+    /// </summary>
+    public StorageSnapshot? Partial { get; }
 }
 
 public interface IStorageSnapshotSource
