@@ -90,4 +90,101 @@ public sealed class VolumeCapacityTests
         Assert.AreEqual("NTFS · System", VolumeCapacity.CaptionFor(windows, isSystemVolume: true));
         Assert.AreEqual("NTFS", VolumeCapacity.CaptionFor(windows, isSystemVolume: false));
     }
+    // ---- AfterReclaim: the one-bar after-picture ----
+
+    [TestMethod]
+    public void AfterReclaimSplitsUsedIntoStillUsedAndFreed()
+    {
+        // 600 used, 150 of it about to go. The three parts must total the whole volume: a bar whose
+        // bands do not add up to 1 leaves a gap that reads as a fourth, unexplained category.
+        VolumeCapacityResult bar = VolumeCapacity.AfterReclaim(Volume(1000, 400), freedBytes: 150);
+
+        Assert.HasCount(2, bar.Segments);
+        Assert.AreEqual(CapacitySegmentKind.Used, bar.Segments[0].Kind);
+        Assert.AreEqual(0.45, bar.Segments[0].Fraction, 0.0001);
+        Assert.AreEqual(450, bar.Segments[0].Bytes);
+        Assert.AreEqual(CapacitySegmentKind.Freed, bar.Segments[1].Kind);
+        Assert.AreEqual(0.15, bar.Segments[1].Fraction, 0.0001);
+        Assert.AreEqual(150, bar.Segments[1].Bytes);
+
+        // The track is free-space *before*. Free-after is read off the bar as track plus freed.
+        Assert.AreEqual(0.4, bar.FreeFraction, 0.0001);
+        Assert.AreEqual(
+            1.0,
+            bar.Segments.Sum(s => s.Fraction) + bar.FreeFraction,
+            0.0001,
+            "the three bands must tile the whole volume");
+    }
+
+    [TestMethod]
+    public void AfterReclaimWithNothingSelectedIsJustTheVolume()
+    {
+        VolumeCapacityResult bar = VolumeCapacity.AfterReclaim(Volume(1000, 400), freedBytes: 0);
+
+        Assert.HasCount(1, bar.Segments);
+        Assert.AreEqual(CapacitySegmentKind.Used, bar.Segments[0].Kind);
+        Assert.AreEqual(0.4, bar.FreeFraction, 0.0001);
+    }
+
+    [TestMethod]
+    public void AfterReclaimClampsFreedToUsedSpace()
+    {
+        // Free space moves under a finished scan. Freeing more than is in use is arithmetically
+        // impossible, and a band wider than its track reads as a rendering bug, not a stale number.
+        VolumeCapacityResult bar = VolumeCapacity.AfterReclaim(Volume(1000, 400), freedBytes: 5000);
+
+        Assert.HasCount(1, bar.Segments);
+        Assert.AreEqual(CapacitySegmentKind.Freed, bar.Segments[0].Kind);
+        Assert.AreEqual(600, bar.Segments[0].Bytes);
+        Assert.AreEqual(1.0, bar.Segments[0].Fraction + bar.FreeFraction, 0.0001);
+    }
+
+    [TestMethod]
+    public void AfterReclaimOnAZeroCapacityVolumeDrawsNothing()
+    {
+        VolumeCapacityResult bar = VolumeCapacity.AfterReclaim(Volume(0, 0), freedBytes: 100);
+
+        Assert.IsEmpty(bar.Segments);
+        Assert.AreEqual(0, bar.FreeFraction, 0.0001);
+    }
+
+    // ---- ByRisk: the three-tier composition bar ----
+
+    [TestMethod]
+    public void ByRiskFillsItsTrackCompletely()
+    {
+        // Normalised against the tiers, not a volume. A gap in a risk mix would imply a fourth tier
+        // that does not exist.
+        VolumeCapacityResult bar = VolumeCapacity.ByRisk(600, 300, 100);
+
+        Assert.HasCount(3, bar.Segments);
+        Assert.AreEqual(CapacitySegmentKind.Safe, bar.Segments[0].Kind);
+        Assert.AreEqual(0.6, bar.Segments[0].Fraction, 0.0001);
+        Assert.AreEqual(CapacitySegmentKind.Check, bar.Segments[1].Kind);
+        Assert.AreEqual(0.3, bar.Segments[1].Fraction, 0.0001);
+        Assert.AreEqual(CapacitySegmentKind.Careful, bar.Segments[2].Kind);
+        Assert.AreEqual(0.1, bar.Segments[2].Fraction, 0.0001);
+        Assert.AreEqual(0, bar.FreeFraction, 0.0001);
+    }
+
+    [TestMethod]
+    public void ByRiskOmitsEmptyTiersRatherThanDrawingZeroWidthBands()
+    {
+        VolumeCapacityResult bar = VolumeCapacity.ByRisk(600, 0, 400);
+
+        Assert.HasCount(2, bar.Segments);
+        Assert.AreEqual(CapacitySegmentKind.Safe, bar.Segments[0].Kind);
+        Assert.AreEqual(CapacitySegmentKind.Careful, bar.Segments[1].Kind);
+    }
+
+    [TestMethod]
+    public void ByRiskWithNothingSelectedIsAnEmptyTrack()
+    {
+        // Not one grey band: "nothing is selected" and "everything selected is low risk" must not
+        // look the same on a bar the user is about to act on.
+        VolumeCapacityResult bar = VolumeCapacity.ByRisk(0, 0, 0);
+
+        Assert.IsEmpty(bar.Segments);
+        Assert.AreEqual(1, bar.FreeFraction, 0.0001);
+    }
 }

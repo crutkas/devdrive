@@ -108,6 +108,7 @@
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
                     <Border Grid.Row="0" Style="{StaticResource SmCardHeadStyle}">
@@ -176,6 +177,112 @@
                             </DataTemplate>
                         </ListView.ItemTemplate>
                     </ListView>
+
+                    <!--
+                        The risk composition of everything found. The category list answers "where is
+                        it"; this answers "how much of it can I take without thinking", which is the
+                        question that decides whether the room is worth the next five minutes.
+                    -->
+                    <StackPanel
+                        Grid.Row="2"
+                        Padding="0,11,0,0"
+                        BorderBrush="{ThemeResource SmDividerBrush}"
+                        BorderThickness="0,1,0,0"
+                        Spacing="7"
+                        Visibility="{x:Bind ViewModel.FoundRiskMix.HasAny, Mode=OneWay}">
+                        <TextBlock
+                            Margin="13,0"
+                            Style="{StaticResource SmSectionLabelTextStyle}"
+                            Text="{x:Bind ViewModel.FoundRiskMix.Headline, Mode=OneWay}" />
+                        <controls:CapacityBar
+                            Height="12"
+                            Margin="13,0"
+                            AutomationProperties.AutomationId="ReclaimRiskMixBar"
+                            AutomationProperties.Name="Risk composition of everything found"
+                            Capacity="{x:Bind ViewModel.FoundRiskMix.Bar, Mode=OneWay}"
+                            CornerRadius="3" />
+
+                        <StackPanel Margin="13,0,13,4" Spacing="3">
+                            <Grid ColumnSpacing="7">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <Ellipse
+                                    Grid.Column="0"
+                                    Width="6"
+                                    Height="6"
+                                    VerticalAlignment="Center"
+                                    Fill="{ThemeResource SmGoodBrush}" />
+                                <TextBlock
+                                    Grid.Column="1"
+                                    Style="{StaticResource SmCardSubTextStyle}"
+                                    Text="{x:Bind ViewModel.FoundRiskMix.SafeCountText, Mode=OneWay}" />
+                                <TextBlock
+                                    Grid.Column="2"
+                                    Style="{StaticResource SmTreeValueTextStyle}"
+                                    Text="{x:Bind ViewModel.FoundRiskMix.SafeText, Mode=OneWay}" />
+                            </Grid>
+                            <Grid ColumnSpacing="7">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <Ellipse
+                                    Grid.Column="0"
+                                    Width="6"
+                                    Height="6"
+                                    VerticalAlignment="Center"
+                                    Fill="{ThemeResource SmWarnBrush}" />
+                                <TextBlock
+                                    Grid.Column="1"
+                                    Style="{StaticResource SmCardSubTextStyle}"
+                                    Text="{x:Bind ViewModel.FoundRiskMix.CheckCountText, Mode=OneWay}" />
+                                <TextBlock
+                                    Grid.Column="2"
+                                    Style="{StaticResource SmTreeValueTextStyle}"
+                                    Text="{x:Bind ViewModel.FoundRiskMix.CheckText, Mode=OneWay}" />
+                            </Grid>
+                            <Grid ColumnSpacing="7">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <Ellipse
+                                    Grid.Column="0"
+                                    Width="6"
+                                    Height="6"
+                                    VerticalAlignment="Center"
+                                    Fill="{ThemeResource SmBadBrush}" />
+                                <TextBlock
+                                    Grid.Column="1"
+                                    Style="{StaticResource SmCardSubTextStyle}"
+                                    Text="{x:Bind ViewModel.FoundRiskMix.CarefulCountText, Mode=OneWay}" />
+                                <TextBlock
+                                    Grid.Column="2"
+                                    Style="{StaticResource SmTreeValueTextStyle}"
+                                    Text="{x:Bind ViewModel.FoundRiskMix.CarefulText, Mode=OneWay}" />
+                            </Grid>
+                        </StackPanel>
+
+                        <!--
+                            The legend earns its space by defining the tiers in the user's terms
+                            rather than ours. A colour key alone would say which band is which
+                            without saying what the bands mean.
+                        -->
+                        <Border
+                            Padding="13,8,13,9"
+                            Background="{ThemeResource SmCardHeaderBrush}"
+                            BorderBrush="{ThemeResource SmDividerBrush}"
+                            BorderThickness="0,1,0,0">
+                            <TextBlock Style="{StaticResource SmCardSubTextStyle}" TextWrapping="Wrap">
+                                Safe is regenerable with no decision. Check is almost certainly fine but you should glance. Careful can lose work that exists nowhere else.
+                            </TextBlock>
+                        </Border>
+                    </StackPanel>
                 </Grid>
             </Border>
 
@@ -197,6 +304,7 @@
                     Style="{StaticResource SmCardStyle}">
                     <Grid>
                         <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
@@ -342,6 +450,78 @@
                                 </DataTemplate>
                             </ListView.ItemTemplate>
                         </ListView>
+
+                        <!--
+                            The selection footer. Every number needed to press the button, on the
+                            same line as the button: how much, out of how much, split by risk, and
+                            on which volume. Found and selected live here rather than beside the
+                            after-picture because this is where the decision is actually made.
+                        -->
+                        <Border
+                            Grid.Row="3"
+                            Padding="13,9,13,10"
+                            Background="{ThemeResource SmCardHeaderBrush}"
+                            BorderBrush="{ThemeResource SmDividerBrush}"
+                            BorderThickness="0,1,0,0">
+                            <Grid ColumnSpacing="13">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" MinWidth="90" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+
+                                <StackPanel
+                                    Grid.Column="0"
+                                    VerticalAlignment="Center"
+                                    Orientation="Horizontal"
+                                    Spacing="6">
+                                    <TextBlock
+                                        VerticalAlignment="Bottom"
+                                        AutomationProperties.AutomationId="ReclaimSelectedBytes"
+                                        AutomationProperties.Name="Total selected"
+                                        Foreground="{ThemeResource SmGoodBrush}"
+                                        Style="{StaticResource SmTierValueTextStyle}"
+                                        Text="{x:Bind ViewModel.SelectedBytesText, Mode=OneWay}" />
+                                    <TextBlock
+                                        VerticalAlignment="Bottom"
+                                        Style="{StaticResource SmCardSubTextStyle}"
+                                        Text="selected of" />
+                                    <TextBlock
+                                        VerticalAlignment="Bottom"
+                                        AutomationProperties.AutomationId="ReclaimFoundBytes"
+                                        AutomationProperties.Name="Total found"
+                                        Style="{StaticResource SmTreeValueTextStyle}"
+                                        Text="{x:Bind ViewModel.FoundBytesText, Mode=OneWay}" />
+                                    <TextBlock
+                                        VerticalAlignment="Bottom"
+                                        Style="{StaticResource SmCardSubTextStyle}"
+                                        Text="found" />
+                                </StackPanel>
+
+                                <StackPanel
+                                    Grid.Column="1"
+                                    VerticalAlignment="Center"
+                                    Spacing="5">
+                                    <controls:CapacityBar
+                                        Height="8"
+                                        AutomationProperties.AutomationId="ReclaimSelectionRiskBar"
+                                        AutomationProperties.Name="Risk composition of the selection"
+                                        Capacity="{x:Bind ViewModel.SelectedRiskMix.Bar, Mode=OneWay}" />
+                                    <TextBlock
+                                        Style="{StaticResource SmCardSubTextStyle}"
+                                        Text="{x:Bind ViewModel.VolumeSplitText, Mode=OneWay}"
+                                        TextTrimming="CharacterEllipsis" />
+                                </StackPanel>
+
+                                <Button
+                                    Grid.Column="2"
+                                    VerticalAlignment="Center"
+                                    AutomationProperties.AutomationId="ReclaimReviewButton"
+                                    Content="Review &amp; reclaim"
+                                    IsEnabled="{x:Bind ViewModel.SelectedRiskMix.HasAny, Mode=OneWay}"
+                                    Style="{StaticResource SmCompactButtonStyle}" />
+                            </Grid>
+                        </Border>
                     </Grid>
                 </Border>
 
@@ -362,43 +542,17 @@
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
                                 <TextBlock
                                     Grid.Column="0"
                                     VerticalAlignment="Center"
                                     Style="{StaticResource SmCardTitleTextStyle}"
                                     Text="After you reclaim" />
-                                <!--
-                                    Found and selected sit here, beside the picture they explain,
-                                    rather than in a summary block of their own. The pair is the
-                                    decision: how much of what exists have I actually chosen.
-                                -->
-                                <StackPanel
+                                <TextBlock
                                     Grid.Column="1"
                                     VerticalAlignment="Center"
-                                    Orientation="Horizontal"
-                                    Spacing="6">
-                                    <TextBlock Style="{StaticResource SmCardSubTextStyle}" Text="found" />
-                                    <TextBlock
-                                        AutomationProperties.AutomationId="ReclaimFoundBytes"
-                                        AutomationProperties.Name="Total found"
-                                        Style="{StaticResource SmTreeValueTextStyle}"
-                                        Text="{x:Bind ViewModel.FoundBytesText, Mode=OneWay}" />
-                                </StackPanel>
-                                <StackPanel
-                                    Grid.Column="2"
-                                    VerticalAlignment="Center"
-                                    Orientation="Horizontal"
-                                    Spacing="6">
-                                    <TextBlock Style="{StaticResource SmCardSubTextStyle}" Text="selected" />
-                                    <TextBlock
-                                        AutomationProperties.AutomationId="ReclaimSelectedBytes"
-                                        AutomationProperties.Name="Total selected"
-                                        Foreground="{ThemeResource SmGoodBrush}"
-                                        Style="{StaticResource SmTreeValueTextStyle}"
-                                        Text="{x:Bind ViewModel.SelectedBytesText, Mode=OneWay}" />
-                                </StackPanel>
+                                    Style="{StaticResource SmCardSubTextStyle}"
+                                    Text="live as you tick" />
                             </Grid>
                         </Border>
 
@@ -417,75 +571,184 @@
                                         <DataTemplate x:DataType="vm:ReclaimVolumeImpact">
                                             <Grid
                                                 AutomationProperties.Name="{x:Bind AccessibleDescription}"
-                                                ColumnSpacing="12"
-                                                RowSpacing="5">
+                                                ColumnSpacing="11">
                                                 <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="34" />
+                                                    <ColumnDefinition Width="31" />
                                                     <ColumnDefinition Width="*" />
-                                                    <ColumnDefinition Width="Auto" />
                                                 </Grid.ColumnDefinitions>
-                                                <Grid.RowDefinitions>
-                                                    <RowDefinition Height="Auto" />
-                                                    <RowDefinition Height="Auto" />
-                                                    <RowDefinition Height="Auto" />
-                                                </Grid.RowDefinitions>
-
-                                                <TextBlock
-                                                    Grid.Row="0"
-                                                    Grid.Column="0"
-                                                    Grid.ColumnSpan="2"
-                                                    Style="{StaticResource SmCellTextStyle}"
-                                                    Text="{x:Bind VolumeRoot}" />
-                                                <TextBlock
-                                                    Grid.Row="0"
-                                                    Grid.Column="2"
-                                                    AutomationProperties.AutomationId="{x:Bind AutomationId}"
-                                                    Foreground="{ThemeResource SmGoodBrush}"
-                                                    Style="{StaticResource SmTreeValueTextStyle}"
-                                                    Text="{x:Bind BytesText}" />
 
                                                 <!--
-                                                    Two bars, stacked and labelled, rather than one
-                                                    bar that animates. A before you can still see is
-                                                    what makes the after mean anything.
+                                                    The letter tile. A volume is identified by its
+                                                    letter far faster than by its label, and giving
+                                                    the letter its own tile lets the three text rows
+                                                    beside it share one left edge.
                                                 -->
-                                                <TextBlock
-                                                    Grid.Row="1"
+                                                <Border
                                                     Grid.Column="0"
-                                                    VerticalAlignment="Center"
-                                                    Style="{StaticResource SmCardSubTextStyle}"
-                                                    Text="now" />
-                                                <controls:CapacityBar
-                                                    Grid.Row="1"
-                                                    Grid.Column="1"
-                                                    Capacity="{x:Bind Before}" />
-                                                <TextBlock
-                                                    Grid.Row="1"
-                                                    Grid.Column="2"
-                                                    Style="{StaticResource SmCardSubTextStyle}"
-                                                    Text="{x:Bind FreeBeforeText}" />
+                                                    Width="31"
+                                                    Height="31"
+                                                    VerticalAlignment="Top"
+                                                    Background="{ThemeResource SmCardHeaderBrush}"
+                                                    BorderBrush="{ThemeResource SmStrokeBrush}"
+                                                    BorderThickness="1"
+                                                    CornerRadius="6">
+                                                    <TextBlock
+                                                        HorizontalAlignment="Center"
+                                                        VerticalAlignment="Center"
+                                                        Style="{StaticResource SmVolumeLetterTextStyle}"
+                                                        Text="{x:Bind Letter}" />
+                                                </Border>
 
-                                                <TextBlock
-                                                    Grid.Row="2"
-                                                    Grid.Column="0"
-                                                    VerticalAlignment="Center"
-                                                    Style="{StaticResource SmCardSubTextStyle}"
-                                                    Text="after" />
-                                                <controls:CapacityBar
-                                                    Grid.Row="2"
-                                                    Grid.Column="1"
-                                                    UsedBrush="{ThemeResource SmGoodBrush}"
-                                                    Capacity="{x:Bind After}" />
-                                                <TextBlock
-                                                    Grid.Row="2"
-                                                    Grid.Column="2"
-                                                    Foreground="{ThemeResource SmGoodBrush}"
-                                                    Style="{StaticResource SmCardSubTextStyle}"
-                                                    Text="{x:Bind FreeAfterText}" />
+                                                <StackPanel Grid.Column="1" Spacing="5">
+                                                    <Grid ColumnSpacing="10">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="Auto" />
+                                                            <ColumnDefinition Width="*" />
+                                                            <ColumnDefinition Width="Auto" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <TextBlock
+                                                            Grid.Column="0"
+                                                            Style="{StaticResource SmCellTextStyle}"
+                                                            Text="{x:Bind Name}" />
+                                                        <TextBlock
+                                                            Grid.Column="1"
+                                                            VerticalAlignment="Bottom"
+                                                            Style="{StaticResource SmCardSubTextStyle}"
+                                                            Text="{x:Bind Caption}"
+                                                            TextTrimming="CharacterEllipsis" />
+                                                        <!--
+                                                            "100.7 GB → 481.7 GB free". The arrow is
+                                                            the row: a single number cannot say
+                                                            whether it changed anything.
+                                                        -->
+                                                        <TextBlock
+                                                            Grid.Column="2"
+                                                            AutomationProperties.AutomationId="{x:Bind AutomationId}"
+                                                            Style="{StaticResource SmCardSubTextStyle}">
+                                                            <Run Text="{x:Bind FreeBeforeText}" />
+                                                            <Run Text="→" />
+                                                            <Run Foreground="{ThemeResource SmGoodBrush}" Text="{x:Bind FreeAfterText}" />
+                                                            <Run Text="free" />
+                                                        </TextBlock>
+                                                    </Grid>
+
+                                                    <!--
+                                                        One bar, not two. The freed band is hatched
+                                                        and sits exactly where those bytes are about
+                                                        to move — between what stays in use and what
+                                                        was already free — so the delta is read in
+                                                        place rather than by diffing two pictures.
+                                                    -->
+                                                    <controls:CapacityBar Height="9" Capacity="{x:Bind Bar}" />
+
+                                                    <Grid>
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="*" />
+                                                            <ColumnDefinition Width="Auto" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <TextBlock
+                                                            Grid.Column="0"
+                                                            Style="{StaticResource SmCardSubTextStyle}"
+                                                            Text="{x:Bind StillInUseText}"
+                                                            TextTrimming="CharacterEllipsis" />
+                                                        <TextBlock
+                                                            Grid.Column="1"
+                                                            Foreground="{ThemeResource SmGoodBrush}"
+                                                            Style="{StaticResource SmTreeValueTextStyle}"
+                                                            Text="{x:Bind GainText}" />
+                                                    </Grid>
+                                                </StackPanel>
                                             </Grid>
                                         </DataTemplate>
                                     </ItemsControl.ItemTemplate>
                                 </ItemsControl>
+
+                                <!--
+                                    The tiers. Four cards over the selection, because "131.6 GB" is
+                                    a number and "131.6 GB, all of it regenerable" is a decision.
+                                    Total sits alongside rather than below so the three parts and
+                                    their sum are read in one line.
+                                -->
+                                <Grid ColumnSpacing="7">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+
+                                    <Border Grid.Column="0" Style="{StaticResource SmTierCardStyle}">
+                                        <StackPanel Spacing="3">
+                                            <StackPanel Orientation="Horizontal" Spacing="5">
+                                                <Ellipse
+                                                    Width="6"
+                                                    Height="6"
+                                                    VerticalAlignment="Center"
+                                                    Fill="{ThemeResource SmGoodBrush}" />
+                                                <TextBlock Style="{StaticResource SmSectionLabelTextStyle}" Text="SAFE" />
+                                            </StackPanel>
+                                            <TextBlock
+                                                AutomationProperties.AutomationId="ReclaimTierSafe"
+                                                Style="{StaticResource SmTierValueTextStyle}"
+                                                Text="{x:Bind ViewModel.SelectedRiskMix.SafeText, Mode=OneWay}" />
+                                            <TextBlock Style="{StaticResource SmCardSubTextStyle}" Text="{x:Bind ViewModel.SelectedRiskMix.SafeCountText, Mode=OneWay}" />
+                                        </StackPanel>
+                                    </Border>
+
+                                    <Border Grid.Column="1" Style="{StaticResource SmTierCardStyle}">
+                                        <StackPanel Spacing="3">
+                                            <StackPanel Orientation="Horizontal" Spacing="5">
+                                                <Ellipse
+                                                    Width="6"
+                                                    Height="6"
+                                                    VerticalAlignment="Center"
+                                                    Fill="{ThemeResource SmWarnBrush}" />
+                                                <TextBlock Style="{StaticResource SmSectionLabelTextStyle}" Text="CHECK" />
+                                            </StackPanel>
+                                            <TextBlock
+                                                AutomationProperties.AutomationId="ReclaimTierCheck"
+                                                Style="{StaticResource SmTierValueTextStyle}"
+                                                Text="{x:Bind ViewModel.SelectedRiskMix.CheckText, Mode=OneWay}" />
+                                            <TextBlock Style="{StaticResource SmCardSubTextStyle}" Text="{x:Bind ViewModel.SelectedRiskMix.CheckCountText, Mode=OneWay}" />
+                                        </StackPanel>
+                                    </Border>
+
+                                    <Border Grid.Column="2" Style="{StaticResource SmTierCardStyle}">
+                                        <StackPanel Spacing="3">
+                                            <StackPanel Orientation="Horizontal" Spacing="5">
+                                                <Ellipse
+                                                    Width="6"
+                                                    Height="6"
+                                                    VerticalAlignment="Center"
+                                                    Fill="{ThemeResource SmBadBrush}" />
+                                                <TextBlock Style="{StaticResource SmSectionLabelTextStyle}" Text="CAREFUL" />
+                                            </StackPanel>
+                                            <TextBlock
+                                                AutomationProperties.AutomationId="ReclaimTierCareful"
+                                                Style="{StaticResource SmTierValueTextStyle}"
+                                                Text="{x:Bind ViewModel.SelectedRiskMix.CarefulText, Mode=OneWay}" />
+                                            <TextBlock Style="{StaticResource SmCardSubTextStyle}" Text="{x:Bind ViewModel.SelectedRiskMix.CarefulCountText, Mode=OneWay}" />
+                                        </StackPanel>
+                                    </Border>
+
+                                    <Border Grid.Column="3" Style="{StaticResource SmTierCardStyle}">
+                                        <StackPanel Spacing="3">
+                                            <StackPanel Orientation="Horizontal" Spacing="5">
+                                                <Ellipse
+                                                    Width="6"
+                                                    Height="6"
+                                                    VerticalAlignment="Center"
+                                                    Fill="{ThemeResource SmCategory0Brush}" />
+                                                <TextBlock Style="{StaticResource SmSectionLabelTextStyle}" Text="TOTAL" />
+                                            </StackPanel>
+                                            <TextBlock
+                                                AutomationProperties.AutomationId="ReclaimTierTotal"
+                                                Style="{StaticResource SmTierValueTextStyle}"
+                                                Text="{x:Bind ViewModel.SelectedBytesText, Mode=OneWay}" />
+                                            <TextBlock Style="{StaticResource SmCardSubTextStyle}" Text="{x:Bind ViewModel.SelectedCountText, Mode=OneWay}" />
+                                        </StackPanel>
+                                    </Border>
+                                </Grid>
 
                                 <!--  Nothing ticked is a state, not an empty pane. Say what to do.  -->
                                 <TextBlock

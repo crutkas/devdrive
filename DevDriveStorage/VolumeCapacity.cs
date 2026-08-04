@@ -10,6 +10,22 @@ public enum CapacitySegmentKind
 
     /// <summary>Space in use that a reclaim scan says can be given back.</summary>
     Reclaimable,
+
+    /// <summary>
+    /// Space the current selection would hand back. Distinct from <see cref="Reclaimable"/> because
+    /// the two answer different questions — what <i>could</i> go versus what the user has actually
+    /// ticked — and a bar showing the after-picture must not colour them the same.
+    /// </summary>
+    Freed,
+
+    /// <summary>Regenerable with no decision to make.</summary>
+    Safe,
+
+    /// <summary>Almost certainly fine, but worth a glance.</summary>
+    Check,
+
+    /// <summary>Can lose work that exists nowhere else.</summary>
+    Careful,
 }
 
 /// <summary>
@@ -71,6 +87,95 @@ public static class VolumeCapacity
 
         long free = Math.Clamp(volume.CapacityBytes - used, 0, volume.CapacityBytes);
         return new VolumeCapacityResult(segments.ToImmutable(), free / total);
+    }
+
+    /// <summary>
+    /// The after-picture: one bar showing what the volume looks like once the current selection is
+    /// reclaimed.
+    /// </summary>
+    /// <param name="volume">The volume as it stands now.</param>
+    /// <param name="freedBytes">
+    /// Bytes the current selection hands back on this volume. Clamped to the used space for the same
+    /// reason <see cref="ForVolume"/> clamps: free space can move underneath a finished scan, and a
+    /// band wider than its track reads as a rendering bug rather than a stale number.
+    /// </param>
+    /// <remarks>
+    /// The freed band sits between the space still in use and the space that was already free, which
+    /// is where it physically belongs — it is the slice about to change sides. Two separate before
+    /// and after bars would make the reader diff two pictures; one bar with the delta highlighted
+    /// is the same information without the diffing.
+    /// </remarks>
+    public static VolumeCapacityResult AfterReclaim(StorageVolume volume, long freedBytes)
+    {
+        ArgumentNullException.ThrowIfNull(volume);
+
+        if (volume.CapacityBytes <= 0)
+        {
+            return new VolumeCapacityResult([], 0);
+        }
+
+        double total = volume.CapacityBytes;
+        long used = Math.Clamp(volume.UsedBytes, 0, volume.CapacityBytes);
+        long freed = Math.Clamp(freedBytes, 0, used);
+        long stillUsed = used - freed;
+
+        ImmutableArray<CapacitySegment>.Builder segments =
+            ImmutableArray.CreateBuilder<CapacitySegment>(2);
+
+        if (stillUsed > 0)
+        {
+            segments.Add(new CapacitySegment(CapacitySegmentKind.Used, stillUsed / total, stillUsed));
+        }
+
+        if (freed > 0)
+        {
+            segments.Add(new CapacitySegment(CapacitySegmentKind.Freed, freed / total, freed));
+        }
+
+        // The track is the space that was already free. Free-after is that plus the freed band, which
+        // the eye reads directly off the bar rather than having to be told.
+        long freeBefore = Math.Clamp(volume.CapacityBytes - used, 0, volume.CapacityBytes);
+        return new VolumeCapacityResult(segments.ToImmutable(), freeBefore / total);
+    }
+
+    /// <summary>
+    /// The risk mix: how a pile of reclaimable bytes splits across the three tiers.
+    /// </summary>
+    /// <remarks>
+    /// Normalised against the three tiers rather than against a volume, so the bar always fills its
+    /// track. A risk mix with a gap in it would imply a fourth tier that does not exist.
+    /// </remarks>
+    public static VolumeCapacityResult ByRisk(long safeBytes, long checkBytes, long carefulBytes)
+    {
+        long safe = Math.Max(0, safeBytes);
+        long check = Math.Max(0, checkBytes);
+        long careful = Math.Max(0, carefulBytes);
+
+        double total = (double)safe + check + careful;
+        if (total <= 0)
+        {
+            return new VolumeCapacityResult([], 1);
+        }
+
+        ImmutableArray<CapacitySegment>.Builder segments =
+            ImmutableArray.CreateBuilder<CapacitySegment>(3);
+
+        if (safe > 0)
+        {
+            segments.Add(new CapacitySegment(CapacitySegmentKind.Safe, safe / total, safe));
+        }
+
+        if (check > 0)
+        {
+            segments.Add(new CapacitySegment(CapacitySegmentKind.Check, check / total, check));
+        }
+
+        if (careful > 0)
+        {
+            segments.Add(new CapacitySegment(CapacitySegmentKind.Careful, careful / total, careful));
+        }
+
+        return new VolumeCapacityResult(segments.ToImmutable(), 0);
     }
 
     /// <summary>

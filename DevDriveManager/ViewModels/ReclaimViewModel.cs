@@ -258,6 +258,35 @@ public sealed partial class ReclaimViewModel : ObservableObject
     public ObservableCollection<ReclaimVolumeImpact> VolumeImpacts { get; } = [];
 
     /// <summary>
+    /// How everything found splits across the three risk tiers. Shown under the category list,
+    /// because "218 GB reclaimable" and "131 GB of it is regenerable with no decision to make" are
+    /// very different facts and only the second one tells you whether to keep reading.
+    /// </summary>
+    [ObservableProperty]
+    public partial ReclaimRiskMix FoundRiskMix { get; set; } = ReclaimRiskMix.Empty;
+
+    /// <summary>The same split over the current selection — what you are actually about to do.</summary>
+    [ObservableProperty]
+    public partial ReclaimRiskMix SelectedRiskMix { get; set; } = ReclaimRiskMix.Empty;
+
+    /// <summary>Where the selected bytes live, e.g. "105.1 GB on G: · 26.5 GB on C:".</summary>
+    [ObservableProperty]
+    public partial string VolumeSplitText { get; set; } = string.Empty;
+
+    /// <summary>
+    /// How many rows are ticked. Paired with <see cref="SelectedBytesText"/> in the totals card,
+    /// where the tier cards' own counts cannot be summed — tiers overlap, the total does not.
+    /// </summary>
+    public string SelectedCountText
+    {
+        get
+        {
+            int count = SelectedRows.Count();
+            return count == 1 ? "1 item queued" : $"{count:N0} items queued";
+        }
+    }
+
+    /// <summary>
     /// The volume context strip. Reclaimable bytes track the current <i>selection</i>, not everything
     /// found, so the bars answer "what will this machine look like if I press the button" rather than
     /// "what did the scan turn up" — the latter is already the headline number.
@@ -418,6 +447,40 @@ public sealed partial class ReclaimViewModel : ObservableObject
     /// the obj folder inside it must show the worktree's size once — the arithmetic that made a real
     /// scan claim 812 GB when only 493 GB was reclaimable.
     /// </summary>
+    /// <summary>
+    /// What each risk tier would give you, nesting resolved <i>within</i> each tier.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately not a strict partition of the headline total. Resolving across tiers would
+    /// attribute a safe <c>obj</c> folder's bytes to the careful worktree that contains it, and the
+    /// safe tier would then read smaller than what "Select safe only" actually hands you — the found
+    /// summary would be understating the primary action by a factor of nearly two on this machine.
+    /// <para>
+    /// Resolving inside each tier instead makes every tier answer the question the user is really
+    /// asking of it: if I took this tier and nothing else, what do I get. That is the number the
+    /// button delivers, so that is the number to show. The cost is that tiers can overlap and need
+    /// not sum to the headline, which is why the bar is labelled as a comparison rather than as a
+    /// breakdown.
+    /// </para>
+    /// </remarks>
+    private static ReclaimRiskMix RiskMixOf(IEnumerable<ReclaimCandidate> candidates)
+    {
+        List<ReclaimCandidate> all = [.. candidates];
+
+        (long Bytes, int Count) Tier(ReclaimRisk risk)
+        {
+            IReadOnlyList<ReclaimCandidate> roots =
+                ReclaimOverlapResolver.Roots(all.Where(c => c.Risk == risk));
+            return (roots.Sum(r => r.SizeBytes), roots.Count);
+        }
+
+        (long safe, int safeCount) = Tier(ReclaimRisk.Safe);
+        (long check, int checkCount) = Tier(ReclaimRisk.Check);
+        (long careful, int carefulCount) = Tier(ReclaimRisk.Careful);
+
+        return new ReclaimRiskMix(safe, check, careful, safeCount, checkCount, carefulCount);
+    }
+
     private void RecomputeTotals()
     {
         if (_suspendRecompute)
@@ -430,7 +493,11 @@ public sealed partial class ReclaimViewModel : ObservableObject
 
         SelectedBytes = ReclaimOverlapResolver.ReclaimableBytes(candidates);
         OnPropertyChanged(nameof(SelectedBytesText));
+        OnPropertyChanged(nameof(SelectedCountText));
         OnPropertyChanged(nameof(SelectionSummary));
+
+        SelectedRiskMix = RiskMixOf(candidates);
+        FoundRiskMix = RiskMixOf(AllRows.Select(r => r.Candidate));
 
         IReadOnlyDictionary<string, string> containers =
             ReclaimOverlapResolver.ContainerByPath(candidates);
@@ -444,6 +511,17 @@ public sealed partial class ReclaimViewModel : ObservableObject
 
         IReadOnlyDictionary<string, long> byVolume =
             ReclaimOverlapResolver.ReclaimableBytesByVolume(candidates);
+
+        // "105.1 GB on G: · 26.5 GB on C:" — the split matters because freeing 130 GB spread over two
+        // volumes does not solve a problem that lives on one of them.
+        VolumeSplitText = byVolume.Count == 0
+            ? string.Empty
+            : string.Join(
+                " · ",
+                byVolume
+                    .Where(kv => kv.Value > 0)
+                    .OrderByDescending(kv => kv.Value)
+                    .Select(kv => $"{ReclaimFormat.Bytes(kv.Value)} on {kv.Key.TrimEnd('\\')}"));
 
         RefreshVolumeStrip(byVolume);
     }
@@ -496,35 +574,35 @@ public sealed partial class ReclaimViewModel : ObservableObject
         IReadOnlyList<StorageVolume> volumes)
     {
         VolumeImpacts.Clear();
-        if (reclaimableByVolume is null)
-        {
-            return;
-        }
 
-        foreach ((string root, long bytes) in
-            reclaimableByVolume.OrderBy(k => k.Key, StringComparer.OrdinalIgnoreCase))
+        // Driven by the volumes, not by the selection. A volume that would free nothing still belongs
+        // in the after-picture: "C: is unchanged by this" is a fact the user needs when deciding
+        // whether the selection solves their actual problem, and a row that appears and disappears as
+        // boxes are ticked makes the card jump under the cursor.
+        foreach (StorageVolume volume in volumes.OrderBy(v => v.RootPath, StringComparer.OrdinalIgnoreCase))
         {
-            StorageVolume? volume = volumes.FirstOrDefault(
-                v => string.Equals(v.RootPath, root, StringComparison.OrdinalIgnoreCase));
-
-            if (volume is null || volume.CapacityBytes <= 0)
+            if (volume.CapacityBytes <= 0)
             {
                 continue;
             }
 
-            // The after-volume is the same volume with the reclaimed bytes handed back to free
-            // space. Modelling it as a volume rather than as a second set of fractions means the
-            // two bars are computed by exactly the same code, so they cannot drift apart.
+            long bytes = 0;
+            reclaimableByVolume?.TryGetValue(volume.RootPath, out bytes);
+
             long freed = Math.Clamp(bytes, 0, volume.UsedBytes);
-            StorageVolume after = volume with { FreeBytes = volume.FreeBytes + freed };
+            long stillUsed = Math.Max(0, volume.UsedBytes - freed);
+            long freeAfter = volume.FreeBytes + freed;
 
             VolumeImpacts.Add(new ReclaimVolumeImpact(
-                root,
+                volume.RootPath,
+                string.IsNullOrEmpty(volume.DriveLetter) ? "?" : volume.DriveLetter,
+                volume.DisplayName,
+                VolumeCapacity.CaptionFor(volume),
                 freed,
-                VolumeCapacity.ForVolume(volume, freed),
-                VolumeCapacity.ForVolume(after),
+                VolumeCapacity.AfterReclaim(volume, freed),
                 ReclaimFormat.Bytes(volume.FreeBytes),
-                ReclaimFormat.Bytes(after.FreeBytes)));
+                ReclaimFormat.Bytes(freeAfter),
+                $"{ReclaimFormat.Bytes(stillUsed)} still in use of {ReclaimFormat.Bytes(volume.CapacityBytes)}"));
         }
     }
 
@@ -537,25 +615,86 @@ public sealed partial class ReclaimViewModel : ObservableObject
     partial void OnHasScannedChanged(bool value) => OnPropertyChanged(nameof(SelectionSummary));
 }
 
-/// <summary>What one volume gets back from the current selection.</summary>
+/// <summary>
+/// One volume's after-picture: what it looks like once the current selection is reclaimed.
+/// </summary>
 /// <remarks>
-/// Carries a before and an after picture rather than a single number. "You get 26.5 GB back" means
-/// very little on a volume whose size the reader does not have in their head; two bars, one above
-/// the other, answer the question they actually have — is this enough to make a difference.
+/// A single bar, not a before and an after. The freed band sits between the space still in use and
+/// the space that was already free — exactly where those bytes are about to move — so the reader
+/// sees the delta in place instead of diffing two pictures stacked on top of each other.
 /// </remarks>
 public sealed record ReclaimVolumeImpact(
     string VolumeRoot,
+    string Letter,
+    string Name,
+    string Caption,
     long Bytes,
-    VolumeCapacityResult Before,
-    VolumeCapacityResult After,
+    VolumeCapacityResult Bar,
     string FreeBeforeText,
-    string FreeAfterText)
+    string FreeAfterText,
+    string StillInUseText)
 {
     public string BytesText => ReclaimFormat.Bytes(Bytes);
 
-    /// <summary>Reads as one sentence to a screen reader, which cannot see two stacked bars.</summary>
+    /// <summary>Free space before and after, as one phrase. The arrow is the whole point of the row.</summary>
+    public string FreeTransitionText => $"{FreeBeforeText} → {FreeAfterText} free";
+
+    /// <summary>
+    /// Right-hand end of the footer line. Says nothing selected rather than "+0 B", because zero
+    /// bytes freed is a state the user chose, not a measurement.
+    /// </summary>
+    public string GainText => Bytes > 0 ? $"+{BytesText} freed" : "nothing selected here";
+
+    /// <summary>Reads as one sentence to a screen reader, which cannot see a bar.</summary>
     public string AccessibleDescription =>
-        $"{VolumeRoot} frees {BytesText}, from {FreeBeforeText} free to {FreeAfterText} free";
+        $"{Name} ({Letter}:), {StillInUseText}, {FreeBeforeText} free before, {FreeAfterText} free after";
 
     public string AutomationId => $"ReclaimImpact_{VolumeRoot.TrimEnd('\\', ':')}";
+}
+
+/// <summary>
+/// A pile of reclaimable bytes broken down by risk tier, with item counts.
+/// </summary>
+/// <remarks>
+/// Counts travel with the bytes because the two together are what makes a tier actionable: "17.4 GB
+/// careful" is worrying, "17.4 GB careful across 5 items" is a short afternoon.
+/// </remarks>
+public sealed record ReclaimRiskMix(
+    long SafeBytes,
+    long CheckBytes,
+    long CarefulBytes,
+    int SafeCount,
+    int CheckCount,
+    int CarefulCount)
+{
+    public static readonly ReclaimRiskMix Empty = new(0, 0, 0, 0, 0, 0);
+
+    public long TotalBytes => SafeBytes + CheckBytes + CarefulBytes;
+
+    public int TotalCount => SafeCount + CheckCount + CarefulCount;
+
+    public bool HasAny => TotalBytes > 0;
+
+    public VolumeCapacityResult Bar => VolumeCapacity.ByRisk(SafeBytes, CheckBytes, CarefulBytes);
+
+    public string SafeText => ReclaimFormat.Bytes(SafeBytes);
+
+    public string CheckText => ReclaimFormat.Bytes(CheckBytes);
+
+    public string CarefulText => ReclaimFormat.Bytes(CarefulBytes);
+
+    public string SafeCountText => Items(SafeCount);
+
+    public string CheckCountText => Items(CheckCount);
+
+    public string CarefulCountText => Items(CarefulCount);
+
+    /// <summary>
+    /// The bar's label. States that this compares tiers rather than dividing a total, because the
+    /// tiers can overlap — a safe folder inside a careful one is genuinely available under either
+    /// choice, and pretending otherwise would understate the safe tier.
+    /// </summary>
+    public string Headline => HasAny ? "What each tier would give you" : "Nothing found yet";
+
+    private static string Items(int count) => count == 1 ? "1 item" : $"{count:N0} items";
 }

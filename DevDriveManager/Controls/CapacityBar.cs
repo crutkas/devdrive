@@ -3,6 +3,8 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Shapes;
+using Windows.Foundation;
+using Windows.UI;
 
 namespace DevDriveManager.Controls;
 
@@ -109,8 +111,53 @@ public sealed partial class CapacityBar : Control
     {
         // Amber reads as "actionable" rather than "consumed", which is what reclaimable space is.
         CapacitySegmentKind.Reclaimable => Resolve("SmCategory3Brush"),
+        CapacitySegmentKind.Freed => FreedBrush(),
+        CapacitySegmentKind.Safe => Resolve("SmGoodBrush"),
+        CapacitySegmentKind.Check => Resolve("SmWarnBrush"),
+        CapacitySegmentKind.Careful => Resolve("SmBadBrush"),
         _ => UsedBrush ?? Resolve("SmCategory0Brush"),
     };
+
+    /// <summary>
+    /// The freed band, hatched rather than solid.
+    /// </summary>
+    /// <remarks>
+    /// Freed space is the only band on the bar that does not exist yet — it is a promise about what
+    /// happens if the user presses the button. A hatch says "pending" in a way no flat colour can,
+    /// and it keeps the band legible next to the solid good-coloured text around it.
+    /// <para>
+    /// <c>MappingMode.Absolute</c> with <c>SpreadMethod.Repeat</c> is what makes this a repeating
+    /// stripe rather than a single sweep: the gradient is defined over an 8x8 DIP square and tiled,
+    /// which is the direct equivalent of the design's
+    /// <c>repeating-linear-gradient(135deg, good 0 4px, good/55% 4px 8px)</c>. Duplicated stops at
+    /// 0.5 give the hard edge; a smooth ramp would read as a gradient fill, not a hatch.
+    /// </para>
+    /// </remarks>
+    private Brush? FreedBrush()
+    {
+        if (Resolve("SmGoodBrush") is not SolidColorBrush good)
+        {
+            return null;
+        }
+
+        Color solid = good.Color;
+        Color faded = Color.FromArgb((byte)(solid.A * 0.55), solid.R, solid.G, solid.B);
+
+        return new LinearGradientBrush
+        {
+            MappingMode = BrushMappingMode.Absolute,
+            SpreadMethod = GradientSpreadMethod.Repeat,
+            StartPoint = new Point(0, 0),
+            EndPoint = new Point(8, 8),
+            GradientStops =
+            {
+                new GradientStop { Color = solid, Offset = 0 },
+                new GradientStop { Color = solid, Offset = 0.5 },
+                new GradientStop { Color = faded, Offset = 0.5 },
+                new GradientStop { Color = faded, Offset = 1 },
+            },
+        };
+    }
 
     private static Brush? Resolve(string key) =>
         Application.Current.Resources.TryGetValue(key, out object? value) ? value as Brush : null;

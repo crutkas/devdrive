@@ -161,6 +161,17 @@
         <Setter Property="Foreground" Value="{ThemeResource SmTextBrush}" />
     </Style>
 
+    <!--
+        The tier number. 15px semibold tabular so the four cards' figures line up on the decimal —
+        four sizes that do not align read as four unrelated facts.
+    -->
+    <Style x:Key="SmTierValueTextStyle" TargetType="TextBlock">
+        <Setter Property="FontSize" Value="15" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Foreground" Value="{ThemeResource SmTextBrush}" />
+        <Setter Property="FontFamily" Value="Consolas, Cascadia Mono, Segoe UI" />
+    </Style>
+
     <Style x:Key="SmVolumeCaptionTextStyle" TargetType="TextBlock">
         <Setter Property="FontSize" Value="10.5" />
         <Setter Property="Foreground" Value="{ThemeResource SmDimBrush}" />
@@ -249,6 +260,18 @@
         <Setter Property="Padding" Value="10,3,10,4" />
         <Setter Property="FontSize" Value="11.5" />
         <Setter Property="CornerRadius" Value="4" />
+    </Style>
+
+    <!--
+        A tier card. Four of these sit side by side under the after-picture, each holding one risk
+        tier's bytes and item count. Bordered rather than filled so they read as a measured breakdown
+        of the bar above them, not as four more buttons.
+    -->
+    <Style x:Key="SmTierCardStyle" TargetType="Border">
+        <Setter Property="BorderBrush" Value="{ThemeResource SmStrokeBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="7" />
+        <Setter Property="Padding" Value="10,7,10,8" />
     </Style>
 
     <Style x:Key="SmCardTitleTextStyle" TargetType="TextBlock">
