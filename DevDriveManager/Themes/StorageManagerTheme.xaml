@@ -201,6 +201,56 @@
         .cardhead h3 is 13/600, .cardhead .sub 11.5 dim, thead th 10.5/.08em/uppercase/dim,
         tbody td 13.5, .tnode 13 with a 12px dim value, .kv 11.5 dim, .chip 11.5 dim.
     -->
+
+    <!--
+        The three container shapes every room is built from. These started life in SpacePage and
+        moved here the moment a second room needed them — a room that redefines its own card is a
+        room that will drift away from the others.
+    -->
+
+    <!--  A card. Spec: card fill, 1px stroke, 8px radius.  -->
+    <Style x:Key="SmCardStyle" TargetType="Border">
+        <Setter Property="Background" Value="{ThemeResource SmCardBrush}" />
+        <Setter Property="BorderBrush" Value="{ThemeResource SmStrokeBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="{StaticResource SmCardCornerRadius}" />
+    </Style>
+
+    <!--  A card head. Spec: 38px min-height, 0 14px padding, cardhead fill, bottom divider.  -->
+    <Style x:Key="SmCardHeadStyle" TargetType="Border">
+        <Setter Property="Background" Value="{ThemeResource SmCardHeaderBrush}" />
+        <Setter Property="BorderBrush" Value="{ThemeResource SmDividerBrush}" />
+        <Setter Property="BorderThickness" Value="0,0,0,1" />
+        <Setter Property="Padding" Value="14,0" />
+        <Setter Property="MinHeight" Value="38" />
+    </Style>
+
+    <!--  A chip. Spec: 11.5px dim text, 4px 9px padding, 11px radius, 1px stroke.  -->
+    <Style x:Key="SmChipStyle" TargetType="Border">
+        <Setter Property="BorderBrush" Value="{ThemeResource SmStrokeBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="11" />
+        <Setter Property="Padding" Value="9,3,9,4" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <!--
+        A card-head button. The default button is 32px tall with 11px text, which is taller than the
+        card head it sits in — the head is 142 in the spec and a default button forces it past that.
+        Based on DefaultButtonStyle so focus visuals, hover, and high contrast are inherited rather
+        than reimplemented; only the metrics change.
+    -->
+    <Style
+        x:Key="SmCompactButtonStyle"
+        BasedOn="{StaticResource DefaultButtonStyle}"
+        TargetType="Button">
+        <Setter Property="MinHeight" Value="0" />
+        <Setter Property="MinWidth" Value="0" />
+        <Setter Property="Padding" Value="10,3,10,4" />
+        <Setter Property="FontSize" Value="11.5" />
+        <Setter Property="CornerRadius" Value="4" />
+    </Style>
+
     <Style x:Key="SmCardTitleTextStyle" TargetType="TextBlock">
         <Setter Property="FontSize" Value="13" />
         <Setter Property="FontWeight" Value="SemiBold" />

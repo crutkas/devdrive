@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using DevDriveCore;
+using DevDriveManager.Controls;
 using DevDriveReclaim;
 using DevDriveStorage;
 
@@ -60,6 +61,26 @@ public sealed partial class ReclaimRowViewModel(ReclaimCandidate candidate) : Ob
         ReclaimRisk.Check => "Check",
         _ => "Careful",
     };
+
+    /// <summary>
+    /// The risk tier as a colour role. Deleting is the one thing in this app the user cannot undo,
+    /// so the tier is carried by a word and a colour rather than colour alone — colour is the fast
+    /// read, the word is the one that survives a colour-blind user or a greyscale screenshot.
+    /// </summary>
+    public StatusEmphasis RiskEmphasis => Candidate.Risk switch
+    {
+        ReclaimRisk.Safe => StatusEmphasis.Good,
+        ReclaimRisk.Check => StatusEmphasis.Warn,
+        _ => StatusEmphasis.Bad,
+    };
+
+    /// <summary>
+    /// What a screen reader hears for the whole row. Built here rather than in XAML so the order
+    /// of the facts is a decision made once: what it is, how big, how risky.
+    /// </summary>
+    public string AccessibleDescription =>
+        $"{DisplayName}, {SizeText}, {RiskText}"
+        + (DetailText.Length > 0 ? $", {DetailText}" : string.Empty);
 
     public string DetailText => Candidate.Detail ?? string.Empty;
 
@@ -220,6 +241,19 @@ public sealed partial class ReclaimViewModel : ObservableObject
     public partial long FoundBytes { get; set; }
 
     public string FoundBytesText => ReclaimFormat.Bytes(FoundBytes);
+
+    /// <summary>
+    /// The one line that says where the user stands: how much of what was found is currently ticked.
+    /// Kept as prose rather than two numbers in two corners because the ratio is the decision, and a
+    /// ratio the reader has to compute themselves is one they will not compute.
+    /// </summary>
+    public string SelectionSummary => !HasScanned
+        ? "Nothing scanned yet"
+        : FoundBytes <= 0
+            ? "Nothing found"
+            : SelectedBytes <= 0
+                ? $"Nothing selected of {FoundBytesText} found"
+                : $"{SelectedBytesText} selected of {FoundBytesText} found";
 
     public ObservableCollection<ReclaimVolumeImpact> VolumeImpacts { get; } = [];
 
@@ -396,6 +430,7 @@ public sealed partial class ReclaimViewModel : ObservableObject
 
         SelectedBytes = ReclaimOverlapResolver.ReclaimableBytes(candidates);
         OnPropertyChanged(nameof(SelectedBytesText));
+        OnPropertyChanged(nameof(SelectionSummary));
 
         IReadOnlyDictionary<string, string> containers =
             ReclaimOverlapResolver.ContainerByPath(candidates);
@@ -410,19 +445,15 @@ public sealed partial class ReclaimViewModel : ObservableObject
         IReadOnlyDictionary<string, long> byVolume =
             ReclaimOverlapResolver.ReclaimableBytesByVolume(candidates);
 
-        VolumeImpacts.Clear();
-        foreach ((string volume, long bytes) in byVolume.OrderBy(k => k.Key, StringComparer.OrdinalIgnoreCase))
-        {
-            VolumeImpacts.Add(new ReclaimVolumeImpact(volume, bytes));
-        }
-
         RefreshVolumeStrip(byVolume);
     }
 
     /// <summary>
-    /// Rebuilds the context strip. Volumes are re-enumerated each time rather than cached because a
-    /// reclaim run changes free space, and a strip showing pre-scan free space beside post-scan
-    /// findings would be quietly self-contradictory.
+    /// Rebuilds the context strip and the per-volume impact rows. Volumes are re-enumerated each time
+    /// rather than cached because a reclaim run changes free space, and a strip showing pre-scan free
+    /// space beside post-scan findings would be quietly self-contradictory. The impact rows are built
+    /// here, from the same enumeration, so the after-picture bars can never disagree with the strip
+    /// above them about how big a volume is.
     /// </summary>
     private void RefreshVolumeStrip(IReadOnlyDictionary<string, long>? reclaimableByVolume = null)
     {
@@ -435,10 +466,12 @@ public sealed partial class ReclaimViewModel : ObservableObject
         {
             // A volume disappearing mid-session is a real event, not a bug. The room is still usable
             // without its strip, so this degrades rather than taking the page down.
+            RebuildImpacts(reclaimableByVolume, []);
             return;
         }
         catch (UnauthorizedAccessException)
         {
+            RebuildImpacts(reclaimableByVolume, []);
             return;
         }
 
@@ -449,15 +482,80 @@ public sealed partial class ReclaimViewModel : ObservableObject
         {
             VolumeStripEntries.Add(entry);
         }
+
+        RebuildImpacts(reclaimableByVolume, volumes);
     }
 
-    partial void OnFoundBytesChanged(long value) => OnPropertyChanged(nameof(FoundBytesText));
+    /// <summary>
+    /// A volume the enumeration could not describe is dropped rather than drawn with invented
+    /// geometry — a bar with no capacity behind it is a lie told confidently, which is worse in a
+    /// delete tool than a missing row.
+    /// </summary>
+    private void RebuildImpacts(
+        IReadOnlyDictionary<string, long>? reclaimableByVolume,
+        IReadOnlyList<StorageVolume> volumes)
+    {
+        VolumeImpacts.Clear();
+        if (reclaimableByVolume is null)
+        {
+            return;
+        }
+
+        foreach ((string root, long bytes) in
+            reclaimableByVolume.OrderBy(k => k.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            StorageVolume? volume = volumes.FirstOrDefault(
+                v => string.Equals(v.RootPath, root, StringComparison.OrdinalIgnoreCase));
+
+            if (volume is null || volume.CapacityBytes <= 0)
+            {
+                continue;
+            }
+
+            // The after-volume is the same volume with the reclaimed bytes handed back to free
+            // space. Modelling it as a volume rather than as a second set of fractions means the
+            // two bars are computed by exactly the same code, so they cannot drift apart.
+            long freed = Math.Clamp(bytes, 0, volume.UsedBytes);
+            StorageVolume after = volume with { FreeBytes = volume.FreeBytes + freed };
+
+            VolumeImpacts.Add(new ReclaimVolumeImpact(
+                root,
+                freed,
+                VolumeCapacity.ForVolume(volume, freed),
+                VolumeCapacity.ForVolume(after),
+                ReclaimFormat.Bytes(volume.FreeBytes),
+                ReclaimFormat.Bytes(after.FreeBytes)));
+        }
+    }
+
+    partial void OnFoundBytesChanged(long value)
+    {
+        OnPropertyChanged(nameof(FoundBytesText));
+        OnPropertyChanged(nameof(SelectionSummary));
+    }
+
+    partial void OnHasScannedChanged(bool value) => OnPropertyChanged(nameof(SelectionSummary));
 }
 
 /// <summary>What one volume gets back from the current selection.</summary>
-public sealed record ReclaimVolumeImpact(string VolumeRoot, long Bytes)
+/// <remarks>
+/// Carries a before and an after picture rather than a single number. "You get 26.5 GB back" means
+/// very little on a volume whose size the reader does not have in their head; two bars, one above
+/// the other, answer the question they actually have — is this enough to make a difference.
+/// </remarks>
+public sealed record ReclaimVolumeImpact(
+    string VolumeRoot,
+    long Bytes,
+    VolumeCapacityResult Before,
+    VolumeCapacityResult After,
+    string FreeBeforeText,
+    string FreeAfterText)
 {
     public string BytesText => ReclaimFormat.Bytes(Bytes);
+
+    /// <summary>Reads as one sentence to a screen reader, which cannot see two stacked bars.</summary>
+    public string AccessibleDescription =>
+        $"{VolumeRoot} frees {BytesText}, from {FreeBeforeText} free to {FreeAfterText} free";
 
     public string AutomationId => $"ReclaimImpact_{VolumeRoot.TrimEnd('\\', ':')}";
 }

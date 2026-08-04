@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using DevDriveManager.Controls;
 using DevDriveManager.ViewModels;
+using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 
 namespace DevDriveManager.Pages;
@@ -14,9 +15,23 @@ namespace DevDriveManager.Pages;
 /// machine, so it is something the user asks for rather than something that begins the moment they
 /// glance at the room.
 /// </remarks>
-public sealed partial class ReclaimPage : Page
+public sealed partial class ReclaimPage : Page, INotifyPropertyChanged
 {
+    private double _nameColumnWidth = 220;
+
     public ReclaimViewModel ViewModel { get; } = App.SharedReclaim;
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    /// <summary>
+    /// An explicit width for the candidate name column, shared by the header and every row.
+    /// <para>
+    /// Same reasoning as the Space room: the fixed columns plus gaps and padding claim a known
+    /// number of DIPs, so computing the remainder makes the floor explicit and keeps the header
+    /// aligned with the rows for free, because both read this one number.
+    /// </para>
+    /// </summary>
+    public GridLength NameColumnWidth => new(_nameColumnWidth);
 
     public ReclaimPage()
     {
@@ -36,6 +51,34 @@ public sealed partial class ReclaimPage : Page
         };
 
         Unloaded += (_, _) => ViewModel.PropertyChanged -= OnViewModelPropertyChanged;
+    }
+
+    /// <summary>
+    /// Everything in a candidate row that is not the name, in DIPs: the RISK and SIZE columns
+    /// (76 + 84), the two 12px gaps, the row's own 14px horizontal padding, and the card's 1px
+    /// border on each side.
+    /// </summary>
+    private const double TableFixedColumnsWidth = 76 + 84 + (12 * 2) + 28 + 2;
+
+    /// <summary>
+    /// Measures the table card, not the header grid. Measuring the header would feed back on
+    /// itself: a wider name column grows the header's desired width, the grid is arranged at that
+    /// desired width, and the next measurement reports the inflated number. The card's width comes
+    /// from the page's star column and does not depend on anything inside it.
+    /// </summary>
+    private void TableCard_SizeChanged(object sender, SizeChangedEventArgs args)
+    {
+        // NewSize is in DIPs, which is the same unit the ColumnDefinition widths are in. Do not
+        // sanity-check this against UI-automation rectangles — those are physical pixels, and the
+        // two only agree at 100% scale.
+        double available = Math.Max(140, args.NewSize.Width - TableFixedColumnsWidth);
+        if (Math.Abs(available - _nameColumnWidth) < 0.5)
+        {
+            return;
+        }
+
+        _nameColumnWidth = available;
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(NameColumnWidth)));
     }
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e) =>

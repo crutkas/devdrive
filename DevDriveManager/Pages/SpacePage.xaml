@@ -29,32 +29,6 @@
 
     <Page.Resources>
         <controls:VolumeAccentRoleToBrushConverter x:Key="VolumeAccent" />
-
-        <!--  A card. Spec: card fill, 1px stroke, 8px radius, clipped.  -->
-        <Style x:Key="SmCardStyle" TargetType="Border">
-            <Setter Property="Background" Value="{ThemeResource SmCardBrush}" />
-            <Setter Property="BorderBrush" Value="{ThemeResource SmStrokeBrush}" />
-            <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="CornerRadius" Value="{StaticResource SmCardCornerRadius}" />
-        </Style>
-
-        <!--  A card head. Spec: 38px min-height, 0 14px padding, cardhead fill, bottom divider.  -->
-        <Style x:Key="SmCardHeadStyle" TargetType="Border">
-            <Setter Property="Background" Value="{ThemeResource SmCardHeaderBrush}" />
-            <Setter Property="BorderBrush" Value="{ThemeResource SmDividerBrush}" />
-            <Setter Property="BorderThickness" Value="0,0,0,1" />
-            <Setter Property="Padding" Value="14,0" />
-            <Setter Property="MinHeight" Value="38" />
-        </Style>
-
-        <!--  A chip. Spec: 11.5px dim text, 4px 9px padding, 11px radius, 1px stroke.  -->
-        <Style x:Key="SmChipStyle" TargetType="Border">
-            <Setter Property="BorderBrush" Value="{ThemeResource SmStrokeBrush}" />
-            <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="CornerRadius" Value="11" />
-            <Setter Property="Padding" Value="9,3,9,4" />
-            <Setter Property="VerticalAlignment" Value="Center" />
-        </Style>
     </Page.Resources>
 
     <Grid>
