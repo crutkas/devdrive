@@ -908,4 +908,209 @@
         <Setter Property="Foreground" Value="{ThemeResource SmBadBrush}" />
     </Style>
 
+    <!--
+        Overview signal dots. A round tinted disc with a glyph in it, one per signal kind.
+
+        The glyph matters as much as the colour: in high contrast every tint collapses to the same
+        ink, and a table whose only difference between "you gain 218 GB" and "this volume is about to
+        fail" is a hue is a table that says nothing to a third of its readers.
+    -->
+    <Style x:Key="SmSignalDotStyle" TargetType="Border">
+        <Setter Property="Width" Value="22" />
+        <Setter Property="Height" Value="22" />
+        <Setter Property="CornerRadius" Value="11" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Background" Value="{ThemeResource SmMuteTintBrush}" />
+        <Setter Property="BorderBrush" Value="{ThemeResource SmStrokeBrush}" />
+    </Style>
+
+    <Style
+        x:Key="SmSignalDotGainStyle"
+        BasedOn="{StaticResource SmSignalDotStyle}"
+        TargetType="Border">
+        <Setter Property="Background" Value="{ThemeResource SmGoodTintBrush}" />
+        <Setter Property="BorderBrush" Value="{ThemeResource SmGoodEdgeBrush}" />
+    </Style>
+
+    <Style
+        x:Key="SmSignalDotWarnStyle"
+        BasedOn="{StaticResource SmSignalDotStyle}"
+        TargetType="Border">
+        <Setter Property="Background" Value="{ThemeResource SmWarnTintBrush}" />
+        <Setter Property="BorderBrush" Value="{ThemeResource SmWarnEdgeBrush}" />
+    </Style>
+
+    <Style
+        x:Key="SmSignalDotBadStyle"
+        BasedOn="{StaticResource SmSignalDotStyle}"
+        TargetType="Border">
+        <Setter Property="Background" Value="{ThemeResource SmBadBrush}" />
+        <Setter Property="BorderBrush" Value="{ThemeResource SmBadBrush}" />
+    </Style>
+
+    <Style
+        x:Key="SmSignalDotInfoStyle"
+        BasedOn="{StaticResource SmSignalDotStyle}"
+        TargetType="Border">
+        <Setter Property="Background" Value="{ThemeResource SmAccentTintBrush}" />
+        <Setter Property="BorderBrush" Value="{ThemeResource SmAccentEdgeBrush}" />
+    </Style>
+
+    <!--  The glyph inside a signal dot. Sized to the disc, not to the body text.  -->
+    <Style x:Key="SmSignalGlyphStyle" TargetType="FontIcon">
+        <Setter Property="FontSize" Value="11" />
+        <Setter Property="HorizontalAlignment" Value="Center" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="Foreground" Value="{ThemeResource SmDimBrush}" />
+    </Style>
+
+    <Style
+        x:Key="SmSignalGlyphGainStyle"
+        BasedOn="{StaticResource SmSignalGlyphStyle}"
+        TargetType="FontIcon">
+        <Setter Property="Foreground" Value="{ThemeResource SmGoodBrush}" />
+    </Style>
+
+    <Style
+        x:Key="SmSignalGlyphWarnStyle"
+        BasedOn="{StaticResource SmSignalGlyphStyle}"
+        TargetType="FontIcon">
+        <Setter Property="Foreground" Value="{ThemeResource SmWarnBrush}" />
+    </Style>
+
+    <Style
+        x:Key="SmSignalGlyphBadStyle"
+        BasedOn="{StaticResource SmSignalGlyphStyle}"
+        TargetType="FontIcon">
+        <Setter Property="Foreground" Value="{ThemeResource SmCanvasBrush}" />
+    </Style>
+
+    <Style
+        x:Key="SmSignalGlyphInfoStyle"
+        BasedOn="{StaticResource SmSignalGlyphStyle}"
+        TargetType="FontIcon">
+        <Setter Property="Foreground" Value="{ThemeResource SmAccentBrush}" />
+    </Style>
+
+    <!--
+        The impact figure. A gain is the one number in the room worth colouring, because it is the
+        only one that answers "what do I get" — everything else is a measurement.
+    -->
+    <Style
+        x:Key="SmImpactTextStyle"
+        BasedOn="{StaticResource SmNumericCellTextStyle}"
+        TargetType="TextBlock" />
+
+    <Style
+        x:Key="SmImpactGainTextStyle"
+        BasedOn="{StaticResource SmNumericCellTextStyle}"
+        TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{ThemeResource SmGoodBrush}" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+
+    <Style
+        x:Key="SmImpactWarnTextStyle"
+        BasedOn="{StaticResource SmNumericCellTextStyle}"
+        TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{ThemeResource SmWarnBrush}" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+
+    <Style
+        x:Key="SmImpactBadTextStyle"
+        BasedOn="{StaticResource SmNumericCellTextStyle}"
+        TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{ThemeResource SmBadBrush}" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+
+    <!--
+        The free-space chart. Measured and projected are two Polylines rather than one dashed line,
+        because the join between them has to be exact — a single line with a StrokeDashArray would
+        fade at whatever pixel the dash pattern happened to land on rather than at the last real
+        reading.
+    -->
+    <Style x:Key="SmSparkMeasuredStyle" TargetType="Polyline">
+        <Setter Property="Stroke" Value="{ThemeResource SmCategory0Brush}" />
+        <Setter Property="StrokeThickness" Value="2" />
+        <Setter Property="StrokeLineJoin" Value="Round" />
+    </Style>
+
+    <Style x:Key="SmSparkProjectedStyle" TargetType="Polyline">
+        <Setter Property="Stroke" Value="{ThemeResource SmCategory5Brush}" />
+        <Setter Property="StrokeThickness" Value="2" />
+        <Setter Property="StrokeDashArray" Value="3,3" />
+        <Setter Property="Opacity" Value="0.65" />
+    </Style>
+
+    <Style x:Key="SmSparkFillStyle" TargetType="Polygon">
+        <Setter Property="Fill" Value="{ThemeResource SmAccentTintBrush}" />
+        <Setter Property="Opacity" Value="0.55" />
+    </Style>
+
+    <!--  Legend swatch for the chart. Square, not a line: it has to read at 8px.  -->
+    <Style x:Key="SmLegendSwatchStyle" TargetType="Rectangle">
+        <Setter Property="Width" Value="8" />
+        <Setter Property="Height" Value="8" />
+        <Setter Property="RadiusX" Value="2" />
+        <Setter Property="RadiusY" Value="2" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <!--
+        A chip the user can press: the same outline as SmChipStyle, but a real Button so it is
+        focusable, reachable by Tab and announced as invokable. A Border with a tap handler would
+        look identical and be unusable without a mouse.
+    -->
+    <Style x:Key="SmChipButtonStyle" TargetType="Button">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="{ThemeResource SmStrokeBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="11" />
+        <Setter Property="Padding" Value="9,3,9,4" />
+        <Setter Property="MinWidth" Value="0" />
+        <Setter Property="MinHeight" Value="0" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="UseSystemFocusVisuals" Value="True" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Grid
+                        x:Name="Root"
+                        Background="{TemplateBinding Background}"
+                        BorderBrush="{TemplateBinding BorderBrush}"
+                        BorderThickness="{TemplateBinding BorderThickness}"
+                        CornerRadius="{TemplateBinding CornerRadius}">
+                        <VisualStateManager.VisualStateGroups>
+                            <VisualStateGroup x:Name="CommonStates">
+                                <VisualState x:Name="Normal" />
+                                <VisualState x:Name="PointerOver">
+                                    <VisualState.Setters>
+                                        <Setter Target="Root.Background" Value="{ThemeResource SmHoverBrush}" />
+                                        <Setter Target="Root.BorderBrush" Value="{ThemeResource SmHoverStrokeBrush}" />
+                                    </VisualState.Setters>
+                                </VisualState>
+                                <VisualState x:Name="Pressed">
+                                    <VisualState.Setters>
+                                        <Setter Target="Root.Opacity" Value="0.7" />
+                                    </VisualState.Setters>
+                                </VisualState>
+                                <VisualState x:Name="Disabled">
+                                    <VisualState.Setters>
+                                        <Setter Target="Root.Opacity" Value="0.4" />
+                                    </VisualState.Setters>
+                                </VisualState>
+                            </VisualStateGroup>
+                        </VisualStateManager.VisualStateGroups>
+                        <ContentPresenter
+                            Padding="{TemplateBinding Padding}"
+                            HorizontalContentAlignment="Center"
+                            VerticalContentAlignment="Center" />
+                    </Grid>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
 </ResourceDictionary>

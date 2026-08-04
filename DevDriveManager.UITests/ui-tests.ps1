@@ -4,8 +4,8 @@
     Follows the winui-ui-testing skill: one batch script, single run, structured results.
     Drives the *built, running* app via `winapp ui` (UI Automation).
 
-    The redesign splits the old single endless-scroll page into a NavigationView shell with six
-    focused pages — Dashboard, Package caches, Benchmarks, Drives, Create Dev Drive and Settings —
+    The redesign splits the old single endless-scroll page into a NavigationView shell of focused
+    rooms — Overview, Reclaim, Space, Caches, Drives, Benchmarks, Create Dev Drive and Settings —
     all backed by ONE shared MainPageViewModel (App.Shared), loaded once. This suite:
       (1) asserts the shell + every nav item renders;
       (2) navigates to each page and asserts a page-specific anchor element;
@@ -67,6 +67,31 @@ function Get-Value([string]$id) {
     return [string]$json.text
 }
 
+# Presence test built on the tool's own resolver. `winapp ui inspect <id>` silently falls back to a
+# whole-tree dump when the id is absent, so substring-matching its output is not a presence check.
+function Test-Present([string]$id, [int]$timeoutMs = 1500) {
+    winapp ui wait-for $id -a $AppPid -t $timeoutMs 2>&1 | Out-Null
+    $found = ($LASTEXITCODE -eq 0)
+    $global:LASTEXITCODE = 0     # a legitimate "absent" must not fail the enclosing Test-UI
+    return $found
+}
+
+# Every semantic slug under a subtree. `inspect --json` returns a NESTED tree whose nodes carry
+# `selector` (a slug derived from the AutomationId), not `automationId` — only `--interactive`
+# flattens and exposes ids, and it filters out lists, canvases and rows.
+function Get-Selectors([string]$rootId) {
+    $obj = winapp ui inspect $rootId -a $AppPid --json --depth 20 2>$null | Out-String | ConvertFrom-Json
+    $global:LASTEXITCODE = 0
+    $out = [System.Collections.Generic.List[string]]::new()
+    function Walk($n) {
+        if (-not $n) { return }
+        if ($n.selector) { $out.Add([string]$n.selector) }
+        foreach ($c in $n.children) { Walk $c }
+    }
+    foreach ($w in $obj.windows) { foreach ($e in $w.elements) { Walk $e } }
+    return $out
+}
+
 # Navigate via a top-level nav item and wait for a page-specific anchor to appear.
 function Goto([string]$navId, [string]$anchorId) {
     winapp ui invoke $navId -a $AppPid 2>$null | Out-Null
@@ -104,20 +129,72 @@ Test-UI "Nav: Drives present"               { winapp ui wait-for "NavDrives"    
 Test-UI "Nav: Create Dev Drive present"     { winapp ui wait-for "NavCreate"        -a $AppPid -t 4000 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  (2) Dashboard — the calm landing surface; leads with what's NOT on the Dev Drive.
-#      (Navigate explicitly so the suite is re-runnable regardless of prior nav state; the shell
-#      selects Dashboard on fresh launch.)
+#  (2) Overview — the landing room. Ranks what this machine needs and routes each finding to the
+#      room that acts on it. Everything here is derived from the other rooms' data, so the assertions
+#      are about the room's own furniture (strip, table, chart, inspector, status bar) rather than
+#      about any particular finding — which findings appear depends entirely on the test machine.
 # ─────────────────────────────────────────────────────────────────────────────
-Test-UI "Navigate to Dashboard"              { Goto "NavDashboard" "DashboardScrollViewer" }
-Test-UI "Dashboard: Refresh present"         { winapp ui wait-for "RefreshButton"         -a $AppPid -t 3000 }
-Test-UI "Dashboard: Create present"          { winapp ui wait-for "CreateDevDriveButton"  -a $AppPid -t 3000 }
-# The cards are lightweight Border/ItemsControl panels (no automation peer); assert on the
-# peer-projecting child each card owns — its "Move all" button and its three nav links.
-Test-UI "Dashboard: caches hero (Move all)"  { winapp ui wait-for "MoveAllButton"          -a $AppPid -t 3000 }
-Test-UI "Dashboard: caches hero (Manage link)" { winapp ui wait-for "OpenPackageCachesLink" -a $AppPid -t 3000 }
-Test-UI "Dashboard: drive-health card link"  { winapp ui wait-for "OpenDrivesLink"         -a $AppPid -t 3000 }
-Test-UI "Dashboard: benchmarks card link"    { winapp ui wait-for "OpenBenchmarksLink"     -a $AppPid -t 3000 }
-winapp ui screenshot -a $AppPid -o "screenshots\01-dashboard.png" 2>$null | Out-Null
+Test-UI "Navigate to Overview"               { Goto "NavDashboard" "SignalsSubtitle" }
+Test-UI "Overview: volume strip"             { winapp ui wait-for "OverviewVolumeStrip"   -a $AppPid -t 3000 }
+Test-UI "Overview: scan action"              { winapp ui wait-for "ScanEverythingButton"  -a $AppPid -t 3000 }
+Test-UI "Overview: last-scan chip"           { winapp ui wait-for "LastScanChip"          -a $AppPid -t 3000 }
+Test-UI "Overview: free-space chart card"    { winapp ui wait-for "TrendSubtitle"         -a $AppPid -t 3000 }
+Test-UI "Overview: inspector title"          { winapp ui wait-for "OverviewInspectorTitle" -a $AppPid -t 3000 }
+Test-UI "Overview: coverage facts"           { winapp ui wait-for "CoverageNodes"        -a $AppPid -t 3000 }
+Test-UI "Overview: status bar"               { winapp ui wait-for "OverviewStatusBar"     -a $AppPid -t 3000 }
+Test-UI "Overview: inspector footnote"       { winapp ui wait-for "OverviewFootNote"      -a $AppPid -t 3000 }
+
+# The signals table and its empty state are mutually exclusive, and which one shows depends on what
+# the machine actually has to report — so assert that the room committed to one of them.
+Test-UI "Overview: signals table or empty state" {
+    if (-not ((Test-Present "SignalsList") -or (Test-Present "SignalsEmptyTitle"))) {
+        throw "neither the signals table nor its empty state rendered"
+    }
+    winapp ui wait-for "SignalsSubtitle" -a $AppPid -t 3000 | Out-Null
+}
+
+# The chart draws only once two readings sit 30 minutes apart, which a fresh profile never has —
+# so accept either the plotted chart or the honest "not enough history yet" card.
+Test-UI "Overview: chart or not-enough-history" {
+    if (-not ((Test-Present "FreeSpaceChart") -or (Test-Present "TrendEmptyTitle"))) {
+        throw "the trend card rendered neither a chart nor its empty state"
+    }
+    winapp ui wait-for "TrendSubtitle" -a $AppPid -t 3000 | Out-Null
+}
+
+# Selecting a signal explains it in place; only the GOES TO chip leaves the room. Both halves are
+# asserted because one gesture doing both is exactly the defect this split fixed.
+Test-UI "Overview: selecting a signal explains it without navigating" {
+    # Signal ids are derived from the finding, so they are discovered rather than hard-coded.
+    $row = Get-Selectors "SignalsList" | Where-Object { $_ -clike 'Signal_*' } | Select-Object -First 1
+    if (-not $row) {
+        # A machine with nothing to report has no row to select; the empty state must be why.
+        if (-not (Test-Present "SignalsEmptyTitle")) { throw "no signal rows and no empty state" }
+        winapp ui wait-for "SignalsSubtitle" -a $AppPid -t 3000 | Out-Null
+        return
+    }
+    winapp ui click $row -a $AppPid 2>$null | Out-Null
+    Start-Sleep -Milliseconds 400
+    if ((Get-Name "OverviewInspectorTitle") -ne 'About this signal') {
+        throw "selecting a signal did not fill the inspector"
+    }
+    if ([string]::IsNullOrWhiteSpace((Get-Name "OverviewSelectionDetail"))) {
+        throw "the inspector did not say why the signal is listed"
+    }
+    # Still in Overview — selection must not navigate.
+    winapp ui wait-for "SignalsSubtitle" -a $AppPid -t 3000 | Out-Null
+}
+
+Test-UI "Overview: the GOES TO chip opens that room" {
+    $chip = Get-Selectors "SignalsList" | Where-Object { $_ -clike 'SignalRoom_*' } | Select-Object -First 1
+    if (-not $chip) { winapp ui wait-for "SignalsSubtitle" -a $AppPid -t 3000 | Out-Null; return }
+    winapp ui invoke $chip -a $AppPid 2>$null | Out-Null
+    Start-Sleep -Milliseconds 700
+    # Whichever room it landed in, Overview is no longer the one on screen.
+    if (Test-Present "SignalsSubtitle") { throw "$chip did not leave the Overview room" }
+    Goto "NavDashboard" "SignalsSubtitle"
+}
+winapp ui screenshot -a $AppPid -o "screenshots\01-overview.png" 2>$null | Out-Null
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  (2b) Reclaim — the room the Storage Manager reframe is built around. Scanning is deliberately
@@ -303,7 +380,7 @@ Test-UI "Theme override -> System default (restored)" {
 #      open-ComboBox popup window is covered too.
 # ─────────────────────────────────────────────────────────────────────────────
 $auditPages = @(
-    @{ nav = "NavDashboard";     anchor = "DashboardScrollViewer" },
+    @{ nav = "NavDashboard";     anchor = "SignalsSubtitle" },
     @{ nav = "NavReclaim";       anchor = "ReclaimCategoryList" },
     @{ nav = "NavSpace";         anchor = "SpaceItemsList" },
     @{ nav = "NavPackageCaches"; anchor = "PackageCachesScrollViewer" },

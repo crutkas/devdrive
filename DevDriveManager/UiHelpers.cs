@@ -38,26 +38,6 @@ public static class UiHelpers
     public static double QueuedOpacity(bool isQueued) => isQueued ? 0.5 : 1.0;
 
     /// <summary>
-    /// Background brush for a package-cache status pill, keyed by status. Dev Drive = the user's bright
-    /// base accent; system drive = a darker accent shade (one accent family, never grey) so the Dev Drive
-    /// reads as the brighter one; not-found = a quiet neutral.
-    /// </summary>
-    public static Brush? PillBackground(string statusKind) => Resource(statusKind switch
-    {
-        "dev" => "PerfDevDriveBarBrush",
-        "system" => "PerfBaselineBarBrush",
-        _ => "ControlFillColorSecondaryBrush",
-    });
-
-    /// <summary>Foreground brush for a package-cache status pill, keyed by status (paired for contrast on each fill).</summary>
-    public static Brush? PillForeground(string statusKind) => Resource(statusKind switch
-    {
-        "dev" => "PerfDevDriveForegroundBrush",
-        "system" => "PerfBaselineForegroundBrush",
-        _ => "TextFillColorSecondaryBrush",
-    });
-
-    /// <summary>
     /// The Storage Manager status pill: an outline over a wash of its own colour rather than a solid
     /// block. On the Dev Drive is the good state; still on the system drive is the one asking for
     /// attention; undetected is muted, because "we didn't find it" is information, not a problem.
@@ -147,25 +127,41 @@ public static class UiHelpers
         _ => "SmRiskChipTextStyle",
     });
 
+    /// <summary>
+    /// The disc behind an Overview signal's glyph, keyed by <c>"gain"</c>, <c>"warn"</c>,
+    /// <c>"bad"</c> or <c>"info"</c>.
+    /// </summary>
+    public static Style? SignalDotStyle(string kind) => Resource<Style>(kind switch
+    {
+        "gain" => "SmSignalDotGainStyle",
+        "warn" => "SmSignalDotWarnStyle",
+        "bad" => "SmSignalDotBadStyle",
+        _ => "SmSignalDotInfoStyle",
+    });
+
+    /// <summary>The glyph inside an Overview signal's dot, keyed by the same four kinds.</summary>
+    public static Style? SignalGlyphStyle(string kind) => Resource<Style>(kind switch
+    {
+        "gain" => "SmSignalGlyphGainStyle",
+        "warn" => "SmSignalGlyphWarnStyle",
+        "bad" => "SmSignalGlyphBadStyle",
+        _ => "SmSignalGlyphInfoStyle",
+    });
+
+    /// <summary>
+    /// The right-aligned impact figure on an Overview row. Only a gain is coloured — see the style.
+    /// </summary>
+    public static Style? ImpactTextStyle(string kind) => Resource<Style>(kind switch
+    {
+        "gain" => "SmImpactGainTextStyle",
+        "warn" => "SmImpactWarnTextStyle",
+        "bad" => "SmImpactBadTextStyle",
+        _ => "SmImpactTextStyle",
+    });
+
     /// <summary>Foreground brush for a speed-test ratio: success green when the Dev Drive wins (or ties), neutral otherwise.</summary>
     public static Brush? RatioBrush(bool isFavorable) =>
         Resource(isFavorable ? "SystemFillColorSuccessBrush" : "TextFillColorSecondaryBrush");
-
-    /// <summary>Cache overview accent: informational without a Dev Drive, caution when movable, success otherwise.</summary>
-    public static Brush? CacheOverviewBrush(
-        bool hasDevDrive,
-        bool hasCachesOnSystemDrive,
-        bool hasDetectedCaches,
-        bool allDetectedCachesOnDevDrive) =>
-        Resource(!hasDevDrive
-            ? "AccentTextFillColorPrimaryBrush"
-            : hasCachesOnSystemDrive
-                ? "SystemFillColorCautionBrush"
-                : hasDetectedCaches
-                    ? allDetectedCachesOnDevDrive
-                        ? "SystemFillColorSuccessBrush"
-                        : "SystemFillColorCautionBrush"
-                    : "TextFillColorSecondaryBrush");
 
     /// <summary>
     /// Alternating-row ("banded") background so the eye flows across a multi-row grid. The base row uses

@@ -79,9 +79,34 @@
             </Grid>
         </Border>
 
-        <Frame
-            x:Name="ContentFrame"
-            Grid.Column="1"
-            AutomationProperties.AutomationId="ShellContentFrame" />
+        <Grid Grid.Column="1">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <!--
+                UI-test seam indicator (present only when DDM_UITEST_SAFE_MUTATIONS=1). It lives in
+                the shell rather than in a room: a warning that this app is only pretending to
+                mutate the machine must not disappear when you navigate away from Overview.
+            -->
+            <Border
+                Grid.Row="0"
+                Padding="16,6"
+                Background="{ThemeResource SmWarnTintBrush}"
+                BorderBrush="{ThemeResource SmDividerBrush}"
+                BorderThickness="0,0,0,1"
+                Visibility="{x:Bind local:UiHelpers.BoolToVisibility(ViewModel.IsSafeMutationMode), Mode=OneWay}">
+                <TextBlock
+                    AutomationProperties.AutomationId="SafeMutationModeIndicator"
+                    Style="{StaticResource SmStatusFactWarnStyle}"
+                    Text="Safe-mutation test mode — nothing on this machine will actually change." />
+            </Border>
+
+            <Frame
+                x:Name="ContentFrame"
+                Grid.Row="1"
+                AutomationProperties.AutomationId="ShellContentFrame" />
+        </Grid>
     </Grid>
 </Page>

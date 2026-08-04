@@ -308,7 +308,7 @@ public sealed class TrustFiltersViewModelTests
         Assert.IsTrue(vm.HasFilters);
         // The union of attached and allowed, not just attached: an allowed filter that is NOT running
         // is the interesting row, because that absence is where the speed comes from.
-        Assert.IsTrue(vm.Filters.Count >= trust.AttachedFilters.Count);
+        Assert.IsGreaterThanOrEqualTo(trust.AttachedFilters.Count, vm.Filters.Count);
         Assert.IsTrue(vm.Filters.Any(row => row.Name == "PrjFlt"), "An allowed-but-detached filter must be listed.");
         Assert.IsTrue(vm.Filters.Any(row => row is { Name: "WdFilter", IsAttached: true }));
     }

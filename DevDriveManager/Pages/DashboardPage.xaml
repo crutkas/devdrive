@@ -1,380 +1,592 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <Page
     x:Class="DevDriveManager.Pages.DashboardPage"
+    x:Name="OverviewRoot"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:controls="using:CommunityToolkit.WinUI.Controls"
+    xmlns:controls="using:DevDriveManager.Controls"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:local="using:DevDriveManager"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:storage="using:DevDriveStorage"
     xmlns:vm="using:DevDriveManager.ViewModels"
     mc:Ignorable="d">
 
-    <ScrollViewer AutomationProperties.AutomationId="DashboardScrollViewer" VerticalScrollBarVisibility="Auto">
-        <StackPanel
-            MaxWidth="1000"
-            Padding="36,24,36,40"
-            HorizontalAlignment="Stretch"
-            Spacing="20">
+    <Page.Resources>
+        <controls:VolumeAccentRoleToBrushConverter x:Key="VolumeAccent" />
+    </Page.Resources>
 
-            <!--  Header: title + primary actions  -->
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-                <StackPanel Grid.Column="0" VerticalAlignment="Bottom" Spacing="2">
-                    <TextBlock Style="{StaticResource TitleTextBlockStyle}" Text="Dashboard" />
-                    <TextBlock
-                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        Style="{StaticResource BodyTextBlockStyle}"
-                        Text="What needs your attention, at a glance." />
-                </StackPanel>
-                <StackPanel
-                    Grid.Column="1"
-                    Orientation="Horizontal"
-                    VerticalAlignment="Bottom"
-                    Spacing="8">
-                    <Button
-                        AutomationProperties.AutomationId="RefreshButton"
-                        AutomationProperties.Name="Refresh"
-                        Command="{x:Bind ViewModel.LoadCommand}"
-                        ToolTipService.ToolTip="Refresh">
-                        <FontIcon FontSize="16" Glyph="&#xE72C;" />
-                    </Button>
-                    <Button
-                        AutomationProperties.AutomationId="CreateDevDriveButton"
-                        Command="{x:Bind ViewModel.CreateDevDriveCommand}"
-                        Content="Create Dev Drive"
-                        Style="{StaticResource AccentButtonStyle}" />
-                </StackPanel>
-            </Grid>
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
 
-            <!--  Status banner — reserved for the no-Dev-Drive-yet and error states only.  -->
-            <InfoBar
-                AutomationProperties.AutomationId="StatusBanner"
-                IsClosable="False"
-                IsOpen="True"
-                Message="{x:Bind ViewModel.StatusMessage, Mode=OneWay}"
-                Severity="{x:Bind ViewModel.StatusSeverity, Mode=OneWay}"
-                Title="{x:Bind ViewModel.StatusTitle, Mode=OneWay}"
-                Visibility="{x:Bind local:UiHelpers.InvertBoolToVisibility(ViewModel.HasDevDrive), Mode=OneWay}" />
+        <!--
+            The same context strip every room carries. Here it is genuinely context rather than
+            subject: the table below is about what to do, and the strip is the machine it is about.
+        -->
+        <Grid
+            Grid.Row="0"
+            Padding="18,10"
+            ColumnSpacing="14"
+            BorderBrush="{ThemeResource SmDividerBrush}"
+            BorderThickness="0,0,0,1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
 
-            <!--  UI-test seam indicator (present only when DDM_UITEST_SAFE_MUTATIONS=1).  -->
-            <TextBlock
-                AutomationProperties.AutomationId="SafeMutationModeIndicator"
-                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                Style="{StaticResource CaptionTextBlockStyle}"
-                Text="Safe-mutation test mode"
-                Visibility="{x:Bind local:UiHelpers.BoolToVisibility(ViewModel.IsSafeMutationMode), Mode=OneWay}" />
+            <ItemsControl
+                Grid.Column="0"
+                AutomationProperties.AutomationId="OverviewVolumeStrip"
+                AutomationProperties.Name="Volumes on this machine"
+                ItemsSource="{x:Bind VolumeStripEntries}">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <StackPanel Orientation="Horizontal" Spacing="10" />
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="storage:VolumeStripEntry">
+                        <controls:VolumeCard
+                            AccentBrush="{x:Bind AccentRole, Converter={StaticResource VolumeAccent}}"
+                            IsSystemVolume="{x:Bind IsSystemVolume}"
+                            ReclaimableBytes="{x:Bind ReclaimableBytes}"
+                            Volume="{x:Bind Volume}" />
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
 
-            <!--  ── Empty state: no Dev Drive yet ──  -->
-            <Border
-                Padding="24"
-                AutomationProperties.AutomationId="CreateDevDriveHeroCard"
-                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                BorderThickness="1"
-                CornerRadius="{StaticResource ControlCornerRadius}"
-                Visibility="{x:Bind local:UiHelpers.InvertBoolToVisibility(ViewModel.HasDevDrive), Mode=OneWay}">
-                <StackPanel Spacing="12">
-                    <FontIcon
-                        HorizontalAlignment="Left"
-                        FontSize="28"
-                        Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
-                        Glyph="&#xEDA2;" />
-                    <StackPanel Spacing="2">
-                        <TextBlock Style="{StaticResource SubtitleTextBlockStyle}" Text="Create your first Dev Drive" />
-                        <TextBlock
-                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                            Style="{StaticResource BodyTextBlockStyle}"
-                            Text="A Dev Drive is a ReFS volume tuned for developer workloads — faster file I/O for repos, package caches and build output, with Defender performance mode. Then move your package caches onto it in one click."
-                            TextWrapping="Wrap" />
-                    </StackPanel>
-                    <Button
-                        HorizontalAlignment="Left"
-                        AutomationProperties.AutomationId="CreateDevDriveHeroButton"
-                        Command="{x:Bind ViewModel.CreateDevDriveCommand}"
-                        Content="Create Dev Drive"
-                        Style="{StaticResource AccentButtonStyle}" />
-                </StackPanel>
-            </Border>
+            <!--
+                The room's one verb. Overview cannot tell you what is reclaimable until something has
+                looked, and the largest signal in the table is the one this button produces — so the
+                button that fills the room lives on the room, not three rooms away.
+            -->
+            <Button
+                Grid.Column="1"
+                VerticalAlignment="Center"
+                AutomationProperties.AutomationId="ScanEverythingButton"
+                Command="{x:Bind Reclaim.ScanCommand}"
+                Content="{x:Bind ScanButtonText, Mode=OneWay}"
+                IsEnabled="{x:Bind local:UiHelpers.Not(Reclaim.IsScanning), Mode=OneWay}"
+                Style="{StaticResource AccentButtonStyle}" />
+        </Grid>
 
-            <!--  Package-cache inventory remains useful even before a Dev Drive exists.  -->
-            <Border
-                    Padding="18"
-                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                    BorderThickness="1"
-                    CornerRadius="{StaticResource ControlCornerRadius}">
-                    <StackPanel Spacing="12">
-                        <Grid ColumnSpacing="14">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <FontIcon
-                                Grid.Column="0"
-                                VerticalAlignment="Center"
-                                FontSize="22"
-                                Foreground="{x:Bind local:UiHelpers.CacheOverviewBrush(ViewModel.PackageCaches.HasDevDrive, ViewModel.PackageCaches.HasCachesOnSystemDrive, ViewModel.PackageCaches.HasDetectedCaches, ViewModel.PackageCaches.AllDetectedCachesOnDevDrive), Mode=OneWay}"
-                                Glyph="&#xE8B7;" />
-                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+        <Grid
+            Grid.Row="1"
+            Padding="18,11"
+            ColumnSpacing="11">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" MinWidth="560" />
+                <ColumnDefinition Width="312" />
+            </Grid.ColumnDefinitions>
+
+            <Grid Grid.Column="0" RowSpacing="11">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*" MinHeight="200" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <!--  ================= Needs attention =================  -->
+                <Border
+                    Grid.Row="0"
+                    SizeChanged="TableCard_SizeChanged"
+                    Style="{StaticResource SmCardStyle}">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+
+                        <Border Grid.Row="0" Style="{StaticResource SmCardHeadStyle}">
+                            <Grid ColumnSpacing="10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+
                                 <TextBlock
-                                    AutomationProperties.AutomationId="CachesWarning"
-                                    Style="{StaticResource BodyStrongTextBlockStyle}"
-                                    Text="{x:Bind ViewModel.PackageCaches.WarningMessage, Mode=OneWay}"
-                                    TextWrapping="Wrap" />
+                                    Grid.Column="0"
+                                    VerticalAlignment="Center"
+                                    Style="{StaticResource SmCardTitleTextStyle}"
+                                    Text="Needs attention" />
                                 <TextBlock
-                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                    Style="{StaticResource CaptionTextBlockStyle}"
-                                    Text="Copies each cache to your Dev Drive and repoints its environment variable. Reversible anytime."
-                                    Visibility="{x:Bind local:UiHelpers.BoolToVisibility(ViewModel.PackageCaches.ShowMoveAllButton), Mode=OneWay}" />
-                                <TextBlock
-                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                    Style="{StaticResource CaptionTextBlockStyle}"
-                                    Text="{x:Bind ViewModel.PackageCaches.DevDriveNoticeMessage, Mode=OneWay}"
-                                    TextWrapping="Wrap"
-                                    Visibility="{x:Bind local:UiHelpers.BoolToVisibility(ViewModel.PackageCaches.ShowNoDevDriveNotice), Mode=OneWay}" />
-                            </StackPanel>
-                            <Button
-                                Grid.Column="2"
-                                VerticalAlignment="Center"
-                                AutomationProperties.AutomationId="MoveAllButton"
-                                Command="{x:Bind ViewModel.PackageCaches.MoveAllCommand}"
-                                Content="{x:Bind ViewModel.PackageCaches.MoveAllButtonText, Mode=OneWay}"
-                                Style="{StaticResource AccentButtonStyle}"
-                                Visibility="{x:Bind local:UiHelpers.BoolToVisibility(ViewModel.PackageCaches.ShowMoveAllButton), Mode=OneWay}" />
-                        </Grid>
-
-                        <!--  All-clear  -->
-                        <StackPanel
-                            Orientation="Horizontal"
-                            Spacing="8"
-                            Visibility="{x:Bind local:UiHelpers.BoolToVisibility(ViewModel.PackageCaches.ShowAllCachesOnDevDrive), Mode=OneWay}">
-                            <FontIcon
-                                FontSize="16"
-                                Foreground="{ThemeResource SystemFillColorSuccessBrush}"
-                                Glyph="&#xE73E;" />
-                            <TextBlock
-                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                Style="{StaticResource CaptionTextBlockStyle}"
-                                Text="Every detected cache is already on your Dev Drive."
-                                TextWrapping="Wrap" />
-                        </StackPanel>
-
-                        <!--  Move-all inline confirm  -->
-                        <Border
-                            AutomationProperties.AutomationId="MoveAllConfirmPanel"
-                            Background="{ThemeResource SystemFillColorAttentionBackgroundBrush}"
-                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                            BorderThickness="1"
-                            CornerRadius="{StaticResource ControlCornerRadius}"
-                            Padding="12,8"
-                            Visibility="{x:Bind local:UiHelpers.BoolToVisibility(ViewModel.PackageCaches.IsConfirmingMoveAll), Mode=OneWay}">
-                            <StackPanel Spacing="8">
-                                <TextBlock
-                                    Style="{StaticResource CaptionTextBlockStyle}"
-                                    Text="{x:Bind ViewModel.PackageCaches.MoveAllConfirmBodyText, Mode=OneWay}"
-                                    TextWrapping="Wrap" />
-                                <StackPanel
-                                    HorizontalAlignment="Right"
-                                    Orientation="Horizontal"
-                                    Spacing="8">
-                                    <Button
-                                        AutomationProperties.AutomationId="CancelMoveAllButton"
-                                        Command="{x:Bind ViewModel.PackageCaches.CancelMoveAllCommand}"
-                                        Content="Cancel" />
-                                    <Button
-                                        AutomationProperties.AutomationId="ConfirmMoveAllButton"
-                                        Command="{x:Bind ViewModel.PackageCaches.ConfirmMoveAllCommand}"
-                                        Content="Move all"
-                                        Style="{StaticResource AccentButtonStyle}" />
-                                </StackPanel>
-                            </StackPanel>
+                                    Grid.Column="1"
+                                    VerticalAlignment="Center"
+                                    AutomationProperties.AutomationId="SignalsSubtitle"
+                                    Style="{StaticResource SmCardSubTextStyle}"
+                                    Text="{x:Bind SignalsSubtitle, Mode=OneWay}"
+                                    TextTrimming="CharacterEllipsis" />
+                                <Border
+                                    Grid.Column="2"
+                                    VerticalAlignment="Center"
+                                    Style="{StaticResource SmChipStyle}">
+                                    <TextBlock
+                                        AutomationProperties.AutomationId="LastScanChip"
+                                        Style="{StaticResource SmCardSubTextStyle}"
+                                        Text="{x:Bind LastScanText, Mode=OneWay}" />
+                                </Border>
+                            </Grid>
                         </Border>
 
-                        <!--  Move-all result  -->
-                        <TextBlock
-                            AutomationProperties.AutomationId="MoveAllResult"
-                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                            Style="{StaticResource CaptionTextBlockStyle}"
-                            Text="{x:Bind ViewModel.PackageCaches.MoveAllResultText, Mode=OneWay}"
-                            TextWrapping="Wrap"
-                            Visibility="{x:Bind local:UiHelpers.BoolToVisibility(ViewModel.PackageCaches.ShowMoveAllResult), Mode=OneWay}" />
+                        <!--
+                            Column headers, outside the list so they do not scroll away and do not
+                            cost a row template. Widths are stated twice — here and in the row — and
+                            the flexible column is computed rather than starred, because a star in
+                            two separate Grids resolves against two separate available widths and
+                            the columns drift apart by exactly the scrollbar.
+                        -->
+                        <Border
+                            Grid.Row="1"
+                            Padding="14,7,14,7"
+                            BorderBrush="{ThemeResource SmDividerBrush}"
+                            BorderThickness="0,0,0,1">
+                            <Grid ColumnSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="{x:Bind SignalColumnWidth, Mode=OneWay}" />
+                                    <ColumnDefinition Width="168" />
+                                    <ColumnDefinition Width="104" />
+                                    <ColumnDefinition Width="92" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock
+                                    Grid.Column="0"
+                                    Style="{StaticResource SmColumnHeaderTextStyle}"
+                                    Text="SIGNAL" />
+                                <TextBlock
+                                    Grid.Column="1"
+                                    Style="{StaticResource SmColumnHeaderTextStyle}"
+                                    Text="WHERE" />
+                                <TextBlock
+                                    Grid.Column="2"
+                                    HorizontalAlignment="Right"
+                                    Style="{StaticResource SmColumnHeaderTextStyle}"
+                                    Text="IMPACT" />
+                                <TextBlock
+                                    Grid.Column="3"
+                                    Style="{StaticResource SmColumnHeaderTextStyle}"
+                                    Text="GOES TO" />
+                            </Grid>
+                        </Border>
 
-                        <!--  Banded preview of movable caches, or all detected caches without a Dev Drive.  -->
-                        <StackPanel
-                            Spacing="2"
-                            Visibility="{x:Bind local:UiHelpers.BoolToVisibility(ViewModel.PackageCaches.ShowDashboardCacheList), Mode=OneWay}">
-                            <ItemsControl
-                                AutomationProperties.AutomationId="MovableCachesList"
-                                HorizontalContentAlignment="Stretch"
-                                ItemsSource="{x:Bind MovableCaches, Mode=OneWay}">
-                                <ItemsControl.ItemsPanel>
-                                    <ItemsPanelTemplate>
-                                        <StackPanel Spacing="2" />
-                                    </ItemsPanelTemplate>
-                                </ItemsControl.ItemsPanel>
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate x:DataType="vm:PackageCacheRowViewModel">
+                        <Grid Grid.Row="2">
+                            <ListView
+                                AutomationProperties.AutomationId="SignalsList"
+                                AutomationProperties.Name="What this machine needs"
+                                ItemsSource="{x:Bind Signals}"
+                                KeyDown="Signals_KeyDown"
+                                SelectedItem="{x:Bind SelectedSignal, Mode=TwoWay}"
+                                SelectionMode="Single"
+                                Visibility="{x:Bind local:UiHelpers.BoolToVisibility(HasSignals), Mode=OneWay}">
+                                <ListView.ItemContainerStyle>
+                                    <Style TargetType="ListViewItem">
+                                        <Setter Property="Padding" Value="0" />
+                                        <Setter Property="MinHeight" Value="0" />
+                                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                    </Style>
+                                </ListView.ItemContainerStyle>
+                                <ListView.ItemTemplate>
+                                    <DataTemplate x:DataType="vm:AttentionSignalViewModel">
                                         <Grid
-                                            Padding="12,8"
-                                            Background="{x:Bind local:UiHelpers.BandBrush(BandAlt), Mode=OneWay}"
-                                            ColumnSpacing="12"
-                                            CornerRadius="4">
+                                            Padding="14,8,14,8"
+                                            AutomationProperties.AutomationId="{x:Bind AutomationId}"
+                                            AutomationProperties.Name="{x:Bind AutomationName}"
+                                            ColumnSpacing="12">
                                             <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="Auto" />
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="Auto" />
-                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="{Binding SignalColumnWidth, ElementName=OverviewRoot}" />
+                                                <ColumnDefinition Width="168" />
+                                                <ColumnDefinition Width="104" />
+                                                <ColumnDefinition Width="92" />
                                             </Grid.ColumnDefinitions>
-                                            <FontIcon
+
+                                            <Grid
                                                 Grid.Column="0"
                                                 VerticalAlignment="Center"
-                                                FontSize="15"
-                                                Glyph="&#xE8B7;" />
+                                                ColumnSpacing="10">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+
+                                                <Border Grid.Column="0" Style="{x:Bind local:UiHelpers.SignalDotStyle(KindKey)}">
+                                                    <FontIcon Glyph="{x:Bind Glyph}" Style="{x:Bind local:UiHelpers.SignalGlyphStyle(KindKey)}" />
+                                                </Border>
+
+                                                <StackPanel Grid.Column="1" Spacing="1">
+                                                    <TextBlock
+                                                        Style="{StaticResource SmCellTextStyle}"
+                                                        Text="{x:Bind Title}"
+                                                        TextTrimming="CharacterEllipsis"
+                                                        ToolTipService.ToolTip="{x:Bind Title}" />
+                                                    <TextBlock
+                                                        Style="{StaticResource SmCardSubTextStyle}"
+                                                        Text="{x:Bind Detail}"
+                                                        TextTrimming="CharacterEllipsis"
+                                                        ToolTipService.ToolTip="{x:Bind Detail}" />
+                                                </StackPanel>
+                                            </Grid>
+
                                             <TextBlock
                                                 Grid.Column="1"
                                                 VerticalAlignment="Center"
-                                                Text="{x:Bind Header}" />
+                                                Style="{StaticResource SmMonoCellTextStyle}"
+                                                Text="{x:Bind Where}"
+                                                TextTrimming="CharacterEllipsis"
+                                                ToolTipService.ToolTip="{x:Bind Where}" />
+
                                             <TextBlock
                                                 Grid.Column="2"
                                                 VerticalAlignment="Center"
-                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                                Text="{x:Bind SizeText, Mode=OneWay}" />
-                                            <Border
+                                                Style="{x:Bind local:UiHelpers.ImpactTextStyle(KindKey)}"
+                                                Text="{x:Bind Impact}" />
+
+                                            <!--
+                                                The chip opens the room; selecting the row only
+                                                explains it. One gesture that did both would mean
+                                                the inspector never got a chance to answer "should
+                                                I", because reading the answer required leaving.
+                                            -->
+                                            <Button
                                                 Grid.Column="3"
-                                                Padding="10,2,10,3"
+                                                HorizontalAlignment="Left"
                                                 VerticalAlignment="Center"
-                                                Background="{x:Bind local:UiHelpers.PillBackground(StatusKind), Mode=OneWay}"
-                                                CornerRadius="10">
+                                                AutomationProperties.AutomationId="{x:Bind RoomButtonAutomationId}"
+                                                AutomationProperties.Name="{x:Bind RoomButtonAutomationName}"
+                                                Click="Room_Click"
+                                                Style="{StaticResource SmChipButtonStyle}"
+                                                Tag="{x:Bind RoomTag}">
+                                                <TextBlock Style="{StaticResource SmCardSubTextStyle}" Text="{x:Bind RoomLabel}" />
+                                            </Button>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+
+                            <!--
+                                Nothing to do is a result, not an absence — so it gets the same
+                                affirmative treatment a found problem gets rather than a blank card.
+                            -->
+                            <StackPanel
+                                Padding="14,26"
+                                HorizontalAlignment="Center"
+                                Spacing="6"
+                                Visibility="{x:Bind local:UiHelpers.InvertBoolToVisibility(HasSignals), Mode=OneWay}">
+                                <TextBlock
+                                    HorizontalAlignment="Center"
+                                    AutomationProperties.AutomationId="SignalsEmptyTitle"
+                                    Style="{StaticResource SmCardTitleTextStyle}"
+                                    Text="{x:Bind EmptyTitle, Mode=OneWay}" />
+                                <TextBlock
+                                    HorizontalAlignment="Center"
+                                    MaxWidth="420"
+                                    Style="{StaticResource SmCardSubTextStyle}"
+                                    Text="{x:Bind EmptyDetail, Mode=OneWay}"
+                                    TextAlignment="Center"
+                                    TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Grid>
+                    </Grid>
+                </Border>
+
+                <!--  ================= Free space over time =================  -->
+                <!--
+                    Sized to a chart rather than to whatever is left over. The signals table above is
+                    the room's content and takes the slack; a chart does not read better at 600px
+                    tall, and before there is any history a stretched card is 600px of nothing.
+                -->
+                <Border Grid.Row="1" Style="{StaticResource SmCardStyle}">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <Border Grid.Row="0" Style="{StaticResource SmCardHeadStyle}">
+                            <Grid ColumnSpacing="10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+
+                                <TextBlock
+                                    Grid.Column="0"
+                                    VerticalAlignment="Center"
+                                    Style="{StaticResource SmCardTitleTextStyle}"
+                                    Text="Free space over time" />
+                                <TextBlock
+                                    Grid.Column="1"
+                                    VerticalAlignment="Center"
+                                    AutomationProperties.AutomationId="TrendSubtitle"
+                                    Style="{StaticResource SmCardSubTextStyle}"
+                                    Text="{x:Bind TrendSubtitle, Mode=OneWay}"
+                                    TextTrimming="CharacterEllipsis" />
+
+                                <StackPanel
+                                    Grid.Column="2"
+                                    VerticalAlignment="Center"
+                                    Orientation="Horizontal"
+                                    Spacing="12"
+                                    Visibility="{x:Bind local:UiHelpers.BoolToVisibility(HasTrend), Mode=OneWay}">
+                                    <StackPanel
+                                        Orientation="Horizontal"
+                                        Spacing="5"
+                                        VerticalAlignment="Center">
+                                        <Rectangle Fill="{ThemeResource SmCategory0Brush}" Style="{StaticResource SmLegendSwatchStyle}" />
+                                        <TextBlock Style="{StaticResource SmCardSubTextStyle}" Text="measured" />
+                                    </StackPanel>
+                                    <StackPanel
+                                        Orientation="Horizontal"
+                                        Spacing="5"
+                                        VerticalAlignment="Center">
+                                        <Rectangle
+                                            Fill="{ThemeResource SmCategory5Brush}"
+                                            Opacity="0.65"
+                                            Style="{StaticResource SmLegendSwatchStyle}" />
+                                        <TextBlock Style="{StaticResource SmCardSubTextStyle}" Text="at this rate" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+
+                        <Grid Grid.Row="1">
+                            <Grid
+                                Padding="14,12,14,10"
+                                RowSpacing="7"
+                                Visibility="{x:Bind local:UiHelpers.BoolToVisibility(HasTrend), Mode=OneWay}">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="168" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+
+                                <!--
+                                    Drawn rather than bound. A chart is one shape whose geometry
+                                    depends on the plot area, and an ItemsControl of points would
+                                    need the same size-changed handler to place them anyway — with
+                                    a container per point on top.
+                                -->
+                                <Grid
+                                    x:Name="SparkHost"
+                                    Grid.Row="0"
+                                    AutomationProperties.AutomationId="FreeSpaceChart"
+                                    AutomationProperties.Name="{x:Bind TrendAccessibleName, Mode=OneWay}"
+                                    SizeChanged="SparkHost_SizeChanged">
+                                    <Polygon x:Name="SparkFill" Style="{StaticResource SmSparkFillStyle}" />
+                                    <Polyline x:Name="SparkMeasured" Style="{StaticResource SmSparkMeasuredStyle}" />
+                                    <Polyline x:Name="SparkProjected" Style="{StaticResource SmSparkProjectedStyle}" />
+                                </Grid>
+
+                                <Grid Grid.Row="1">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock
+                                        Grid.Column="0"
+                                        AutomationProperties.AutomationId="TrendOldest"
+                                        Style="{StaticResource SmCardSubTextStyle}"
+                                        Text="{x:Bind TrendOldestText, Mode=OneWay}" />
+                                    <TextBlock
+                                        Grid.Column="1"
+                                        AutomationProperties.AutomationId="TrendLatest"
+                                        Style="{StaticResource SmCardSubTextStyle}"
+                                        Text="{x:Bind TrendLatestText, Mode=OneWay}" />
+                                    <TextBlock
+                                        Grid.Column="2"
+                                        HorizontalAlignment="Right"
+                                        AutomationProperties.AutomationId="TrendProjected"
+                                        Style="{StaticResource SmCardSubTextStyle}"
+                                        Text="{x:Bind TrendProjectedText, Mode=OneWay}" />
+                                </Grid>
+                            </Grid>
+
+                            <!--
+                                Before there are two readings there is no trend, and drawing one
+                                point as a flat line would assert something nobody measured.
+                            -->
+                            <StackPanel
+                                Padding="14,20"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Spacing="6"
+                                Visibility="{x:Bind local:UiHelpers.InvertBoolToVisibility(HasTrend), Mode=OneWay}">
+                                <TextBlock
+                                    HorizontalAlignment="Center"
+                                    AutomationProperties.AutomationId="TrendEmptyTitle"
+                                    Style="{StaticResource SmCardTitleTextStyle}"
+                                    Text="Not enough history yet" />
+                                <TextBlock
+                                    HorizontalAlignment="Center"
+                                    MaxWidth="440"
+                                    AutomationProperties.AutomationId="TrendEmptyDetail"
+                                    Style="{StaticResource SmCardSubTextStyle}"
+                                    Text="{x:Bind TrendEmptyDetail, Mode=OneWay}"
+                                    TextAlignment="Center"
+                                    TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Grid>
+                    </Grid>
+                </Border>
+            </Grid>
+
+            <!--  ================= Inspector =================  -->
+            <Border Grid.Column="1" Style="{StaticResource SmCardStyle}">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <Border Grid.Row="0" Style="{StaticResource SmCardHeadStyle}">
+                        <TextBlock
+                            VerticalAlignment="Center"
+                            AutomationProperties.AutomationId="OverviewInspectorTitle"
+                            Style="{StaticResource SmCardTitleTextStyle}"
+                            Text="{x:Bind InspectorTitle, Mode=OneWay}" />
+                    </Border>
+
+                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                        <StackPanel Padding="14,12" Spacing="4">
+                            <Grid Margin="0,0,0,12" ColumnSpacing="9">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Border Grid.Column="0" Style="{StaticResource SmTierCardStyle}">
+                                    <StackPanel Spacing="3">
+                                        <TextBlock Style="{StaticResource SmMetricLabelTextStyle}" Text="{x:Bind MetricOneLabel, Mode=OneWay}" />
+                                        <TextBlock
+                                            AutomationProperties.AutomationId="OverviewMetricOne"
+                                            Style="{StaticResource SmMetricValueTextStyle}"
+                                            Text="{x:Bind MetricOneValue, Mode=OneWay}" />
+                                    </StackPanel>
+                                </Border>
+                                <Border Grid.Column="1" Style="{StaticResource SmTierCardStyle}">
+                                    <StackPanel Spacing="3">
+                                        <TextBlock Style="{StaticResource SmMetricLabelTextStyle}" Text="{x:Bind MetricTwoLabel, Mode=OneWay}" />
+                                        <TextBlock
+                                            AutomationProperties.AutomationId="OverviewMetricTwo"
+                                            Style="{StaticResource SmMetricValueTextStyle}"
+                                            Text="{x:Bind MetricTwoValue, Mode=OneWay}" />
+                                    </StackPanel>
+                                </Border>
+                            </Grid>
+
+                            <TextBlock Style="{StaticResource SmSectionLabelTextStyle}" Text="{x:Bind SelectionLabel, Mode=OneWay}" />
+                            <TextBlock
+                                Margin="0,0,0,12"
+                                AutomationProperties.AutomationId="OverviewSelectionDetail"
+                                Style="{StaticResource SmKeyValueTextStyle}"
+                                Text="{x:Bind SelectionDetail, Mode=OneWay}"
+                                TextWrapping="Wrap" />
+
+                            <StackPanel Visibility="{x:Bind local:UiHelpers.BoolToVisibility(HasBiggestFolders), Mode=OneWay}">
+                                <TextBlock Style="{StaticResource SmSectionLabelTextStyle}" Text="{x:Bind BiggestLabel, Mode=OneWay}" />
+                                <!--
+                                    No AutomationId on the ItemsControl: a bare ItemsControl
+                                    surfaces no UIA peer, so an id there resolves to nothing. Each
+                                    row carries the Name a screen reader actually reads.
+                                -->
+                                <ItemsControl Margin="0,0,0,12" ItemsSource="{x:Bind BiggestFolders}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate x:DataType="vm:InspectorFactViewModel">
+                                            <Grid
+                                                Padding="0,3"
+                                                AutomationProperties.Name="{x:Bind AutomationName}"
+                                                ColumnSpacing="9">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
                                                 <TextBlock
-                                                    Foreground="{x:Bind local:UiHelpers.PillForeground(StatusKind), Mode=OneWay}"
-                                                    Style="{StaticResource CaptionTextBlockStyle}"
-                                                    Text="{x:Bind StatusText, Mode=OneWay}" />
-                                            </Border>
+                                                    Grid.Column="0"
+                                                    Style="{StaticResource SmTierValueTextStyle}"
+                                                    Text="{x:Bind Value}" />
+                                                <TextBlock
+                                                    Grid.Column="1"
+                                                    VerticalAlignment="Center"
+                                                    Style="{StaticResource SmMonoCellTextStyle}"
+                                                    Text="{x:Bind Label}"
+                                                    TextTrimming="CharacterEllipsis"
+                                                    ToolTipService.ToolTip="{x:Bind Label}" />
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+
+                            <TextBlock Style="{StaticResource SmSectionLabelTextStyle}" Text="WHAT THE SCAN ACTUALLY SAW" />
+                            <ItemsControl ItemsSource="{x:Bind CoverageFacts}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="vm:InspectorFactViewModel">
+                                        <Grid
+                                            Padding="0,4"
+                                            AutomationProperties.Name="{x:Bind AutomationName}"
+                                            BorderBrush="{ThemeResource SmDividerBrush}"
+                                            BorderThickness="0,0,0,1"
+                                            ColumnSpacing="9">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock
+                                                Grid.Column="0"
+                                                VerticalAlignment="Center"
+                                                Style="{StaticResource SmKeyValueTextStyle}"
+                                                Text="{x:Bind Label}" />
+                                            <StackPanel
+                                                Grid.Column="1"
+                                                Orientation="Horizontal"
+                                                Spacing="6">
+                                                <TextBlock
+                                                    AutomationProperties.AutomationId="{x:Bind AutomationId}"
+                                                    Style="{StaticResource SmTierValueTextStyle}"
+                                                    Text="{x:Bind Value}" />
+                                                <TextBlock
+                                                    VerticalAlignment="Center"
+                                                    Style="{StaticResource SmCardSubTextStyle}"
+                                                    Text="{x:Bind Note}"
+                                                    Visibility="{x:Bind local:UiHelpers.BoolToVisibility(HasNote)}" />
+                                            </StackPanel>
                                         </Grid>
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
-                            <HyperlinkButton
-                                AutomationProperties.AutomationId="OpenPackageCachesLink"
-                                Padding="0"
-                                Margin="0,4,0,0"
-                                Click="OpenPackageCaches_Click"
-                                Content="Manage package caches" />
                         </StackPanel>
-                    </StackPanel>
-            </Border>
+                    </ScrollViewer>
 
-            <!--  ── Active Dev Drive state ──  -->
-            <StackPanel Spacing="20" Visibility="{x:Bind local:UiHelpers.BoolToVisibility(ViewModel.HasDevDrive), Mode=OneWay}">
-                <!--  Two compact summary cards: Dev Drive health · Benchmarks  -->
-                <Grid ColumnSpacing="16">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="*" />
-                    </Grid.ColumnDefinitions>
-
-                    <!--  Dev Drive health summary  -->
+                    <!--
+                        The room's thesis, pinned where every room pins its argument. Overview exists
+                        to route: if a row here has nowhere to land, either the row or the room is
+                        missing — which is also the test of whether these rooms belong in one app.
+                    -->
                     <Border
-                        Grid.Column="0"
-                        Padding="16"
-                        AutomationProperties.AutomationId="DriveHealthSummaryCard"
-                        Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                        BorderThickness="1"
-                        CornerRadius="{StaticResource ControlCornerRadius}">
-                        <StackPanel Spacing="10">
-                            <Grid ColumnSpacing="10">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-                                <FontIcon
-                                    Grid.Column="0"
-                                    VerticalAlignment="Center"
-                                    FontSize="18"
-                                    Foreground="{ThemeResource SystemFillColorSuccessBrush}"
-                                    Glyph="&#xE930;" />
-                                <TextBlock
-                                    Grid.Column="1"
-                                    VerticalAlignment="Center"
-                                    Style="{StaticResource BodyStrongTextBlockStyle}"
-                                    Text="{x:Bind ViewModel.DriveHealth.HeaderText, Mode=OneWay}"
-                                    TextWrapping="Wrap" />
-                                <Border
-                                    Grid.Column="2"
-                                    Padding="10,2,10,3"
-                                    VerticalAlignment="Center"
-                                    Background="{ThemeResource SystemFillColorSuccessBackgroundBrush}"
-                                    BorderBrush="{ThemeResource SystemFillColorSuccessBrush}"
-                                    BorderThickness="1"
-                                    CornerRadius="10">
-                                    <TextBlock
-                                        Foreground="{ThemeResource SystemFillColorSuccessBrush}"
-                                        Style="{StaticResource CaptionTextBlockStyle}"
-                                        Text="{x:Bind ViewModel.DriveHealth.HealthPillText, Mode=OneWay}" />
-                                </Border>
-                            </Grid>
-                            <ProgressBar
-                                Maximum="100"
-                                Value="{x:Bind ViewModel.DriveHealth.CapacityPercent, Mode=OneWay}" />
-                            <TextBlock
-                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                Style="{StaticResource CaptionTextBlockStyle}"
-                                Text="{x:Bind ViewModel.DriveHealth.CapacityCaption, Mode=OneWay}" />
-                            <HyperlinkButton
-                                AutomationProperties.AutomationId="OpenDrivesLink"
-                                Padding="0"
-                                Click="OpenDrives_Click"
-                                Content="View drives" />
-                        </StackPanel>
-                    </Border>
-
-                    <!--  Benchmarks one-liner  -->
-                    <Border
-                        Grid.Column="1"
-                        Padding="16"
-                        AutomationProperties.AutomationId="BenchmarkSummaryCard"
-                        Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                        BorderThickness="1"
-                        CornerRadius="{StaticResource ControlCornerRadius}">
-                        <StackPanel Spacing="10">
-                            <Grid ColumnSpacing="10">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <FontIcon
-                                    Grid.Column="0"
-                                    VerticalAlignment="Center"
-                                    FontSize="18"
-                                    Glyph="&#xE9D9;" />
-                                <TextBlock
-                                    Grid.Column="1"
-                                    VerticalAlignment="Center"
-                                    Style="{StaticResource BodyStrongTextBlockStyle}"
-                                    Text="Benchmarks" />
-                            </Grid>
-                            <TextBlock
-                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                Style="{StaticResource CaptionTextBlockStyle}"
-                                Text="Curious how much faster your Dev Drive is? Run real build workloads on demand — no need to babysit them."
-                                TextWrapping="Wrap" />
-                            <HyperlinkButton
-                                AutomationProperties.AutomationId="OpenBenchmarksLink"
-                                Padding="0"
-                                Click="OpenBenchmarks_Click"
-                                Content="Open benchmarks" />
-                        </StackPanel>
+                        Grid.Row="2"
+                        Padding="13,9,13,10"
+                        Background="{ThemeResource SmCardHeaderBrush}"
+                        BorderBrush="{ThemeResource SmDividerBrush}"
+                        BorderThickness="0,1,0,0">
+                        <TextBlock
+                            AutomationProperties.AutomationId="OverviewFootNote"
+                            Style="{StaticResource SmCardSubTextStyle}"
+                            TextWrapping="Wrap">
+                            Every row above lands in a different room. Selecting one explains it here; opening it takes you there.
+                        </TextBlock>
                     </Border>
                 </Grid>
-            </StackPanel>
-        </StackPanel>
-    </ScrollViewer>
+            </Border>
+        </Grid>
+
+        <controls:RoomStatusBar
+            x:Name="StatusBar"
+            Grid.Row="2"
+            AutomationProperties.AutomationId="OverviewStatusBar"
+            AutomationProperties.Name="Overview status"
+            Hints="Enter opens the room &#xB7; Tab to actions" />
+    </Grid>
 </Page>
