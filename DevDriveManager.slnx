@@ -19,6 +19,14 @@
     <Platform Solution="*|x64" Project="x64" />
     <Platform Solution="*|ARM64" Project="ARM64" />
   </Project>
+  <Project Path="DevDriveReclaim/DevDriveReclaim.csproj">
+    <Platform Solution="*|x64" Project="x64" />
+    <Platform Solution="*|ARM64" Project="ARM64" />
+  </Project>
+  <Project Path="DevDriveReclaim.Tests/DevDriveReclaim.Tests.csproj">
+    <Platform Solution="*|x64" Project="x64" />
+    <Platform Solution="*|ARM64" Project="ARM64" />
+  </Project>
   <Project Path="DevDriveStoragePrototype/DevDriveStoragePrototype.csproj">
     <Platform Solution="*|x64" Project="x64" />
     <Platform Solution="*|ARM64" Project="ARM64" />

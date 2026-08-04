@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <Platforms>x64;ARM64</Platforms>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The risk-grading tables are internal because nothing outside should grade a candidate, but
+         that wording is the product: a row whose text contradicts its own risk grade teaches users
+         to distrust every grade. It gets tested directly. -->
+    <InternalsVisibleTo Include="DevDriveReclaim.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DevDriveCore\DevDriveCore.csproj" />
+    <ProjectReference Include="..\DevDriveStorage\DevDriveStorage.csproj" />
+  </ItemGroup>
+</Project>

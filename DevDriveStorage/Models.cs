@@ -136,7 +136,8 @@ public sealed record ScanCoverage
         long totalBytes,
         IEnumerable<string> deniedPaths,
         long? totalAllocatedBytes = null,
-        long? totalApparentBytes = null)
+        long? totalApparentBytes = null,
+        IEnumerable<string>? excludedPaths = null)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(coveredBytes);
         ArgumentOutOfRangeException.ThrowIfNegative(totalBytes);
@@ -166,6 +167,12 @@ public sealed record ScanCoverage
         {
             throw new ArgumentException("Denied paths cannot be blank.", nameof(deniedPaths));
         }
+
+        ExcludedPaths = excludedPaths?.ToImmutableArray() ?? ImmutableArray<string>.Empty;
+        if (ExcludedPaths.Any(string.IsNullOrWhiteSpace))
+        {
+            throw new ArgumentException("Excluded paths cannot be blank.", nameof(excludedPaths));
+        }
     }
 
     public long CoveredBytes { get; }
@@ -189,6 +196,14 @@ public sealed record ScanCoverage
     public long? TotalApparentBytes { get; }
 
     public ImmutableArray<string> DeniedPaths { get; }
+
+    /// <summary>
+    /// OS-owned folders that were skipped because they are unreadable by design (System Volume
+    /// Information and friends). Kept apart from <see cref="DeniedPaths"/> so a scan that hit only
+    /// these still reports <see cref="SnapshotCompletion.Complete"/> — otherwise every whole-volume
+    /// scan is permanently Partial and the signal means nothing.
+    /// </summary>
+    public ImmutableArray<string> ExcludedPaths { get; }
 
     /// <summary>
     /// Signed on-disk-minus-apparent aggregate. Positive means cluster slack dominates (real disk

@@ -342,25 +342,38 @@ public sealed class StorageExplorerViewModel : ObservableObject
     public string CoverageSummary => Snapshot?.Coverage.Display ?? "No coverage";
 
     /// <summary>
-    /// Honest partial-coverage detail for the status bar: how many paths were denied
-    /// when a scan could not read everything, so under-reporting is surfaced rather than
-    /// hidden. Empty when the snapshot is complete.
+    /// Honest coverage detail for the status bar. Unexpected denials degrade the scan and are
+    /// reported as Partial; OS-owned exclusions (System Volume Information and friends) are stated
+    /// as excluded on an otherwise Complete scan, because they are denied on every machine and a
+    /// warning that never turns off is a warning nobody reads. Empty only when neither applies.
     /// </summary>
     public string CoverageDetail
     {
         get
         {
-            if (Snapshot is not { Completion: SnapshotCompletion.Partial } snapshot)
+            if (Snapshot is not { } snapshot)
             {
                 return string.Empty;
             }
 
             int denied = snapshot.Coverage.DeniedPaths.Length;
-            return denied switch
+            int excluded = snapshot.Coverage.ExcludedPaths.Length;
+
+            if (snapshot.Completion == SnapshotCompletion.Partial)
             {
-                0 => "Partial coverage",
-                1 => "Partial · 1 path denied",
-                _ => $"Partial · {denied:N0} paths denied",
+                return denied switch
+                {
+                    0 => "Partial coverage",
+                    1 => "Partial · 1 path denied",
+                    _ => $"Partial · {denied:N0} paths denied",
+                };
+            }
+
+            return excluded switch
+            {
+                0 => string.Empty,
+                1 => "Complete · 1 system folder excluded",
+                _ => $"Complete · {excluded:N0} system folders excluded",
             };
         }
     }

@@ -112,6 +112,12 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
         var deniedPaths = context.DeniedPaths
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
+        var excludedPaths = context.ExcludedPaths
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        // Only *unexpected* denials degrade the result. OS-owned exclusions are reported separately so
+        // "Complete — 1 system folder excluded" stays truthful and the Partial signal keeps its meaning.
         bool partial = deniedPaths.Length > 0 ||
             (referenceTotalBytes is long reference && covered < reference - reference / 1000);
 
@@ -142,7 +148,8 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
                 total,
                 deniedPaths,
                 context.TotalAllocatedBytes,
-                context.TotalApparentBytes),
+                context.TotalApparentBytes,
+                excludedPaths),
             nodes);
     }
 
@@ -534,6 +541,9 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
 
         public List<string> DeniedPaths { get; } = [];
 
+        /// <summary>OS-owned folders skipped by design; never a reason to downgrade to Partial.</summary>
+        public List<string> ExcludedPaths { get; } = [];
+
         public long ProcessedBytes { get; private set; }
 
         /// <summary>Running sum of every file's on-disk AllocationSize (cluster slack included).</summary>
@@ -545,7 +555,16 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
         /// <summary>Directories that fell back from the fast path to readable managed enumeration.</summary>
         public int FastPathFallbacks { get; private set; }
 
-        public void RecordDenied(string path) => DeniedPaths.Add(path);
+        public void RecordDenied(string path)
+        {
+            if (SystemPathClassifier.IsExpectedSystemExclusion(path))
+            {
+                ExcludedPaths.Add(path);
+                return;
+            }
+
+            DeniedPaths.Add(path);
+        }
 
         public void RecordFastPathFallback() => FastPathFallbacks++;
 
