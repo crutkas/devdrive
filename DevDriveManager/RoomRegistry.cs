@@ -60,6 +60,7 @@ public static class RoomRegistry
     [
         new("overview", "Overview", "\uE80F", typeof(DashboardPage), RoomSection.Storage, "NavDashboard"),
         new("reclaim", "Reclaim", "\uE74D", typeof(ReclaimPage), RoomSection.Storage, "NavReclaim"),
+        new("space", "Space", "\uE9D5", typeof(SpacePage), RoomSection.Storage, "NavSpace"),
         new("caches", "Package caches", "\uE8B7", typeof(PackageCachesPage), RoomSection.Storage, "NavPackageCaches"),
         new("drives", "Drives", "\uEDA2", typeof(DrivesPage), RoomSection.Storage, "NavDrives"),
         new("benchmarks", "Benchmarks", "\uE9D9", typeof(BenchmarksPage), RoomSection.Storage, "NavBenchmarks"),

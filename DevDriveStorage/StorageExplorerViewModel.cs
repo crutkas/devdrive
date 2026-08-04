@@ -92,14 +92,17 @@ public sealed class StorageRowViewModel
 
 public sealed class StorageTreeItemViewModel : ObservableObject
 {
+    private readonly Func<StorageNode, IEnumerable<StorageTreeItemViewModel>> _childFactory;
+    private readonly ObservableCollection<StorageTreeItemViewModel> _children = [];
+    private bool _childrenMaterialized;
     private bool _isExpanded;
 
     public StorageTreeItemViewModel(
         StorageNode node,
-        IEnumerable<StorageTreeItemViewModel> children)
+        Func<StorageNode, IEnumerable<StorageTreeItemViewModel>> childFactory)
     {
         Node = node;
-        Children = new ObservableCollection<StorageTreeItemViewModel>(children);
+        _childFactory = childFactory;
     }
 
     public StorageNode Node { get; }
@@ -114,7 +117,30 @@ public sealed class StorageTreeItemViewModel : ObservableObject
 
     public string AccessibleName => $"{Node.Name}, {Node.SizeDisplay}";
 
-    public ObservableCollection<StorageTreeItemViewModel> Children { get; }
+    /// <summary>
+    /// Children are created on first access rather than up front. A real volume holds hundreds of
+    /// thousands of folders, and building a view model for every one of them before the tree has
+    /// drawn a single row costs minutes and gigabytes for rows nobody asked to see.
+    /// </summary>
+    public ObservableCollection<StorageTreeItemViewModel> Children
+    {
+        get
+        {
+            if (!_childrenMaterialized)
+            {
+                _childrenMaterialized = true;
+                foreach (StorageTreeItemViewModel child in _childFactory(Node))
+                {
+                    _children.Add(child);
+                }
+            }
+
+            return _children;
+        }
+    }
+
+    /// <summary>True when children exist, answered without materialising them.</summary>
+    public bool HasMaterialisedChildren => _childrenMaterialized;
 
     public bool IsExpanded
     {
@@ -329,8 +355,8 @@ public sealed class StorageExplorerViewModel : ObservableObject
     public string ScopeName => CurrentScope?.Name ?? "No scope";
 
     public string ScopeSummary => CurrentScope is null
-        ? "No mock snapshot loaded"
-        : $"{CurrentScope.SizeDisplay} allocated · {CurrentScope.ItemCount:N0} items";
+        ? "Nothing scanned yet"
+        : $"{CurrentScope.SizeDisplay} · {CurrentScope.ItemCount:N0} items";
 
     public string ScopeLogicalSummary => CurrentScope?.LogicalBytes is long logical
         ? $"{ByteSizeFormatter.Format(logical)} logical"
@@ -382,7 +408,7 @@ public sealed class StorageExplorerViewModel : ObservableObject
 
     public string SnapshotSummary => Snapshot is null
         ? "No snapshot"
-        : $"Mock snapshot · {Snapshot.CapturedAtUtc:MMM d, HH:mm} UTC";
+        : $"Scanned {Snapshot.CapturedAtUtc.ToLocalTime():MMM d, HH:mm}";
 
     public string SortGlyphName => GlyphFor(ExplorerSortColumn.Name);
 
@@ -493,17 +519,52 @@ public sealed class StorageExplorerViewModel : ObservableObject
     {
         _scanCancellation?.Cancel();
         _scanCancellation?.Dispose();
-        _scanCancellation = new CancellationTokenSource();
-        CancellationToken token = _scanCancellation.Token;
+        var scan = new CancellationTokenSource();
+        _scanCancellation = scan;
+        CancellationToken token = scan.Token;
         ErrorMessage = null;
         Progress = 0;
-        ProgressLabel = "Starting mock scan";
+        ProgressLabel = "Starting scan";
         ScanState = ExplorerScanState.Scanning;
 
-        var progress = new InlineProgress<StorageScanProgress>(update =>
+        // A source is free to scan on any thread: the live scanner walks the tree on a thread-pool
+        // thread, so its progress reports arrive off the thread that started the scan. Raising
+        // property change notifications from there would drive UI bindings off the UI thread, so
+        // reports are marshalled back onto the context that started the scan. When the report
+        // already arrives on the starting thread — synchronous sources and unit tests — it is
+        // applied inline so report ordering stays deterministic.
+        SynchronizationContext? origin = SynchronizationContext.Current;
+
+        void ApplyProgress(StorageScanProgress update)
         {
+            // A marshalled report can land after its scan already finished or was superseded by a
+            // newer one. Applying it then would overwrite the terminal label with a stale value.
+            if (!ReferenceEquals(_scanCancellation, scan) || ScanState != ExplorerScanState.Scanning)
+            {
+                return;
+            }
+
             Progress = update.Fraction;
             ProgressLabel = update.Label;
+        }
+
+        Action<StorageScanProgress> applyProgress = ApplyProgress;
+        var progress = new InlineProgress<StorageScanProgress>(update =>
+        {
+            if (origin is null || ReferenceEquals(origin, SynchronizationContext.Current))
+            {
+                applyProgress(update);
+                return;
+            }
+
+            origin.Post(
+                static state =>
+                {
+                    (Action<StorageScanProgress> apply, StorageScanProgress value) =
+                        ((Action<StorageScanProgress>, StorageScanProgress))state!;
+                    apply(value);
+                },
+                (applyProgress, update));
         });
 
         Guid? previousScopeId = CurrentScope?.Id;
@@ -533,8 +594,8 @@ public sealed class StorageExplorerViewModel : ObservableObject
             ExpandTreePath(CurrentScope.Id);
             Progress = 1;
             ProgressLabel = snapshot.Completion == SnapshotCompletion.Partial
-                ? "Mock scan complete with partial coverage"
-                : "Mock scan complete";
+                ? "Scan complete with partial coverage"
+                : "Scan complete";
             ScanState = ExplorerScanState.Completed;
             OnPropertyChanged(nameof(CoverageSummary));
             OnPropertyChanged(nameof(CoverageDetail));
@@ -544,14 +605,14 @@ public sealed class StorageExplorerViewModel : ObservableObject
         }
         catch (OperationCanceledException)
         {
-            ProgressLabel = "Mock scan cancelled";
+            ProgressLabel = "Scan cancelled";
             ScanState = ExplorerScanState.Cancelled;
         }
         catch (Exception exception) when (
             exception is StorageSnapshotSourceException or StorageSnapshotValidationException)
         {
             ErrorMessage = exception.Message;
-            ProgressLabel = "Mock scan failed";
+            ProgressLabel = "Scan failed";
             ScanState = ExplorerScanState.Failed;
         }
     }
@@ -564,18 +625,15 @@ public sealed class StorageExplorerViewModel : ObservableObject
             return;
         }
 
-        TreeRoots.Add(BuildTreeItem(Snapshot.Root));
+        TreeRoots.Add(BuildTreeItem(Snapshot, Snapshot.Root));
     }
 
-    private StorageTreeItemViewModel BuildTreeItem(StorageNode node)
-    {
-        IEnumerable<StorageTreeItemViewModel> children = Snapshot!.ChildrenOf(node.Id)
+    private StorageTreeItemViewModel BuildTreeItem(StorageSnapshot snapshot, StorageNode node) =>
+        new(node, parent => snapshot.ChildrenOf(parent.Id)
             .Where(child => child.Kind == StorageNodeKind.Folder)
             .OrderByDescending(child => child.SizeBytes)
             .ThenBy(child => child.Name, StringComparer.OrdinalIgnoreCase)
-            .Select(BuildTreeItem);
-        return new StorageTreeItemViewModel(node, children);
-    }
+            .Select(child => BuildTreeItem(snapshot, child)));
 
     private void RebuildBreadcrumbs()
     {
@@ -693,9 +751,18 @@ public sealed class StorageExplorerViewModel : ObservableObject
         }
     }
 
+    /// <summary>
+    /// Expands only along the path to the target. Walking every branch would collapse rows the user
+    /// left open elsewhere and, worse, materialise the entire folder tree to do it.
+    /// </summary>
     private static void Expand(StorageTreeItemViewModel item, HashSet<Guid> path)
     {
-        item.IsExpanded = path.Contains(item.Id);
+        if (!path.Contains(item.Id))
+        {
+            return;
+        }
+
+        item.IsExpanded = true;
         foreach (StorageTreeItemViewModel child in item.Children)
         {
             Expand(child, path);

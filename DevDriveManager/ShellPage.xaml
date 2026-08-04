@@ -6,23 +6,82 @@
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:local="using:DevDriveManager"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    Background="{ThemeResource SmCanvasBrush}"
     mc:Ignorable="d">
 
-    <NavigationView
-        x:Name="NavView"
-        AutomationProperties.AutomationId="ShellNavView"
-        IsBackButtonVisible="Collapsed"
-        IsSettingsVisible="True"
-        IsTabStop="False"
-        OpenPaneLength="248"
-        PaneDisplayMode="Left"
-        SelectionChanged="NavView_SelectionChanged">
+    <!--
+        The shell: a 64px icon rail beside the room frame.
 
-        <!--
-            The rail is built in code from RoomRegistry rather than declared here, so adding a room
-            is one entry in one list instead of edits in three places that can silently disagree.
-        -->
+        This replaced a NavigationView with a 248px open pane. The pane was not the design — the
+        spec's rail is a 64px column of 56px buttons with the label under the icon, and that
+        density is what makes the rooms reachable without navigation dominating the window. A
+        NavigationView cannot render a label under a compact icon, so the rail is built here.
 
-        <Frame x:Name="ContentFrame" AutomationProperties.AutomationId="ShellContentFrame" />
-    </NavigationView>
+        Automation ids are unchanged (ShellNavView, NavDashboard, ..., SettingsItem), so the change
+        is invisible to the UI suite: the rail is still invoked by id, the ids just sit on Buttons
+        now instead of NavigationViewItems.
+    -->
+
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="64" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <Border
+            Grid.Column="0"
+            Background="{ThemeResource SmCardBrush}"
+            BorderBrush="{ThemeResource SmDividerBrush}"
+            BorderThickness="0,0,1,0">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <!--  Rooms, built from RoomRegistry so adding one stays a single-list edit.  -->
+                <ScrollViewer
+                    Grid.Row="0"
+                    Padding="0,8,0,0"
+                    HorizontalScrollMode="Disabled"
+                    VerticalScrollBarVisibility="Hidden">
+                    <StackPanel
+                        x:Name="RailItems"
+                        AutomationProperties.AutomationId="ShellNavView"
+                        AutomationProperties.Name="Rooms" />
+                </ScrollViewer>
+
+                <!--  Settings is pinned to the bottom: it is a destination, not part of the flow.  -->
+                <StackPanel Grid.Row="1" Padding="0,0,0,8">
+                    <Rectangle
+                        Width="32"
+                        Height="1"
+                        Margin="0,5,0,6"
+                        Fill="{ThemeResource SmDividerBrush}" />
+                    <Button
+                        x:Name="SettingsRailButton"
+                        AutomationProperties.AutomationId="SettingsItem"
+                        AutomationProperties.Name="Settings"
+                        Style="{StaticResource SmRailButtonStyle}"
+                        Click="SettingsRailButton_Click">
+                        <StackPanel Spacing="3">
+                            <FontIcon
+                                FontFamily="{ThemeResource SymbolThemeFontFamily}"
+                                FontSize="19"
+                                Glyph="&#xE713;" />
+                            <TextBlock
+                                HorizontalAlignment="Center"
+                                FontSize="9.5"
+                                Text="Settings" />
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <Frame
+            x:Name="ContentFrame"
+            Grid.Column="1"
+            AutomationProperties.AutomationId="ShellContentFrame" />
+    </Grid>
 </Page>

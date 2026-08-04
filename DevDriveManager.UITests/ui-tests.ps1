@@ -268,6 +268,7 @@ Test-UI "Theme override -> System default (restored)" {
 $auditPages = @(
     @{ nav = "NavDashboard";     anchor = "DashboardScrollViewer" },
     @{ nav = "NavReclaim";       anchor = "ReclaimCategoryList" },
+    @{ nav = "NavSpace";         anchor = "SpaceItemsList" },
     @{ nav = "NavPackageCaches"; anchor = "PackageCachesScrollViewer" },
     @{ nav = "NavBenchmarks";    anchor = "BenchmarksScrollViewer" },
     @{ nav = "NavDrives";        anchor = "DrivesScrollViewer" },

@@ -1,0 +1,546 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Page
+    x:Class="DevDriveManager.Pages.SpacePage"
+    x:Name="SpaceRoot"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:DevDriveManager.Controls"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:local="using:DevDriveManager.Pages"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:storage="using:DevDriveStorage"
+    Background="{ThemeResource SmCanvasBrush}"
+    KeyDown="Page_KeyDown"
+    Loaded="Page_Loaded"
+    mc:Ignorable="d">
+
+    <!--
+        The Space room.
+
+        This is the storage prototype folded into the manager. The ViewModel (StorageExplorerViewModel)
+        and the treemap geometry already lived in DevDriveStorage, so nothing about the interaction
+        model changed in the move — only the chrome, which is now the Storage Manager idiom rather
+        than the prototype's own.
+
+        The one genuinely new idea: the volume strip is the scanner's scope selector. Clicking a
+        volume card starts a live scan of that volume. The strip stops being decoration and becomes
+        the room's primary control.
+    -->
+
+    <Page.Resources>
+        <controls:VolumeAccentRoleToBrushConverter x:Key="VolumeAccent" />
+
+        <!--  A card. Spec: card fill, 1px stroke, 8px radius, clipped.  -->
+        <Style x:Key="SmCardStyle" TargetType="Border">
+            <Setter Property="Background" Value="{ThemeResource SmCardBrush}" />
+            <Setter Property="BorderBrush" Value="{ThemeResource SmStrokeBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="{StaticResource SmCardCornerRadius}" />
+        </Style>
+
+        <!--  A card head. Spec: 38px min-height, 0 14px padding, cardhead fill, bottom divider.  -->
+        <Style x:Key="SmCardHeadStyle" TargetType="Border">
+            <Setter Property="Background" Value="{ThemeResource SmCardHeaderBrush}" />
+            <Setter Property="BorderBrush" Value="{ThemeResource SmDividerBrush}" />
+            <Setter Property="BorderThickness" Value="0,0,0,1" />
+            <Setter Property="Padding" Value="14,0" />
+            <Setter Property="MinHeight" Value="38" />
+        </Style>
+
+        <!--  A chip. Spec: 11.5px dim text, 4px 9px padding, 11px radius, 1px stroke.  -->
+        <Style x:Key="SmChipStyle" TargetType="Border">
+            <Setter Property="BorderBrush" Value="{ThemeResource SmStrokeBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="11" />
+            <Setter Property="Padding" Value="9,3,9,4" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+    </Page.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!--
+            Volume context strip — and the room's scope selector. Selecting a card scans that
+            volume, so the strip is doing real work rather than only reporting.
+        -->
+        <ItemsControl
+            x:Name="VolumeStripHost"
+            Grid.Row="0"
+            Padding="18,11,18,0"
+            AutomationProperties.AutomationId="SpaceVolumeStrip"
+            AutomationProperties.Name="Volumes on this machine, select one to scan"
+            ItemsSource="{x:Bind StripEntries}">
+            <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                    <StackPanel Orientation="Horizontal" Spacing="10" />
+                </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="storage:VolumeStripEntry">
+                    <controls:VolumeCard
+                        AccentBrush="{x:Bind AccentRole, Converter={StaticResource VolumeAccent}}"
+                        IsSystemVolume="{x:Bind IsSystemVolume}"
+                        Selected="VolumeCard_Selected"
+                        Volume="{x:Bind Volume}" />
+                </DataTemplate>
+            </ItemsControl.ItemTemplate>
+        </ItemsControl>
+
+        <!--  The room. Spec: 11px gap, 11px/18px padding, three columns.  -->
+        <Grid
+            Grid.Row="1"
+            Padding="18,11"
+            ColumnSpacing="11">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="236" />
+                <ColumnDefinition Width="*" MinWidth="380" />
+                <ColumnDefinition Width="312" />
+            </Grid.ColumnDefinitions>
+
+            <!--  ================= Sub-rail: physical tree + coverage =================  -->
+            <Border Grid.Column="0" Style="{StaticResource SmCardStyle}">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <Border Grid.Row="0" Style="{StaticResource SmCardHeadStyle}">
+                        <Grid ColumnSpacing="10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock
+                                Grid.Column="0"
+                                VerticalAlignment="Center"
+                                AutomationProperties.AutomationId="SpaceRootName"
+                                Style="{StaticResource SmCardTitleTextStyle}"
+                                Text="{x:Bind ViewModel.ScopeName, Mode=OneWay}" />
+                            <TextBlock
+                                Grid.Column="1"
+                                VerticalAlignment="Center"
+                                Style="{StaticResource SmCardSubTextStyle}"
+                                Text="{x:Bind ViewModel.ScopeSummary, Mode=OneWay}" />
+                        </Grid>
+                    </Border>
+
+                    <ScrollViewer
+                        Grid.Row="1"
+                        Padding="0,5"
+                        VerticalScrollBarVisibility="Auto">
+                        <StackPanel>
+                            <TextBlock
+                                Margin="13,6,13,5"
+                                Style="{StaticResource SmSectionLabelTextStyle}"
+                                Text="PHYSICAL TREE" />
+
+                            <TreeView
+                                x:Name="FolderTree"
+                                AutomationProperties.AutomationId="SpaceFolderTree"
+                                AutomationProperties.Name="Physical folder tree"
+                                CanDragItems="False"
+                                CanReorderItems="False"
+                                ItemsSource="{x:Bind ViewModel.TreeRoots}"
+                                SelectionChanged="FolderTree_SelectionChanged"
+                                SelectionMode="Single">
+                                <TreeView.ItemTemplate>
+                                    <DataTemplate x:DataType="storage:StorageTreeItemViewModel">
+                                        <TreeViewItem
+                                            AutomationProperties.AutomationId="{x:Bind AutomationId}"
+                                            AutomationProperties.Name="{x:Bind AccessibleName}"
+                                            IsExpanded="{x:Bind IsExpanded, Mode=TwoWay}"
+                                            ItemsSource="{x:Bind Children}">
+                                            <Grid ColumnSpacing="8">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock
+                                                    Grid.Column="0"
+                                                    Style="{StaticResource SmTreeNodeTextStyle}"
+                                                    Text="{x:Bind Name}" />
+                                                <TextBlock
+                                                    Grid.Column="1"
+                                                    Style="{StaticResource SmTreeValueTextStyle}"
+                                                    Text="{x:Bind SizeDisplay}" />
+                                            </Grid>
+                                        </TreeViewItem>
+                                    </DataTemplate>
+                                </TreeView.ItemTemplate>
+                            </TreeView>
+
+                            <TextBlock
+                                Margin="13,11,13,5"
+                                Style="{StaticResource SmSectionLabelTextStyle}"
+                                Text="COVERAGE" />
+                            <TextBlock
+                                Margin="13,0,13,10"
+                                AutomationProperties.AutomationId="SpaceCoverageDetail"
+                                Style="{StaticResource SmKeyValueTextStyle}"
+                                Text="{x:Bind CoverageBlock, Mode=OneWay}" />
+                        </StackPanel>
+                    </ScrollViewer>
+                </Grid>
+            </Border>
+
+            <!--  ================= Centre: table over treemap =================  -->
+            <Grid Grid.Column="1" RowSpacing="11">
+                <Grid.RowDefinitions>
+                    <!--
+                        The table is Auto and the treemap takes the slack. The reverse leaves dead
+                        space under a short table, which reads as a rendering bug rather than a
+                        design choice — a rule learned the hard way in the HTML spec.
+                    -->
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" MinHeight="150" />
+                </Grid.RowDefinitions>
+
+                <Border
+                    Grid.Row="0"
+                    SizeChanged="TableCard_SizeChanged"
+                    Style="{StaticResource SmCardStyle}">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <Border
+                            Grid.Row="0"
+                            Padding="14,0,14,0"
+                            Style="{StaticResource SmCardHeadStyle}">
+                            <Grid ColumnSpacing="10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+
+                                <SelectorBar
+                                    x:Name="ViewModeSelector"
+                                    Grid.Column="0"
+                                    VerticalAlignment="Center"
+                                    AutomationProperties.AutomationId="SpaceViewMode"
+                                    AutomationProperties.Name="What the table lists"
+                                    SelectionChanged="ViewModeSelector_SelectionChanged">
+                                    <SelectorBarItem
+                                        x:Name="FoldersModeItem"
+                                        AutomationProperties.AutomationId="SpaceModeFolders"
+                                        IsSelected="True"
+                                        Text="Folders" />
+                                    <SelectorBarItem
+                                        x:Name="LargestFilesModeItem"
+                                        AutomationProperties.AutomationId="SpaceModeLargestFiles"
+                                        Text="Largest files" />
+                                </SelectorBar>
+
+                                <BreadcrumbBar
+                                    x:Name="ScopeBreadcrumbBar"
+                                    Grid.Column="1"
+                                    Margin="6,0,0,0"
+                                    VerticalAlignment="Center"
+                                    AutomationProperties.AutomationId="SpaceBreadcrumb"
+                                    AutomationProperties.Name="Current scope"
+                                    ItemClicked="ScopeBreadcrumbBar_ItemClicked"
+                                    ItemsSource="{x:Bind ViewModel.Breadcrumbs}">
+                                    <BreadcrumbBar.ItemTemplate>
+                                        <DataTemplate x:DataType="storage:StorageNode">
+                                            <TextBlock Style="{StaticResource SmCardSubTextStyle}" Text="{x:Bind Name}" />
+                                        </DataTemplate>
+                                    </BreadcrumbBar.ItemTemplate>
+                                </BreadcrumbBar>
+
+                                <Border
+                                    Grid.Column="2"
+                                    Style="{StaticResource SmChipStyle}"
+                                    Visibility="{x:Bind local:SpacePage.BoolToVisibility(ViewModel.HasSelection), Mode=OneWay}">
+                                    <TextBlock
+                                        AutomationProperties.AutomationId="SpaceSortChip"
+                                        Style="{StaticResource SmCardSubTextStyle}"
+                                        Text="{x:Bind ViewModel.ModeCaption, Mode=OneWay}" />
+                                </Border>
+                            </Grid>
+                        </Border>
+
+                        <!--  Column header. Widths are shared with the row template below.  -->
+                        <Border
+                            Grid.Row="1"
+                            Padding="14,7,14,7"
+                            BorderBrush="{ThemeResource SmDividerBrush}"
+                            BorderThickness="0,0,0,1">
+                            <Grid ColumnSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="{x:Bind NameColumnWidth, Mode=OneWay}" />
+                                    <ColumnDefinition Width="84" />
+                                    <ColumnDefinition Width="70" />
+                                    <ColumnDefinition Width="74" />
+                                    <ColumnDefinition Width="48" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock
+                                    Grid.Column="0"
+                                    Style="{StaticResource SmColumnHeaderTextStyle}"
+                                    Text="NAME" />
+                                <TextBlock
+                                    Grid.Column="1"
+                                    HorizontalAlignment="Right"
+                                    Style="{StaticResource SmColumnHeaderTextStyle}"
+                                    Text="SIZE ON DISK" />
+                                <TextBlock
+                                    Grid.Column="2"
+                                    HorizontalAlignment="Right"
+                                    Style="{StaticResource SmColumnHeaderTextStyle}"
+                                    Text="APPARENT" />
+                                <TextBlock
+                                    Grid.Column="3"
+                                    HorizontalAlignment="Right"
+                                    Style="{StaticResource SmColumnHeaderTextStyle}"
+                                    Text="ITEMS" />
+                                <TextBlock
+                                    Grid.Column="4"
+                                    HorizontalAlignment="Right"
+                                    Style="{StaticResource SmColumnHeaderTextStyle}"
+                                    Text="SHARE" />
+                            </Grid>
+                        </Border>
+
+                        <ListView
+                            x:Name="ItemsList"
+                            Grid.Row="2"
+                            MaxHeight="268"
+                            AutomationProperties.AutomationId="SpaceItemsList"
+                            AutomationProperties.Name="Items in the current scope"
+                            DoubleTapped="ItemsList_DoubleTapped"
+                            ItemsSource="{x:Bind ViewModel.VisibleItems}"
+                            SelectedItem="{x:Bind ViewModel.SelectedRow, Mode=TwoWay}"
+                            SelectionMode="Single">
+                            <ListView.ItemContainerStyle>
+                                <Style TargetType="ListViewItem">
+                                    <Setter Property="Padding" Value="0" />
+                                    <Setter Property="MinHeight" Value="0" />
+                                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                </Style>
+                            </ListView.ItemContainerStyle>
+                            <ListView.ItemTemplate>
+                                <DataTemplate x:DataType="storage:StorageRowViewModel">
+                                    <Grid
+                                        Padding="14,7,14,7"
+                                        AutomationProperties.AutomationId="{x:Bind AutomationId}"
+                                        AutomationProperties.Name="{x:Bind AccessibleDescription}"
+                                        ColumnSpacing="12">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="{Binding NameColumnWidth, ElementName=SpaceRoot}" />
+                                            <ColumnDefinition Width="84" />
+                                            <ColumnDefinition Width="70" />
+                                            <ColumnDefinition Width="74" />
+                                            <ColumnDefinition Width="48" />
+                                        </Grid.ColumnDefinitions>
+
+                                        <!--
+                                            A Grid, not a horizontal StackPanel. A StackPanel hands
+                                            its children an unconstrained width, so the name cell
+                                            never learns the column width, TextTrimming never
+                                            engages, and long names are hard clipped without an
+                                            ellipsis.
+                                        -->
+                                        <Grid Grid.Column="0" ColumnSpacing="9">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <!--  The swatch ties the row to its treemap rectangle.  -->
+                                            <Rectangle
+                                                Width="9"
+                                                Height="9"
+                                                VerticalAlignment="Center"
+                                                Fill="{x:Bind local:SpacePage.PaletteBrush(ColorIndex)}"
+                                                RadiusX="2"
+                                                RadiusY="2" />
+                                            <TextBlock
+                                                Grid.Column="1"
+                                                Style="{StaticResource SmCellTextStyle}"
+                                                Text="{x:Bind Name}"
+                                                ToolTipService.ToolTip="{x:Bind PhysicalPath}" />
+                                        </Grid>
+
+                                        <TextBlock
+                                            Grid.Column="1"
+                                            Style="{StaticResource SmNumericCellTextStyle}"
+                                            Text="{x:Bind SizeDisplay}" />
+                                        <TextBlock
+                                            Grid.Column="2"
+                                            Style="{StaticResource SmNumericCellTextStyle}"
+                                            Text="{x:Bind LogicalDisplay}" />
+                                        <TextBlock
+                                            Grid.Column="3"
+                                            Style="{StaticResource SmNumericCellTextStyle}"
+                                            Text="{x:Bind ItemCountDisplay}" />
+                                        <TextBlock
+                                            Grid.Column="4"
+                                            Style="{StaticResource SmNumericCellTextStyle}"
+                                            Text="{x:Bind ShareDisplay}" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ListView.ItemTemplate>
+                        </ListView>
+                    </Grid>
+                </Border>
+
+                <!--  ================= Treemap =================  -->
+                <Border Grid.Row="1" Style="{StaticResource SmCardStyle}">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+
+                        <Border Grid.Row="0" Style="{StaticResource SmCardHeadStyle}">
+                            <Grid ColumnSpacing="10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock
+                                    Grid.Column="0"
+                                    VerticalAlignment="Center"
+                                    Style="{StaticResource SmCardTitleTextStyle}"
+                                    Text="Treemap" />
+                                <TextBlock
+                                    Grid.Column="1"
+                                    VerticalAlignment="Center"
+                                    Style="{StaticResource SmCardSubTextStyle}"
+                                    Text="area is size on disk" />
+                                <Border Grid.Column="2" Style="{StaticResource SmChipStyle}">
+                                    <TextBlock Style="{StaticResource SmCardSubTextStyle}" Text="click to drill in" />
+                                </Border>
+                            </Grid>
+                        </Border>
+
+                        <controls:TreemapPane
+                            x:Name="StorageTreemap"
+                            Grid.Row="1"
+                            Margin="9"
+                            AutomationProperties.AutomationId="SpaceTreemap"
+                            AutomationProperties.Name="Treemap of the current scope"
+                            NodeInvoked="StorageTreemap_NodeInvoked"
+                            Rows="{x:Bind ViewModel.VisibleItems}"
+                            SelectedRow="{x:Bind ViewModel.SelectedRow, Mode=OneWay}" />
+                    </Grid>
+                </Border>
+
+                <!--
+                    Scan states sit above the centre column rather than replacing it, so the room's
+                    shape never changes between "no scan", "scanning", and "scanned". A layout that
+                    reflows on every state change is what makes a scanner feel unstable.
+                -->
+                <Border
+                    Grid.Row="0"
+                    Grid.RowSpan="2"
+                    Background="{ThemeResource SmCanvasBrush}"
+                    Style="{StaticResource SmCardStyle}"
+                    Visibility="{x:Bind local:SpacePage.BoolToVisibility(ShowOverlay), Mode=OneWay}">
+                    <StackPanel
+                        MaxWidth="420"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        Spacing="12">
+                        <TextBlock
+                            HorizontalAlignment="Center"
+                            AutomationProperties.AutomationId="SpaceOverlayTitle"
+                            Style="{StaticResource SmMetricValueTextStyle}"
+                            Text="{x:Bind OverlayTitle, Mode=OneWay}"
+                            TextAlignment="Center" />
+                        <TextBlock
+                            HorizontalAlignment="Center"
+                            AutomationProperties.AutomationId="SpaceOverlayDetail"
+                            Style="{StaticResource SmKeyValueTextStyle}"
+                            Text="{x:Bind OverlayDetail, Mode=OneWay}"
+                            TextAlignment="Center" />
+
+                        <ProgressBar
+                            Width="320"
+                            AutomationProperties.AutomationId="SpaceScanProgress"
+                            IsIndeterminate="{x:Bind local:SpacePage.IsIndeterminate(ViewModel.Progress), Mode=OneWay}"
+                            Maximum="1"
+                            Value="{x:Bind ViewModel.Progress, Mode=OneWay}"
+                            Visibility="{x:Bind local:SpacePage.BoolToVisibility(ViewModel.IsScanning), Mode=OneWay}" />
+
+                        <StackPanel
+                            HorizontalAlignment="Center"
+                            Orientation="Horizontal"
+                            Spacing="8">
+                            <Button
+                                AutomationProperties.AutomationId="SpaceCancelScan"
+                                Content="Cancel scan"
+                                Visibility="{x:Bind local:SpacePage.BoolToVisibility(ViewModel.IsScanning), Mode=OneWay}"
+                                Click="CancelScanButton_Click" />
+                            <Button
+                                AutomationProperties.AutomationId="SpaceRetryScan"
+                                Content="Try again"
+                                Style="{StaticResource AccentButtonStyle}"
+                                Visibility="{x:Bind local:SpacePage.BoolToVisibility(ViewModel.HasError), Mode=OneWay}"
+                                Click="RetryScanButton_Click" />
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <!--  ================= Inspector =================  -->
+            <Border Grid.Column="2" Style="{StaticResource SmCardStyle}">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <Border Grid.Row="0" Style="{StaticResource SmCardHeadStyle}">
+                        <TextBlock
+                            VerticalAlignment="Center"
+                            AutomationProperties.AutomationId="SpaceInspectorTitle"
+                            Style="{StaticResource SmCardTitleTextStyle}"
+                            Text="{x:Bind InspectorTitle, Mode=OneWay}" />
+                    </Border>
+
+                    <ScrollViewer Grid.Row="1" Padding="15,13">
+                        <StackPanel Spacing="10">
+                            <TextBlock
+                                AutomationProperties.AutomationId="SpaceInspectorPath"
+                                Style="{StaticResource SmKeyValueTextStyle}"
+                                Text="{x:Bind InspectorPath, Mode=OneWay}" />
+
+                            <ItemsControl ItemsSource="{x:Bind InspectorFacts, Mode=OneWay}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <StackPanel Spacing="9" />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="local:InspectorFact">
+                                        <StackPanel Spacing="1">
+                                            <TextBlock Style="{StaticResource SmMetricLabelTextStyle}" Text="{x:Bind Label}" />
+                                            <TextBlock Style="{StaticResource SmCellTextStyle}" Text="{x:Bind Value}" />
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <controls:RoomStatusBar
+            x:Name="SpaceStatusBar"
+            Grid.Row="2"
+            AutomationProperties.AutomationId="SpaceStatusBar"
+            AutomationProperties.Name="Space status"
+            Hints="Enter drill in · Alt+Up back · F5 rescan" />
+    </Grid>
+</Page>

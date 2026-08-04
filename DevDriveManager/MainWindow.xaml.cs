@@ -27,11 +27,18 @@ public sealed partial class MainWindow : Window
 
         AppWindow.SetIcon("Assets/AppIcon.ico");
 
-        // Size derived from the new NavigationView shell (248px pane + content): ~1180 x 820 DIPs.
-        // AppWindow.Resize takes physical pixels, so scale by the window DPI.
+        // The Storage Manager rooms are drawn against a 1600x900 DIP canvas: a 64px rail, a 236px
+        // subrail, a 312px inspector, and whatever is left for the centre. Below about 1400 DIPs the
+        // centre column gets squeezed hard enough that the Space table has to start dropping
+        // columns, so ask for the full design width and only give it up when the display cannot
+        // hold it. AppWindow.Resize takes physical pixels, hence the DPI scaling.
         nint hwnd = Win32Interop.GetWindowFromWindowId(AppWindow.Id);
         double scale = GetDpiForWindow(hwnd) / 96.0;
-        AppWindow.Resize(new SizeInt32((int)(1180 * scale), (int)(820 * scale)));
+
+        RectInt32 work = DisplayArea.GetFromWindowId(AppWindow.Id, DisplayAreaFallback.Primary).WorkArea;
+        int width = Math.Min((int)(1600 * scale), (int)(work.Width * 0.94));
+        int height = Math.Min((int)(900 * scale), (int)(work.Height * 0.94));
+        AppWindow.Resize(new SizeInt32(width, height));
 
         // Navigate the root frame to the navigation shell on startup.
         RootFrame.Navigate(typeof(ShellPage));

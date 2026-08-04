@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!--
+    Default styles for the Storage Manager custom controls.
+
+    Only implicit (unkeyed) control styles belong here. Generic.xaml is consulted for a custom
+    control's default template; keyed resources put here are not reliably resolvable from pages, so
+    the shared brushes, geometry, and type ramp live in StorageManagerTheme.xaml, which is merged
+    into Application.Resources. Lookups from this file still chain up to that dictionary.
+-->
+<ResourceDictionary
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:DevDriveManager.Controls">
+
+    <Style TargetType="controls:CapacityBar">
+        <Setter Property="Height" Value="{StaticResource SmCapacityBarHeight}" />
+        <Setter Property="HorizontalAlignment" Value="Stretch" />
+        <Setter Property="IsTabStop" Value="False" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="controls:CapacityBar">
+                    <!--  The track is the free space, so an empty volume reads as empty rather than
+                          as a bar full of a "free" colour.  -->
+                    <Border
+                        Background="{ThemeResource SmDividerBrush}"
+                        CornerRadius="{StaticResource SmPillCornerRadius}">
+                        <Grid x:Name="PART_Root" />
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+</ResourceDictionary>

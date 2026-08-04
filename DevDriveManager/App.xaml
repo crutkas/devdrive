@@ -8,7 +8,7 @@
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
                 <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
-                <!-- Other merged dictionaries here -->
+                <ResourceDictionary Source="ms-appx:///Themes/StorageManagerTheme.xaml" />
             </ResourceDictionary.MergedDictionaries>
             <!--  App-level drive colours, used by BOTH the perf bars (via ThemeResource) and the location
                   chips (resolved through Application.Current.Resources in UiHelpers). They are ONE

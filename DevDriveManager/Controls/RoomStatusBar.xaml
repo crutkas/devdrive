@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<UserControl
+    x:Class="DevDriveManager.Controls.RoomStatusBar"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:DevDriveManager.Controls"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    Height="{StaticResource SmStatusBarHeight}"
+    d:DesignWidth="900"
+    mc:Ignorable="d">
+
+    <UserControl.Resources>
+        <controls:StatusEmphasisToBrushConverter x:Key="EmphasisBrush" />
+        <controls:StatusEmphasisToWeightConverter x:Key="EmphasisWeight" />
+    </UserControl.Resources>
+
+    <!--
+        The bar every room ends with. Facts on the left, keyboard hints pushed right.
+
+        It is a Border with a top divider rather than a bottom-docked panel with its own background
+        block, because in the design the bar reads as the closing edge of the room rather than as a
+        separate surface sitting under it.
+    -->
+    <Border
+        Padding="18,0"
+        BorderBrush="{ThemeResource SmDividerBrush}"
+        BorderThickness="0,1,0,0"
+        Background="{ThemeResource SmCardBrush}">
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <ItemsControl
+                x:Name="PartFacts"
+                VerticalAlignment="Center"
+                ItemsSource="{x:Bind Facts, Mode=OneWay}">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <StackPanel Orientation="Horizontal" Spacing="16" />
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="controls:StatusFact">
+                        <TextBlock
+                            FontWeight="{x:Bind Emphasis, Converter={StaticResource EmphasisWeight}}"
+                            Foreground="{x:Bind Emphasis, Converter={StaticResource EmphasisBrush}}"
+                            Style="{StaticResource SmStatusTextStyle}"
+                            Text="{x:Bind Text}" />
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <TextBlock
+                x:Name="PartHints"
+                Grid.Column="1"
+                VerticalAlignment="Center"
+                Style="{StaticResource SmStatusTextStyle}"
+                Text="{x:Bind Hints, Mode=OneWay}" />
+        </Grid>
+    </Border>
+</UserControl>

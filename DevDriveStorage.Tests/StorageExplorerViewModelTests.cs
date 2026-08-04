@@ -203,6 +203,101 @@ public sealed class StorageExplorerViewModelTests
         Assert.IsFalse(viewModel.CanNavigateUp);
     }
 
+    /// <summary>
+    /// The live scanner walks the tree on a thread-pool thread, so its progress reports arrive off
+    /// the thread that started the scan. Applying them there would raise property change
+    /// notifications off the UI thread and drive bindings illegally, so they must be routed through
+    /// the synchronization context that started the scan.
+    /// </summary>
+    [TestMethod]
+    public async Task OffThreadProgressIsMarshalledThroughTheStartingContext()
+    {
+        SynchronizationContext? previous = SynchronizationContext.Current;
+        var context = new CountingSynchronizationContext();
+        SynchronizationContext.SetSynchronizationContext(context);
+        try
+        {
+            var viewModel = new StorageExplorerViewModel(
+                new OffThreadProgressSource(StorageTestBuilder.Snapshot()));
+
+            await viewModel.RefreshAsync();
+
+            Assert.IsGreaterThan(
+                0,
+                context.ProgressPosts,
+                "an off-thread progress report must be posted to the starting context");
+            Assert.AreEqual(ExplorerScanState.Completed, viewModel.ScanState);
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(previous);
+        }
+    }
+
+    /// <summary>
+    /// A source that reports on the calling thread must still be applied inline, so synchronous
+    /// sources and tests keep deterministic report ordering rather than racing a posted callback.
+    /// </summary>
+    [TestMethod]
+    public async Task SameThreadProgressIsAppliedWithoutPosting()
+    {
+        SynchronizationContext? previous = SynchronizationContext.Current;
+        var context = new CountingSynchronizationContext();
+        SynchronizationContext.SetSynchronizationContext(context);
+        try
+        {
+            var viewModel = new StorageExplorerViewModel(
+                new SequenceSource(StorageTestBuilder.Snapshot()));
+
+            await viewModel.RefreshAsync();
+
+            Assert.AreEqual(
+                0,
+                context.ProgressPosts,
+                "a same-thread report must be applied inline, not posted");
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(previous);
+        }
+    }
+
+    /// <summary>
+    /// Counts posts that carry a progress payload. Everything is forwarded to the thread pool so
+    /// awaited continuations still run and the test cannot deadlock on an unpumped queue.
+    /// </summary>
+    private sealed class CountingSynchronizationContext : SynchronizationContext
+    {
+        private int _progressPosts;
+
+        public int ProgressPosts => Volatile.Read(ref _progressPosts);
+
+        public override void Post(SendOrPostCallback callback, object? state)
+        {
+            if (state is ValueTuple<Action<StorageScanProgress>, StorageScanProgress>)
+            {
+                Interlocked.Increment(ref _progressPosts);
+            }
+
+            ThreadPool.QueueUserWorkItem(_ => callback(state));
+        }
+    }
+
+    private sealed class OffThreadProgressSource(StorageSnapshot snapshot) : IStorageSnapshotSource
+    {
+        public async Task<StorageSnapshot> GetSnapshotAsync(
+            StorageSnapshotRequest request,
+            IProgress<StorageScanProgress>? progress,
+            CancellationToken cancellationToken)
+        {
+            await Task.Run(
+                () => progress?.Report(new StorageScanProgress(0.5, "Halfway", 1, 2)),
+                cancellationToken);
+
+            return snapshot;
+        }
+    }
+
     private sealed class SequenceSource(params StorageSnapshot[] snapshots) : IStorageSnapshotSource
     {
         private int _index;

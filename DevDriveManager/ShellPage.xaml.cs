@@ -7,8 +7,10 @@ using DevDriveManager.Views;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Navigation;
 using Windows.System;
+using Rectangle = Microsoft.UI.Xaml.Shapes.Rectangle;
 
 namespace DevDriveManager;
 
@@ -48,9 +50,9 @@ public sealed partial class ShellPage : Page
     }
 
     /// <summary>
-    /// Builds the rail from <see cref="RoomRegistry"/>, inserting a separator wherever the section
-    /// changes. The section break is load-bearing: crossing it is what tells the user they have moved
-    /// between subsystems rather than just to another list of files.
+    /// Builds the rail from <see cref="RoomRegistry"/>, inserting a divider and a section caption
+    /// wherever the section changes. The section break is load-bearing: crossing it is what tells
+    /// the user they have moved between subsystems rather than just to another list of files.
     /// </summary>
     private void BuildRail()
     {
@@ -58,43 +60,143 @@ public sealed partial class ShellPage : Page
 
         foreach (Room room in RoomRegistry.All)
         {
-            if (previous is not null && room.Section != previous)
+            if (room.Section != previous)
             {
-                NavView.MenuItems.Add(new NavigationViewItemSeparator());
+                if (previous is not null)
+                {
+                    RailItems.Children.Add(new Rectangle
+                    {
+                        Width = 32,
+                        Height = 1,
+                        Margin = new Thickness(0, 8, 0, 2),
+                        Fill = Resolve<Brush>("SmDividerBrush"),
+                    });
+                }
+
+                // Utility is the "actions" bucket below the dividers; captioning it would name
+                // something the user does not think of as a place.
+                if (room.Section != RoomSection.Utility)
+                {
+                    RailItems.Children.Add(new TextBlock
+                    {
+                        Text = room.Section.ToString().ToUpperInvariant(),
+                        Margin = new Thickness(0, 4, 0, 3),
+                        Style = Resolve<Style>("SmRailSectionHeaderTextStyle"),
+                    });
+                }
             }
 
-            var item = new NavigationViewItem
-            {
-                Content = room.Title,
-                Tag = room.Tag,
-                Icon = new FontIcon { Glyph = room.Glyph },
-            };
-            AutomationProperties.SetAutomationId(item, room.AutomationId);
-
-            NavView.MenuItems.Add(item);
+            RailItems.Children.Add(CreateRailButton(room));
             previous = room.Section;
         }
     }
 
+    private Button CreateRailButton(Room room)
+    {
+        var content = new StackPanel { Spacing = 3 };
+        content.Children.Add(new FontIcon
+        {
+            Glyph = room.Glyph,
+            FontSize = 19,
+        });
+        content.Children.Add(new TextBlock
+        {
+            Text = RailLabel(room.Title),
+            FontSize = 9.5,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+        });
+
+        var button = new Button
+        {
+            Content = content,
+            Tag = room.Tag,
+            Style = Resolve<Style>("SmRailButtonStyle"),
+        };
+
+        AutomationProperties.SetAutomationId(button, room.AutomationId);
+
+        // The rail label is abbreviated to fit 56px, so the accessible name carries the full title
+        // and a screen reader never hears "Caches" for a room called "Package caches".
+        AutomationProperties.SetName(button, room.Title);
+        ToolTipService.SetToolTip(button, room.Title);
+        button.Click += RailButton_Click;
+        return button;
+    }
+
+    /// <summary>
+    /// Shortens a room title to something that fits a 56px button without ellipsing. Only titles
+    /// that genuinely do not fit are shortened; the full title stays on the tooltip and the
+    /// accessible name.
+    /// </summary>
+    private static string RailLabel(string title) => title switch
+    {
+        "Package caches" => "Caches",
+        "Create Dev Drive" => "Create",
+        _ => title,
+    };
+
+    private T Resolve<T>(string key)
+        where T : class =>
+        Application.Current.Resources[key] as T
+            ?? throw new InvalidOperationException($"Missing shell resource '{key}'.");
+
     /// <summary>Select a top-level nav item by its tag (e.g. "caches"), updating the rail and the content frame.</summary>
     public void SelectNavItem(string tag)
     {
-        foreach (object item in NavView.MenuItems)
+        foreach (Button button in RailItems.Children.OfType<Button>())
         {
-            if (item is NavigationViewItem nvi && (nvi.Tag as string) == tag)
+            if ((button.Tag as string) == tag)
             {
-                NavView.SelectedItem = nvi;
+                SelectRailButton(button);
+                Navigate(tag);
                 return;
             }
         }
     }
 
+    /// <summary>
+    /// Moves the selected state to one rail button. Selection is visual state plus an automation
+    /// item status, because the accent bar alone says nothing to a screen reader.
+    /// </summary>
+    private void SelectRailButton(Button? selected)
+    {
+        foreach (Button button in RailItems.Children.OfType<Button>().Append(SettingsRailButton))
+        {
+            bool isSelected = ReferenceEquals(button, selected);
+            VisualStateManager.GoToState(button, isSelected ? "Selected" : "Unselected", false);
+            button.Foreground = Resolve<Brush>(isSelected ? "SmTextBrush" : "SmDimBrush");
+            AutomationProperties.SetItemStatus(button, isSelected ? "Selected" : string.Empty);
+        }
+    }
+
+    private void RailButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: string tag } button)
+        {
+            SelectRailButton(button);
+            Navigate(tag);
+        }
+    }
+
+    private void SettingsRailButton_Click(object sender, RoutedEventArgs e)
+    {
+        SelectRailButton(SettingsRailButton);
+        if (ContentFrame.CurrentSourcePageType != typeof(SettingsPage))
+        {
+            ContentFrame.Navigate(
+                typeof(SettingsPage),
+                null,
+                new Microsoft.UI.Xaml.Media.Animation.SuppressNavigationTransitionInfo());
+        }
+    }
+
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
-        // Land on the Dashboard and kick off the one-time load.
-        if (NavView.MenuItems.Count > 0 && NavView.SelectedItem is null)
+        // Land on the default room and kick off the one-time load.
+        if (ContentFrame.Content is null)
         {
-            NavView.SelectedItem = NavView.MenuItems[0];
+            SelectNavItem(RoomRegistry.Default.Tag);
         }
 
         if (!ViewModel.HasLoaded)
@@ -113,20 +215,6 @@ public sealed partial class ShellPage : Page
         }
     }
 
-    private void NavView_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
-    {
-        if (args.IsSettingsSelected)
-        {
-            ContentFrame.Navigate(typeof(SettingsPage));
-            return;
-        }
-
-        if (args.SelectedItem is NavigationViewItem { Tag: string tag })
-        {
-            Navigate(tag);
-        }
-    }
-
     private void Navigate(string tag)
     {
         Type? target = RoomRegistry.Find(tag)?.PageType;
@@ -138,17 +226,7 @@ public sealed partial class ShellPage : Page
     }
 
     /// <summary>"Create Dev Drive" raised from a page (e.g. the Dashboard empty state): select the nav item.</summary>
-    private void OnNavigateToCreateRequested()
-    {
-        foreach (object item in NavView.MenuItems)
-        {
-            if (item is NavigationViewItem { Tag: "create" } createItem)
-            {
-                NavView.SelectedItem = createItem;
-                return;
-            }
-        }
-    }
+    private void OnNavigateToCreateRequested() => SelectNavItem("create");
 
     /// <summary>Launches a shell URI (e.g. <c>ms-settings:storage</c>). Best-effort and safe.</summary>
     private async void OnLaunchUriRequested(string uri)

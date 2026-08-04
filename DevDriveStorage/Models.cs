@@ -226,6 +226,7 @@ public sealed class StorageSnapshot
     public const int CurrentSchemaVersion = 1;
 
     private readonly ImmutableDictionary<Guid, StorageNode> _nodesById;
+    private readonly Dictionary<Guid, StorageNode[]> _childrenByParent;
 
     public StorageSnapshot(
         int schemaVersion,
@@ -299,6 +300,49 @@ public sealed class StorageSnapshot
         Coverage = coverage ?? throw new ArgumentNullException(nameof(coverage));
         Nodes = nodes;
         _nodesById = builder.ToImmutable();
+        _childrenByParent = BuildChildIndex(nodes);
+    }
+
+    /// <summary>
+    /// Groups children under their parent once, in the display order <see cref="ChildrenOf"/>
+    /// promises. Without this every child lookup is a full scan of <see cref="Nodes"/>, which is
+    /// invisible on a small snapshot and quadratic on a real volume with a million nodes.
+    /// </summary>
+    private static Dictionary<Guid, StorageNode[]> BuildChildIndex(ImmutableArray<StorageNode> nodes)
+    {
+        var grouped = new Dictionary<Guid, List<StorageNode>>();
+        foreach (StorageNode node in nodes)
+        {
+            if (node.ParentId is not Guid parentId)
+            {
+                continue;
+            }
+
+            if (!grouped.TryGetValue(parentId, out List<StorageNode>? siblings))
+            {
+                siblings = [];
+                grouped[parentId] = siblings;
+            }
+
+            siblings.Add(node);
+        }
+
+        var index = new Dictionary<Guid, StorageNode[]>(grouped.Count);
+        foreach ((Guid parentId, List<StorageNode> siblings) in grouped)
+        {
+            siblings.Sort(static (left, right) =>
+            {
+                int byKind = (right.Kind == StorageNodeKind.Folder).CompareTo(
+                    left.Kind == StorageNodeKind.Folder);
+                return byKind != 0
+                    ? byKind
+                    : string.Compare(left.Name, right.Name, StringComparison.OrdinalIgnoreCase);
+            });
+
+            index[parentId] = [.. siblings];
+        }
+
+        return index;
     }
 
     public int SchemaVersion { get; }
@@ -322,13 +366,33 @@ public sealed class StorageSnapshot
     public StorageNode? Find(Guid id) => _nodesById.GetValueOrDefault(id);
 
     public IReadOnlyList<StorageNode> ChildrenOf(Guid parentId) =>
-        Nodes.Where(node => node.ParentId == parentId)
-            .OrderByDescending(node => node.Kind == StorageNodeKind.Folder)
-            .ThenBy(node => node.Name, StringComparer.OrdinalIgnoreCase)
-            .ToArray();
+        _childrenByParent.GetValueOrDefault(parentId, []);
 
-    public IReadOnlyList<StorageNode> DescendantsOf(Guid parentId) =>
-        Nodes.Where(node => IsDescendantOf(node, parentId)).ToArray();
+    /// <summary>
+    /// Walks the subtree under <paramref name="parentId"/>. Descending from the parent costs the
+    /// size of the subtree; testing every node's ancestry instead costs the whole snapshot times
+    /// its depth, which on a real volume never finishes.
+    /// </summary>
+    public IReadOnlyList<StorageNode> DescendantsOf(Guid parentId)
+    {
+        var result = new List<StorageNode>();
+        var pending = new Stack<Guid>();
+        pending.Push(parentId);
+
+        while (pending.Count > 0)
+        {
+            foreach (StorageNode child in ChildrenOf(pending.Pop()))
+            {
+                result.Add(child);
+                if (child.Kind == StorageNodeKind.Folder)
+                {
+                    pending.Push(child.Id);
+                }
+            }
+        }
+
+        return result;
+    }
 
     public IReadOnlyList<StorageNode> AncestorsAndSelf(Guid id)
     {
@@ -342,22 +406,6 @@ public sealed class StorageSnapshot
 
         result.Reverse();
         return result;
-    }
-
-    private bool IsDescendantOf(StorageNode node, Guid ancestorId)
-    {
-        Guid? parentId = node.ParentId;
-        while (parentId is Guid id)
-        {
-            if (id == ancestorId)
-            {
-                return true;
-            }
-
-            parentId = Find(id)?.ParentId;
-        }
-
-        return false;
     }
 }
 

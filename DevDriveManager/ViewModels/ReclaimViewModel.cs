@@ -3,6 +3,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using DevDriveCore;
 using DevDriveReclaim;
+using DevDriveStorage;
 
 namespace DevDriveManager.ViewModels;
 
@@ -11,14 +12,19 @@ namespace DevDriveManager.ViewModels;
 /// </summary>
 /// <remarks>
 /// Sizes are <see cref="long"/> throughout the reclaim subsystem while
-/// <see cref="ByteSizeFormatter"/> takes <see cref="ulong"/>. Clamping at zero here keeps that
-/// conversion in one place rather than scattering casts through the bindings, where a stray negative
-/// would wrap to an absurd number instead of showing "0 B".
+/// <see cref="DevDriveCore.ByteSizeFormatter"/> takes <see cref="ulong"/>. Clamping at zero here
+/// keeps that conversion in one place rather than scattering casts through the bindings, where a
+/// stray negative would wrap to an absurd number instead of showing "0 B".
+/// <para>
+/// The formatter is named in full because <c>DevDriveStorage</c> has one too, and the two disagree:
+/// storage counts in powers of 1000, core in powers of 1024. Reclaim totals and the volume bars sit
+/// side by side in this room, so they must come from the same one.
+/// </para>
 /// </remarks>
 internal static class ReclaimFormat
 {
     public static string Bytes(long value) =>
-        ByteSizeFormatter.Format(value <= 0 ? 0UL : (ulong)value);
+        DevDriveCore.ByteSizeFormatter.Format(value <= 0 ? 0UL : (ulong)value);
 }
 
 /// <summary>One selectable candidate row.</summary>
@@ -116,7 +122,24 @@ public sealed partial class ReclaimCategoryViewModel(ReclaimCategory category) :
 
     public string AutomationId => $"ReclaimCategory_{Category.Id}";
 
-    partial void OnTotalBytesChanged(long value) => OnPropertyChanged(nameof(TotalText));
+    /// <summary>
+    /// What a screen reader announces for this row.
+    /// </summary>
+    /// <remarks>
+    /// Without it the list item falls back to <c>ToString()</c> and announces
+    /// "DevDriveManager.ViewModels.ReclaimCategoryViewModel" — the rail is unusable without sight.
+    /// The size is included because it is the number that decides whether the category is worth
+    /// opening, and it is otherwise carried only by a sibling TextBlock the item's name never reaches.
+    /// </remarks>
+    public string AutomationName => $"{Title}, {StatusText}, {TotalText}";
+
+    partial void OnTotalBytesChanged(long value)
+    {
+        OnPropertyChanged(nameof(TotalText));
+        OnPropertyChanged(nameof(AutomationName));
+    }
+
+    partial void OnStatusTextChanged(string value) => OnPropertyChanged(nameof(AutomationName));
 }
 
 /// <summary>
@@ -133,6 +156,7 @@ public sealed partial class ReclaimViewModel : ObservableObject
 {
     private readonly ReclaimEngine _engine;
     private readonly Func<ReclaimScanContext> _contextFactory;
+    private readonly IVolumeProvider _volumeProvider;
     private CancellationTokenSource? _scanCts;
 
     /// <summary>
@@ -147,10 +171,14 @@ public sealed partial class ReclaimViewModel : ObservableObject
     {
     }
 
-    public ReclaimViewModel(ReclaimEngine engine, Func<ReclaimScanContext> contextFactory)
+    public ReclaimViewModel(
+        ReclaimEngine engine,
+        Func<ReclaimScanContext> contextFactory,
+        IVolumeProvider? volumeProvider = null)
     {
         _engine = engine;
         _contextFactory = contextFactory;
+        _volumeProvider = volumeProvider ?? new SystemVolumeProvider();
 
         foreach (ReclaimCategory category in engine.Categories)
         {
@@ -158,6 +186,7 @@ public sealed partial class ReclaimViewModel : ObservableObject
         }
 
         SelectedCategory = Categories.FirstOrDefault();
+        RefreshVolumeStrip();
     }
 
     public ObservableCollection<ReclaimCategoryViewModel> Categories { get; } = [];
@@ -193,6 +222,13 @@ public sealed partial class ReclaimViewModel : ObservableObject
     public string FoundBytesText => ReclaimFormat.Bytes(FoundBytes);
 
     public ObservableCollection<ReclaimVolumeImpact> VolumeImpacts { get; } = [];
+
+    /// <summary>
+    /// The volume context strip. Reclaimable bytes track the current <i>selection</i>, not everything
+    /// found, so the bars answer "what will this machine look like if I press the button" rather than
+    /// "what did the scan turn up" — the latter is already the headline number.
+    /// </summary>
+    public ObservableCollection<VolumeStripEntry> VolumeStripEntries { get; } = [];
 
     public IEnumerable<ReclaimRowViewModel> AllRows => Categories.SelectMany(c => c.Rows);
 
@@ -378,6 +414,40 @@ public sealed partial class ReclaimViewModel : ObservableObject
         foreach ((string volume, long bytes) in byVolume.OrderBy(k => k.Key, StringComparer.OrdinalIgnoreCase))
         {
             VolumeImpacts.Add(new ReclaimVolumeImpact(volume, bytes));
+        }
+
+        RefreshVolumeStrip(byVolume);
+    }
+
+    /// <summary>
+    /// Rebuilds the context strip. Volumes are re-enumerated each time rather than cached because a
+    /// reclaim run changes free space, and a strip showing pre-scan free space beside post-scan
+    /// findings would be quietly self-contradictory.
+    /// </summary>
+    private void RefreshVolumeStrip(IReadOnlyDictionary<string, long>? reclaimableByVolume = null)
+    {
+        IReadOnlyList<StorageVolume> volumes;
+        try
+        {
+            volumes = _volumeProvider.GetFixedVolumes();
+        }
+        catch (IOException)
+        {
+            // A volume disappearing mid-session is a real event, not a bug. The room is still usable
+            // without its strip, so this degrades rather than taking the page down.
+            return;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return;
+        }
+
+        string? systemRoot = Path.GetPathRoot(Environment.SystemDirectory);
+
+        VolumeStripEntries.Clear();
+        foreach (VolumeStripEntry entry in VolumeStrip.Build(volumes, systemRoot, reclaimableByVolume))
+        {
+            VolumeStripEntries.Add(entry);
         }
     }
 

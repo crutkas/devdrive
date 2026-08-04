@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="DevDriveManager.Controls.TreemapPane"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <Grid>
+        <Canvas
+            x:Name="TreemapCanvas"
+            HorizontalAlignment="Stretch"
+            VerticalAlignment="Stretch"
+            Background="Transparent"
+            SizeChanged="TreemapCanvas_SizeChanged" />
+
+        <TextBlock
+            x:Name="TreemapEmptyState"
+            HorizontalAlignment="Center"
+            VerticalAlignment="Center"
+            AutomationProperties.AutomationId="TreemapEmptyText"
+            Style="{StaticResource SmCardSubTextStyle}"
+            Text="No allocated bytes in this scope"
+            Visibility="Collapsed" />
+    </Grid>
+</UserControl>
