@@ -135,19 +135,34 @@ Test-UI "Reclaim: does not scan on entry" {
 winapp ui screenshot -a $AppPid -o "screenshots\01b-reclaim.png" 2>$null | Out-Null
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  (3) Package caches — status-grouped, banded; critical "still on C:" group leads.
+#  (3) Package caches — two tabs over one table: Detected, then Not installed.
 # ─────────────────────────────────────────────────────────────────────────────
 Test-UI "Navigate to Package caches"         { Goto "NavPackageCaches" "PackageCachesScrollViewer" }
-# Status groups are banded ItemsControls (no automation peer); assert each group rendered via a
-# representative row's action button. (This PC: NuGet/pip/Cargo/vcpkg on C:, npm already on G:,
-# uv/Poetry/Gradle/... not installed.)
+# The Detected tab is where the room opens. (This PC: NuGet/pip/Cargo/vcpkg on C:, npm already on G:;
+# uv/Poetry/Gradle/... are undetected and live on the other tab.)
+Test-UI "Caches: tab strip present"          { winapp ui wait-for "CacheTab_Detected" -a $AppPid -t 3000 }
 Test-UI "Caches: Needs-action row present (Cargo)" { winapp ui wait-for "MoveCache_Cargo" -a $AppPid -t 4000 }
 # npm's representative is the CARD, not a button: "Move back" is gated on CanMoveBack, which only
 # becomes true after *this app* performs a move in the current session. A cache that was already on
 # the Dev Drive at launch renders the "Already on Dev Drive" checkmark instead, so MoveBack_npm can
 # never exist on a fresh app. The card's name ("npm, On G:") proves the grouping more directly anyway.
 Test-UI "Caches: On-Dev-Drive row present (npm)"   { winapp ui wait-for "PackageCacheCard_npm" -a $AppPid -t 4000 }
-Test-UI "Caches: Not-installed row present (uv)"   { winapp ui wait-for "MapPathInput_uv" -a $AppPid -t 4000 }
+# Undetected tools are on their own tab now, so reaching uv means switching first. That makes this a
+# stronger assertion than it used to be: it proves the tab actually filters, not just that uv exists.
+# `invoke` rather than `click` — click simulates a mouse and silently no-ops on a locked workstation.
+Test-UI "Caches: Not-installed tab switches" {
+    winapp ui invoke "CacheTab_NotInstalled" -a $AppPid
+    winapp ui wait-for "MapPathInput_uv" -a $AppPid -t 4000
+}
+# ...and Cargo must be gone from that tab, which is the half the presence check cannot prove.
+Test-UI "Caches: Not-installed tab excludes detected rows" {
+    $found = winapp ui inspect -a $AppPid --json 2>$null | Out-String
+    if ($found -match 'MoveCache_Cargo') { throw "Cargo is still visible on the Not installed tab" }
+}
+Test-UI "Caches: back to Detected" {
+    winapp ui invoke "CacheTab_Detected" -a $AppPid
+    winapp ui wait-for "MoveCache_Cargo" -a $AppPid -t 4000
+}
 Test-UI "Caches: Move all present"           { winapp ui wait-for "MoveAllButton"     -a $AppPid -t 3000 }
 Test-UI "Caches: 'Learn what this does' link"{ winapp ui wait-for "LearnWhatThisDoes" -a $AppPid -t 3000 }
 winapp ui screenshot -a $AppPid -o "screenshots\02-caches.png" 2>$null | Out-Null

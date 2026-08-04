@@ -37,16 +37,16 @@ namespace DevDriveManager.Pages;
 public sealed partial class PackageCachesPage : Page, INotifyPropertyChanged
 {
     /// <summary>
-    /// Everything in a cache row that is not the name, in DIPs: the WHERE, SIZE and ACTION columns
-    /// (78 + 72 + 104), the three 12px gaps, the row's own 14px horizontal padding, and the card's
-    /// 1px border on each side.
+    /// Everything in a cache row that is not the location, in DIPs: the ECOSYSTEM, REDIRECTED BY,
+    /// SIZE, STATUS and ACTION columns (164 + 170 + 88 + 96 + 104), the five 12px gaps, the row's own
+    /// 14px horizontal padding, and the card's 1px border on each side.
     /// </summary>
-    private const double TableFixedColumnsWidth = 78 + 72 + 104 + (12 * 3) + 28 + 2;
+    private const double TableFixedColumnsWidth = 164 + 170 + 88 + 96 + 104 + (12 * 5) + 28 + 2;
 
     private readonly HashSet<PackageCacheRowViewModel> _hooked = new();
     private readonly IVolumeProvider _volumeProvider = new SystemVolumeProvider();
 
-    private double _nameColumnWidth = 220;
+    private double _locationColumnWidth = 220;
 
     public PackageCachesPage()
     {
@@ -59,16 +59,14 @@ public sealed partial class PackageCachesPage : Page, INotifyPropertyChanged
 
     public PackageCachesViewModel Caches => App.Shared.PackageCaches;
 
-    /// <summary>The rail's bands, in rail order. Rebuilt in place so the selection survives a regroup.</summary>
-    public ObservableCollection<CacheGroupViewModel> Groups { get; } =
+    /// <summary>The table's two tabs, in head order. Rebuilt in place so the selection survives a regroup.</summary>
+    public ObservableCollection<CacheTabViewModel> Tabs { get; } =
     [
-        new(CacheGroupKind.All, "All caches", "\uE8B7"),
-        new(CacheGroupKind.NeedsAction, "Needs action", "\uE7BA"),
-        new(CacheGroupKind.OnDevDrive, "On your Dev Drive", "\uE73E"),
-        new(CacheGroupKind.NotInstalled, "Not installed", "\uE711"),
+        new(CacheTabKind.Detected, "Detected"),
+        new(CacheTabKind.NotInstalled, "Not installed"),
     ];
 
-    /// <summary>The rows the centre table is showing — the selected band, needs-action first.</summary>
+    /// <summary>The rows the table is showing — the selected tab, needs-action first.</summary>
     public ObservableCollection<PackageCacheRowViewModel> VisibleCaches { get; } = new();
 
     private readonly ObservableCollection<VolumeStripEntry> _volumeStripEntries = new();
@@ -86,32 +84,36 @@ public sealed partial class PackageCachesPage : Page, INotifyPropertyChanged
     public IReadOnlyList<VolumeStripEntry> VolumeStripEntries => _volumeStripEntries;
 
     /// <summary>
-    /// An explicit width for the tool-name column, shared by the header and every row.
+    /// An explicit width for the location column, shared by the header and every row.
     /// <para>
     /// Same reasoning as the Reclaim and Space rooms: the fixed columns plus gaps and padding claim a
     /// known number of DIPs, so computing the remainder makes the floor explicit and keeps the header
     /// aligned with the rows for free, because both read this one number.
     /// </para>
     /// </summary>
-    public GridLength NameColumnWidth => new(_nameColumnWidth);
+    public GridLength LocationColumnWidth => new(_locationColumnWidth);
 
-    private CacheGroupViewModel? _selectedGroup;
+    private CacheTabViewModel? _selectedTab;
 
-    /// <summary>Which band the table is filtered to. Never null once the page has loaded.</summary>
-    public CacheGroupViewModel? SelectedGroup
+    /// <summary>Which tab the table is filtered to. Never null once the page has loaded.</summary>
+    public CacheTabViewModel? SelectedTab
     {
-        get => _selectedGroup;
+        get => _selectedTab;
         set
         {
-            // A ListView clears its selection while its ItemsSource is being rebuilt. Honouring that
-            // would drop the user back to an unfiltered table every time a move completes.
-            if (value is null || ReferenceEquals(value, _selectedGroup))
+            if (value is null || ReferenceEquals(value, _selectedTab))
             {
                 return;
             }
 
-            _selectedGroup = value;
-            Raise(nameof(SelectedGroup));
+            if (_selectedTab is not null)
+            {
+                _selectedTab.IsSelected = false;
+            }
+
+            _selectedTab = value;
+            _selectedTab.IsSelected = true;
+            Raise(nameof(SelectedTab));
             RefreshVisible();
         }
     }
@@ -135,13 +137,44 @@ public sealed partial class PackageCachesPage : Page, INotifyPropertyChanged
         }
     }
 
-    /// <summary>The rail head's status: how much is still on the system drive, or that nothing is.</summary>
+    /// <summary>
+    /// The head chip: how many detected caches already sit on the Dev Drive. A fraction rather than a
+    /// byte total because the question the chip answers is "am I done here", and bytes cannot answer
+    /// that — a single large cache left behind reads as progress when counted in gigabytes.
+    /// </summary>
     public string StatusText
     {
         get
         {
-            ulong onSystem = Sum(Caches.Caches.Where(IsStillOnSystemDrive));
-            return onSystem == 0UL ? "all placed" : $"{ByteSizeFormatter.Format(onSystem)} on C:";
+            if (!Caches.HasDevDrive)
+            {
+                int found = Caches.Caches.Count(row => BandOrder(row) != 2);
+                return found == 1 ? "1 cache found" : $"{found} caches found";
+            }
+
+            List<PackageCacheRowViewModel> detected = InTab(CacheTabKind.Detected).ToList();
+            if (detected.Count == 0)
+            {
+                return "nothing to place";
+            }
+
+            int placed = detected.Count(row => row.IsOnDevDrive);
+            return placed == detected.Count
+                ? $"all {detected.Count} already on {DevDriveLabel}"
+                : $"{placed} of {detected.Count} already on {DevDriveLabel}";
+        }
+    }
+
+    /// <summary>The Dev Drive's letter with its colon, or a generic word if we cannot name it.</summary>
+    private string DevDriveLabel
+    {
+        get
+        {
+            string? root = _volumeStripEntries
+                .FirstOrDefault(entry => !entry.IsSystemVolume)?.Volume.RootPath;
+            return string.IsNullOrWhiteSpace(root) || root.Length < 2
+                ? "your Dev Drive"
+                : root[..2];
         }
     }
 
@@ -208,8 +241,9 @@ public sealed partial class PackageCachesPage : Page, INotifyPropertyChanged
         Caches.CachesChanged += OnCachesChanged;
         Caches.InventoryReset += OnInventoryReset;
         Caches.PropertyChanged += OnCachesPropertyChanged;
-        _selectedGroup ??= Groups[0];
-        Raise(nameof(SelectedGroup));
+        _selectedTab ??= Tabs[0];
+        _selectedTab.IsSelected = true;
+        Raise(nameof(SelectedTab));
         HookRows();
         Regroup();
     }
@@ -273,19 +307,16 @@ public sealed partial class PackageCachesPage : Page, INotifyPropertyChanged
         }
     }
 
-    /// <summary>Recomputes the rail's counts and totals, then the table, strip and status bar.</summary>
+    /// <summary>Recomputes the tab counts, then the table, strip and status bar.</summary>
     private void Regroup()
     {
-        // Without a Dev Drive there is nothing to move to, so the bands stop being about placement and
-        // start being about detection. Same rows, honest labels.
-        bool detectionOnly = !Caches.HasDevDrive;
-        Group(CacheGroupKind.NeedsAction).Title = detectionOnly ? "Detected on this PC" : "Needs action";
-        Group(CacheGroupKind.NotInstalled).Title = detectionOnly ? "Not detected" : "Not installed";
+        // Without a Dev Drive there is nothing to move to, so "not installed" stops being about a
+        // missing tool and starts being about a cache we could not find. Same rows, honest labels.
+        Tab(CacheTabKind.NotInstalled).Title = Caches.HasDevDrive ? "Not installed" : "Not detected";
 
-        foreach (CacheGroupViewModel group in Groups)
+        foreach (CacheTabViewModel tab in Tabs)
         {
-            List<PackageCacheRowViewModel> rows = InBand(group.Kind).ToList();
-            group.Set(rows.Count, Sum(rows));
+            tab.Count = InTab(tab.Kind).Count();
         }
 
         RefreshVisible();
@@ -302,7 +333,7 @@ public sealed partial class PackageCachesPage : Page, INotifyPropertyChanged
     {
         PackageCacheRowViewModel? wasSelected = SelectedCache;
 
-        List<PackageCacheRowViewModel> rows = InBand(SelectedGroup?.Kind ?? CacheGroupKind.All).ToList();
+        List<PackageCacheRowViewModel> rows = InTab(SelectedTab?.Kind ?? CacheTabKind.Detected).ToList();
         VisibleCaches.Clear();
         foreach (PackageCacheRowViewModel row in rows)
         {
@@ -316,25 +347,26 @@ public sealed partial class PackageCachesPage : Page, INotifyPropertyChanged
         SelectedCache = wasSelected is not null && rows.Contains(wasSelected)
             ? wasSelected
             : rows.FirstOrDefault();
-        Raise(nameof(SelectedGroup));
     }
 
     /// <summary>
-    /// The rows in a band, needs-action first. The status column already names each band, so a
-    /// mixed "All" view reads as grouped without needing header rows inside the table.
+    /// The rows on a tab, needs-action first. The status column already names where each cache lives,
+    /// so a mixed Detected view reads as grouped without needing header rows inside the table.
     /// </summary>
-    private IEnumerable<PackageCacheRowViewModel> InBand(CacheGroupKind kind) =>
+    private IEnumerable<PackageCacheRowViewModel> InTab(CacheTabKind kind) =>
         Caches.Caches.Where(row => Matches(row, kind)).OrderBy(BandOrder);
 
-    private bool Matches(PackageCacheRowViewModel row, CacheGroupKind kind) => kind switch
+    /// <summary>
+    /// Detected covers both placements — a cache we found is a cache we found, whichever volume it is
+    /// on, and the Status column is what distinguishes them.
+    /// </summary>
+    private bool Matches(PackageCacheRowViewModel row, CacheTabKind kind) => kind switch
     {
-        CacheGroupKind.All => true,
-        CacheGroupKind.NeedsAction => BandOrder(row) == 0,
-        CacheGroupKind.OnDevDrive => BandOrder(row) == 1,
+        CacheTabKind.Detected => BandOrder(row) != 2,
         _ => BandOrder(row) == 2,
     };
 
-    /// <summary>0 needs action, 1 on the Dev Drive, 2 not installed.</summary>
+    /// <summary>0 needs action, 1 on the Dev Drive, 2 not installed. Also the table's sort key.</summary>
     private int BandOrder(PackageCacheRowViewModel row)
     {
         if (!Caches.HasDevDrive)
@@ -347,7 +379,7 @@ public sealed partial class PackageCachesPage : Page, INotifyPropertyChanged
             : 2;
     }
 
-    private CacheGroupViewModel Group(CacheGroupKind kind) => Groups.First(g => g.Kind == kind);
+    private CacheTabViewModel Tab(CacheTabKind kind) => Tabs.First(t => t.Kind == kind);
 
     private bool IsStillOnSystemDrive(PackageCacheRowViewModel row) =>
         Caches.HasDevDrive && !row.IsOnDevDrive && row.CanMove;
@@ -451,19 +483,31 @@ public sealed partial class PackageCachesPage : Page, INotifyPropertyChanged
 
     /// <summary>
     /// Measures the table card, not the header grid. Measuring the header would feed back on itself:
-    /// a wider name column grows the header's desired width, the grid is arranged at that desired
+    /// a wider location column grows the header's desired width, the grid is arranged at that desired
     /// width, and the next measurement reports the inflated number.
     /// </summary>
     private void TableCard_SizeChanged(object sender, SizeChangedEventArgs args)
     {
         double available = Math.Max(140, args.NewSize.Width - TableFixedColumnsWidth);
-        if (Math.Abs(available - _nameColumnWidth) < 0.5)
+        if (Math.Abs(available - _locationColumnWidth) < 0.5)
         {
             return;
         }
 
-        _nameColumnWidth = available;
-        Raise(nameof(NameColumnWidth));
+        _locationColumnWidth = available;
+        Raise(nameof(LocationColumnWidth));
+    }
+
+    /// <summary>
+    /// Switches tabs. A Click handler rather than a bound command because the tab strip is chrome —
+    /// the page owns which rows are visible, not the shared ViewModel, which several rooms share.
+    /// </summary>
+    private void SelectTab_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: CacheTabViewModel tab })
+        {
+            SelectedTab = tab;
+        }
     }
 
     private void Raise(string property) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(property));

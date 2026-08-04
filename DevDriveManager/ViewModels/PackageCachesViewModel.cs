@@ -23,6 +23,9 @@ public partial class PackageCachesViewModel : ObservableObject
 {
     private static readonly TimeSpan SizeBudget = TimeSpan.FromSeconds(1.5);
 
+    /// <summary>How many swatch colours the theme's category ramp offers before it repeats.</summary>
+    private const int CategorySwatchCount = 6;
+
     private readonly IPackageCacheService _service;
     private readonly PackageCacheMoveCoordinator _moveCoordinator;
     private readonly Func<string, bool>? _folderExists;
@@ -207,7 +210,12 @@ public partial class PackageCachesViewModel : ObservableObject
             Caches.Add(new PackageCacheRowViewModel(
                 info, displayDevLetter, systemLetter,
                 OnMoveRequested, OnConfirmMoveRequested, OnMoveBackRequested, OnCancelActiveMoveRequested,
-                OnMapRequested, OnRemapRequested, _folderExists, hasDevDrive));
+                OnMapRequested, OnRemapRequested, _folderExists, hasDevDrive)
+            {
+                // Inventory order, not display order: a tool keeps its swatch colour no matter which
+                // tab it lands in or how the table is sorted.
+                CategoryIndex = Caches.Count % CategorySwatchCount,
+            });
         }
 
         UpdateWarning();

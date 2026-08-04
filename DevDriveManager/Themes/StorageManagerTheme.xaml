@@ -44,6 +44,20 @@
             <SolidColorBrush x:Key="SmBadBrush" Color="#F0796F" />
 
             <!--
+                Status-pill tints. The comp draws pills as an outline over a wash of their own colour
+                (12% fill, 45% edge) rather than a solid block, so a column of them reads as annotation
+                instead of as a column of buttons. Baked as literal alpha rather than computed because
+                XAML has no colour-mix, and naming them keeps rooms out of the alpha business.
+            -->
+            <SolidColorBrush x:Key="SmGoodTintBrush" Color="#1F6CCB8B" />
+            <SolidColorBrush x:Key="SmGoodEdgeBrush" Color="#736CCB8B" />
+            <SolidColorBrush x:Key="SmWarnTintBrush" Color="#1FF2C46B" />
+            <SolidColorBrush x:Key="SmWarnEdgeBrush" Color="#73F2C46B" />
+            <SolidColorBrush x:Key="SmAccentTintBrush" Color="#1F60CDFF" />
+            <SolidColorBrush x:Key="SmAccentEdgeBrush" Color="#7360CDFF" />
+            <SolidColorBrush x:Key="SmMuteTintBrush" Color="Transparent" />
+
+            <!--
                 Treemap ink. The category brushes are light in the dark theme, so a treemap label
                 has to be dark to stay legible — this is the one place the ink inverts relative to
                 the rest of the theme, which is why it is a token rather than SmTextBrush.
@@ -78,6 +92,15 @@
             <SolidColorBrush x:Key="SmGoodBrush" Color="#0F7B3F" />
             <SolidColorBrush x:Key="SmWarnBrush" Color="#8A5A00" />
             <SolidColorBrush x:Key="SmBadBrush" Color="#B3261E" />
+
+            <!--  Same recipe as dark, over the light palette's deeper semantic colours.  -->
+            <SolidColorBrush x:Key="SmGoodTintBrush" Color="#1F0F7B3F" />
+            <SolidColorBrush x:Key="SmGoodEdgeBrush" Color="#730F7B3F" />
+            <SolidColorBrush x:Key="SmWarnTintBrush" Color="#1F8A5A00" />
+            <SolidColorBrush x:Key="SmWarnEdgeBrush" Color="#738A5A00" />
+            <SolidColorBrush x:Key="SmAccentTintBrush" Color="#1F0F6CBD" />
+            <SolidColorBrush x:Key="SmAccentEdgeBrush" Color="#730F6CBD" />
+            <SolidColorBrush x:Key="SmMuteTintBrush" Color="Transparent" />
 
             <!-- Light theme category brushes are saturated, so the label inverts the other way. -->
             <SolidColorBrush x:Key="SmTreemapInkBrush" Color="#FFFFFF" />
@@ -116,6 +139,18 @@
             <SolidColorBrush x:Key="SmWarnBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
             <SolidColorBrush x:Key="SmBadBrush" Color="{ThemeResource SystemColorHotlightColor}" />
 
+            <!--
+                No tint under high contrast: a wash of colour is exactly what the mode exists to remove.
+                The pill keeps its border and its text colour, which is what carries the meaning anyway.
+            -->
+            <SolidColorBrush x:Key="SmGoodTintBrush" Color="Transparent" />
+            <SolidColorBrush x:Key="SmGoodEdgeBrush" Color="{ThemeResource SystemColorHighlightColor}" />
+            <SolidColorBrush x:Key="SmWarnTintBrush" Color="Transparent" />
+            <SolidColorBrush x:Key="SmWarnEdgeBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
+            <SolidColorBrush x:Key="SmAccentTintBrush" Color="Transparent" />
+            <SolidColorBrush x:Key="SmAccentEdgeBrush" Color="{ThemeResource SystemColorHighlightColor}" />
+            <SolidColorBrush x:Key="SmMuteTintBrush" Color="Transparent" />
+
             <SolidColorBrush x:Key="SmTreemapInkBrush" Color="{ThemeResource SystemColorButtonTextColor}" />
         </ResourceDictionary>
 
@@ -135,7 +170,16 @@
     <CornerRadius x:Key="SmCardCornerRadius">8</CornerRadius>
     <CornerRadius x:Key="SmVolumeCornerRadius">7</CornerRadius>
     <CornerRadius x:Key="SmTileCornerRadius">6</CornerRadius>
-    <CornerRadius x:Key="SmPillCornerRadius">999</CornerRadius>
+
+    <!--
+        A pill's radius is half its height, stated literally — NOT a huge number.
+
+        CSS `border-radius: 999px` scales every radius by one factor and yields a stadium. WinUI clamps
+        each corner per axis instead (half the width horizontally, half the height vertically), so 999 on
+        a wide short border gives an ellipse, which is what this used to render. 10 is half of the 20px
+        pill in SmPillStyle; change the two together.
+    -->
+    <CornerRadius x:Key="SmPillCornerRadius">10</CornerRadius>
 
     <!--
         The type ramp.
@@ -242,6 +286,192 @@
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="CornerRadius" Value="11" />
         <Setter Property="Padding" Value="9,3,9,4" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <!--
+        A status pill. Spec: 11px semibold text, 2px 9px padding, 1px border, stadium ends.
+
+        MinHeight is fixed so a column of pills is one shape repeated rather than each one sized by its
+        own text — the read is "same kind of thing, different value", and ragged heights break that.
+    -->
+    <Style x:Key="SmPillStyle" TargetType="Border">
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="{StaticResource SmPillCornerRadius}" />
+        <Setter Property="Padding" Value="9,0,9,1" />
+        <Setter Property="MinHeight" Value="20" />
+        <Setter Property="HorizontalAlignment" Value="Left" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <Style x:Key="SmPillTextStyle" TargetType="TextBlock">
+        <Setter Property="FontSize" Value="11" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="HorizontalAlignment" Value="Center" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <!--
+        One style per pill state, rather than a helper that looks the brushes up in C#.
+
+        A helper returns whichever SolidColorBrush instance was live when the binding ran, and an
+        x:Bind function binding has nothing to re-evaluate on when the theme changes — so an imperative
+        brush freezes at the theme the row was first built under and turns near-white text loose on a
+        white page. Setters resolved with ThemeResource re-evaluate on the theme change itself. The
+        style objects live outside the theme dictionaries, so looking *them* up statically is safe.
+    -->
+    <Style
+        x:Key="SmPillGoodStyle"
+        BasedOn="{StaticResource SmPillStyle}"
+        TargetType="Border">
+        <Setter Property="Background" Value="{ThemeResource SmGoodTintBrush}" />
+        <Setter Property="BorderBrush" Value="{ThemeResource SmGoodEdgeBrush}" />
+    </Style>
+
+    <Style
+        x:Key="SmPillWarnStyle"
+        BasedOn="{StaticResource SmPillStyle}"
+        TargetType="Border">
+        <Setter Property="Background" Value="{ThemeResource SmWarnTintBrush}" />
+        <Setter Property="BorderBrush" Value="{ThemeResource SmWarnEdgeBrush}" />
+    </Style>
+
+    <Style
+        x:Key="SmPillMuteStyle"
+        BasedOn="{StaticResource SmPillStyle}"
+        TargetType="Border">
+        <Setter Property="Background" Value="{ThemeResource SmMuteTintBrush}" />
+        <Setter Property="BorderBrush" Value="{ThemeResource SmStrokeBrush}" />
+    </Style>
+
+    <Style
+        x:Key="SmPillGoodTextStyle"
+        BasedOn="{StaticResource SmPillTextStyle}"
+        TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{ThemeResource SmGoodBrush}" />
+    </Style>
+
+    <Style
+        x:Key="SmPillWarnTextStyle"
+        BasedOn="{StaticResource SmPillTextStyle}"
+        TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{ThemeResource SmWarnBrush}" />
+    </Style>
+
+    <Style
+        x:Key="SmPillMuteTextStyle"
+        BasedOn="{StaticResource SmPillTextStyle}"
+        TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{ThemeResource SmDimBrush}" />
+    </Style>
+
+    <!--
+        Monospaced data cells — paths and environment-variable names. Both are things the user will
+        compare character by character or retype, which is exactly what a proportional face makes hard.
+    -->
+    <Style x:Key="SmMonoCellTextStyle" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="Consolas, Cascadia Mono, Segoe UI" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="Foreground" Value="{ThemeResource SmDimBrush}" />
+        <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <!--  The same cell, quietened, for a value that is an absence rather than a name.  -->
+    <Style
+        x:Key="SmMonoFaintCellTextStyle"
+        BasedOn="{StaticResource SmMonoCellTextStyle}"
+        TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{ThemeResource SmFaintBrush}" />
+    </Style>
+
+    <!--
+        A card-head tab. A Button rather than a bare Border so it is focusable, keyboard-operable and
+        exposes InvokePattern; the chrome is stripped back to text and the room draws the underline.
+    -->
+    <Style x:Key="SmTabButtonStyle" TargetType="Button">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Padding" Value="12,9,12,10" />
+        <Setter Property="VerticalAlignment" Value="Stretch" />
+        <Setter Property="HorizontalContentAlignment" Value="Center" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="UseSystemFocusVisuals" Value="True" />
+    </Style>
+
+    <Style x:Key="SmTabTextStyle" TargetType="TextBlock">
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <!--
+        The selected tab is heavier AND brighter AND underlined — three cues, because weight alone is
+        nearly invisible at 13px and colour alone fails for anyone who cannot separate the two greys.
+    -->
+    <Style
+        x:Key="SmTabSelectedTextStyle"
+        BasedOn="{StaticResource SmTabTextStyle}"
+        TargetType="TextBlock">
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Foreground" Value="{ThemeResource SmTextBrush}" />
+    </Style>
+
+    <Style
+        x:Key="SmTabNormalTextStyle"
+        BasedOn="{StaticResource SmTabTextStyle}"
+        TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{ThemeResource SmDimBrush}" />
+    </Style>
+
+    <!--  Ecosystem swatches. One style per ramp colour, for the same theme reason as the pills.  -->
+    <Style x:Key="SmSwatchStyle" TargetType="Rectangle">
+        <Setter Property="Width" Value="9" />
+        <Setter Property="Height" Value="9" />
+        <Setter Property="RadiusX" Value="2" />
+        <Setter Property="RadiusY" Value="2" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <Style
+        x:Key="SmSwatch0Style"
+        BasedOn="{StaticResource SmSwatchStyle}"
+        TargetType="Rectangle">
+        <Setter Property="Fill" Value="{ThemeResource SmCategory0Brush}" />
+    </Style>
+    <Style
+        x:Key="SmSwatch1Style"
+        BasedOn="{StaticResource SmSwatchStyle}"
+        TargetType="Rectangle">
+        <Setter Property="Fill" Value="{ThemeResource SmCategory1Brush}" />
+    </Style>
+    <Style
+        x:Key="SmSwatch2Style"
+        BasedOn="{StaticResource SmSwatchStyle}"
+        TargetType="Rectangle">
+        <Setter Property="Fill" Value="{ThemeResource SmCategory2Brush}" />
+    </Style>
+    <Style
+        x:Key="SmSwatch3Style"
+        BasedOn="{StaticResource SmSwatchStyle}"
+        TargetType="Rectangle">
+        <Setter Property="Fill" Value="{ThemeResource SmCategory3Brush}" />
+    </Style>
+    <Style
+        x:Key="SmSwatch4Style"
+        BasedOn="{StaticResource SmSwatchStyle}"
+        TargetType="Rectangle">
+        <Setter Property="Fill" Value="{ThemeResource SmCategory4Brush}" />
+    </Style>
+    <Style
+        x:Key="SmSwatch5Style"
+        BasedOn="{StaticResource SmSwatchStyle}"
+        TargetType="Rectangle">
+        <Setter Property="Fill" Value="{ThemeResource SmCategory5Brush}" />
+    </Style>
+
+    <Style x:Key="SmTabCountTextStyle" TargetType="TextBlock">
+        <Setter Property="FontSize" Value="11" />
+        <Setter Property="Foreground" Value="{ThemeResource SmFaintBrush}" />
         <Setter Property="VerticalAlignment" Value="Center" />
     </Style>
 

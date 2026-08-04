@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8" ?>
+﻿<?xml version="1.0" encoding="utf-8" ?>
 <Page
     x:Class="DevDriveManager.Pages.PackageCachesPage"
     x:Name="CachesRoot"
@@ -90,132 +90,13 @@
             Padding="18,11"
             ColumnSpacing="11">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="236" />
-                <ColumnDefinition Width="*" MinWidth="380" />
+                <ColumnDefinition Width="*" MinWidth="560" />
                 <ColumnDefinition Width="312" />
             </Grid.ColumnDefinitions>
 
-            <!--  ================= Group rail =================  -->
-            <Border Grid.Column="0" Style="{StaticResource SmCardStyle}">
-                <Grid>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="*" />
-                        <RowDefinition Height="Auto" />
-                    </Grid.RowDefinitions>
-
-                    <Border Grid.Row="0" Style="{StaticResource SmCardHeadStyle}">
-                        <Grid ColumnSpacing="10">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <!--
-                                Title is Auto and the status takes the slack, for the same reason as
-                                Reclaim's rail: a truncated card title is just a broken card, and the
-                                status is repeated in the status bar at the foot of the room.
-                            -->
-                            <TextBlock
-                                Grid.Column="0"
-                                VerticalAlignment="Center"
-                                Style="{StaticResource SmCardTitleTextStyle}"
-                                Text="What we found" />
-                            <TextBlock
-                                Grid.Column="1"
-                                HorizontalAlignment="Right"
-                                VerticalAlignment="Center"
-                                AutomationProperties.AutomationId="CachesStatus"
-                                Style="{StaticResource SmCardSubTextStyle}"
-                                Text="{x:Bind StatusText, Mode=OneWay}"
-                                TextTrimming="CharacterEllipsis" />
-                        </Grid>
-                    </Border>
-
-                    <ListView
-                        Grid.Row="1"
-                        AutomationProperties.AutomationId="CacheGroupList"
-                        AutomationProperties.Name="Groups of package caches"
-                        ItemsSource="{x:Bind Groups}"
-                        SelectedItem="{x:Bind SelectedGroup, Mode=TwoWay}"
-                        SelectionMode="Single">
-                        <ListView.ItemContainerStyle>
-                            <Style TargetType="ListViewItem">
-                                <Setter Property="Padding" Value="0" />
-                                <Setter Property="MinHeight" Value="0" />
-                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-                            </Style>
-                        </ListView.ItemContainerStyle>
-                        <ListView.ItemTemplate>
-                            <DataTemplate x:DataType="vm:CacheGroupViewModel">
-                                <Grid
-                                    Padding="13,7,13,7"
-                                    AutomationProperties.AutomationId="{x:Bind AutomationId}"
-                                    AutomationProperties.Name="{x:Bind AutomationName, Mode=OneWay}"
-                                    ColumnSpacing="9">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <FontIcon
-                                        Grid.Column="0"
-                                        VerticalAlignment="Center"
-                                        FontSize="15"
-                                        Foreground="{ThemeResource SmDimBrush}"
-                                        Glyph="{x:Bind Glyph}" />
-                                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                                        <TextBlock
-                                            Style="{StaticResource SmCellTextStyle}"
-                                            Text="{x:Bind Title, Mode=OneWay}"
-                                            TextTrimming="CharacterEllipsis" />
-                                        <TextBlock Style="{StaticResource SmCardSubTextStyle}" Text="{x:Bind CountText, Mode=OneWay}" />
-                                    </StackPanel>
-                                    <TextBlock
-                                        Grid.Column="2"
-                                        VerticalAlignment="Center"
-                                        Style="{StaticResource SmTreeValueTextStyle}"
-                                        Text="{x:Bind TotalText, Mode=OneWay}" />
-                                </Grid>
-                            </DataTemplate>
-                        </ListView.ItemTemplate>
-                    </ListView>
-
-                    <!--
-                        What moving actually does, at the foot of the rail rather than as a page
-                        subtitle. The room no longer has a title block to hang an explanation from,
-                        and this is the question a first-time visitor asks before touching anything.
-                    -->
-                    <Border
-                        Grid.Row="2"
-                        Padding="13,9,13,10"
-                        Background="{ThemeResource SmCardHeaderBrush}"
-                        BorderBrush="{ThemeResource SmDividerBrush}"
-                        BorderThickness="0,1,0,0">
-                        <StackPanel Spacing="6">
-                            <!--
-                                Trimming is off here on purpose. SmCardSubTextStyle trims by default for
-                                single-line captions; this one wraps, so wrapping should decide the height
-                                rather than an ellipsis eating the last clause.
-                            -->
-                            <TextBlock
-                                Style="{StaticResource SmCardSubTextStyle}"
-                                TextTrimming="None"
-                                TextWrapping="Wrap">
-                                Moving copies a cache to your Dev Drive and repoints the tool at it. Nothing is deleted, and every move can be undone.
-                            </TextBlock>
-                            <HyperlinkButton
-                                AutomationProperties.AutomationId="LearnWhatThisDoes"
-                                Padding="0"
-                                Click="LearnAboutCacheMoves_Click"
-                                Content="Learn what this does" />
-                        </StackPanel>
-                    </Border>
-                </Grid>
-            </Border>
-
             <!--  ================= The caches themselves =================  -->
             <Border
-                Grid.Column="1"
+                Grid.Column="0"
                 SizeChanged="TableCard_SizeChanged"
                 Style="{StaticResource SmCardStyle}">
                 <Grid>
@@ -226,18 +107,64 @@
                         <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
 
-                    <Border Grid.Row="0" Style="{StaticResource SmCardHeadStyle}">
+                    <!--
+                        Tabs, not a title. The head has to say which half of the inventory is on screen
+                        and let you switch, and a card title plus a rail said the first thing twice.
+                        The chip on the right is the room's one-line answer: how much of what we found
+                        is already where it should be.
+                    -->
+                    <Border Grid.Row="0" Padding="0" Style="{StaticResource SmCardHeadStyle}">
                         <Grid ColumnSpacing="10">
                             <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
-                            <TextBlock
+
+                            <ItemsControl
                                 Grid.Column="0"
-                                VerticalAlignment="Center"
-                                AutomationProperties.AutomationId="CachesTableTitle"
-                                Style="{StaticResource SmCardTitleTextStyle}"
-                                Text="{x:Bind SelectedGroup.Title, Mode=OneWay, FallbackValue='All caches'}" />
+                                VerticalAlignment="Stretch"
+                                AutomationProperties.AutomationId="CacheTabStrip"
+                                AutomationProperties.Name="Which caches to show"
+                                ItemsSource="{x:Bind Tabs}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <StackPanel Orientation="Horizontal" Spacing="2" />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="vm:CacheTabViewModel">
+                                        <Grid>
+                                            <Button
+                                                AutomationProperties.AutomationId="{x:Bind AutomationId}"
+                                                AutomationProperties.Name="{x:Bind AutomationName, Mode=OneWay}"
+                                                Click="SelectTab_Click"
+                                                Style="{StaticResource SmTabButtonStyle}"
+                                                Tag="{x:Bind}">
+                                                <StackPanel Orientation="Horizontal" Spacing="5">
+                                                    <TextBlock Style="{x:Bind local:UiHelpers.TabTextStyle(IsSelected), Mode=OneWay}" Text="{x:Bind Title, Mode=OneWay}" />
+                                                    <TextBlock Style="{StaticResource SmTabCountTextStyle}" Text="{x:Bind Count, Mode=OneWay}" />
+                                                </StackPanel>
+                                            </Button>
+
+                                            <!--
+                                                The selected-tab underline. A sibling rather than a border
+                                                on the button, so it can be inset from the padding and sit
+                                                at the head's edge the way the spec draws it.
+                                            -->
+                                            <Rectangle
+                                                Height="2.5"
+                                                Margin="12,0,12,4"
+                                                VerticalAlignment="Bottom"
+                                                Fill="{ThemeResource SmAccentBrush}"
+                                                RadiusX="2"
+                                                RadiusY="2"
+                                                Visibility="{x:Bind local:UiHelpers.BoolToVisibility(IsSelected), Mode=OneWay}" />
+                                        </Grid>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+
                             <TextBlock
                                 Grid.Column="1"
                                 VerticalAlignment="Center"
@@ -245,6 +172,16 @@
                                 Style="{StaticResource SmCardSubTextStyle}"
                                 Text="{x:Bind Caches.WarningMessage, Mode=OneWay}"
                                 TextTrimming="CharacterEllipsis" />
+
+                            <Border
+                                Grid.Column="2"
+                                Margin="0,0,14,0"
+                                Style="{StaticResource SmChipStyle}">
+                                <TextBlock
+                                    AutomationProperties.AutomationId="CachesStatus"
+                                    Style="{StaticResource SmCardSubTextStyle}"
+                                    Text="{x:Bind StatusText, Mode=OneWay}" />
+                            </Border>
                         </Grid>
                     </Border>
 
@@ -295,7 +232,10 @@
                             Visibility="{x:Bind local:UiHelpers.BoolToVisibility(Caches.ShowMoveAllResult), Mode=OneWay}" />
                     </StackPanel>
 
-                    <!--  Column header. Widths are shared with the row template below.  -->
+                    <!--
+                        Column header. Widths are shared with the row template below via the one
+                        LocationColumnWidth number, which is what keeps the two aligned.
+                    -->
                     <Border
                         Grid.Row="2"
                         Padding="14,7,14,7"
@@ -303,26 +243,36 @@
                         BorderThickness="0,0,0,1">
                         <Grid ColumnSpacing="12">
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="{x:Bind NameColumnWidth, Mode=OneWay}" />
-                                <ColumnDefinition Width="78" />
-                                <ColumnDefinition Width="72" />
+                                <ColumnDefinition Width="164" />
+                                <ColumnDefinition Width="{x:Bind LocationColumnWidth, Mode=OneWay}" />
+                                <ColumnDefinition Width="170" />
+                                <ColumnDefinition Width="88" />
+                                <ColumnDefinition Width="96" />
                                 <ColumnDefinition Width="104" />
                             </Grid.ColumnDefinitions>
                             <TextBlock
                                 Grid.Column="0"
                                 Style="{StaticResource SmColumnHeaderTextStyle}"
-                                Text="TOOL" />
+                                Text="ECOSYSTEM" />
                             <TextBlock
                                 Grid.Column="1"
                                 Style="{StaticResource SmColumnHeaderTextStyle}"
-                                Text="WHERE" />
+                                Text="LOCATION" />
                             <TextBlock
                                 Grid.Column="2"
+                                Style="{StaticResource SmColumnHeaderTextStyle}"
+                                Text="REDIRECTED BY" />
+                            <TextBlock
+                                Grid.Column="3"
                                 HorizontalAlignment="Right"
                                 Style="{StaticResource SmColumnHeaderTextStyle}"
                                 Text="SIZE" />
                             <TextBlock
-                                Grid.Column="3"
+                                Grid.Column="4"
+                                Style="{StaticResource SmColumnHeaderTextStyle}"
+                                Text="STATUS" />
+                            <TextBlock
+                                Grid.Column="5"
                                 HorizontalAlignment="Right"
                                 Style="{StaticResource SmColumnHeaderTextStyle}"
                                 Text="ACTION" />
@@ -357,45 +307,73 @@
                                     -->
                                     <Grid Padding="14,7,14,7" ColumnSpacing="12">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="{Binding NameColumnWidth, ElementName=CachesRoot}" />
-                                            <ColumnDefinition Width="78" />
-                                            <ColumnDefinition Width="72" />
+                                            <ColumnDefinition Width="164" />
+                                            <ColumnDefinition Width="{Binding LocationColumnWidth, ElementName=CachesRoot}" />
+                                            <ColumnDefinition Width="170" />
+                                            <ColumnDefinition Width="88" />
+                                            <ColumnDefinition Width="96" />
                                             <ColumnDefinition Width="104" />
                                         </Grid.ColumnDefinitions>
 
-                                        <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                        <!--
+                                            A Grid, not a horizontal StackPanel. A StackPanel hands its
+                                            children unconstrained width, so the name never learns the
+                                            column width and TextTrimming never engages — "NuGet global
+                                            packages" gets hard-clipped mid-word instead of ellipsised.
+
+                                            The swatch is the only thing tying a row to the ecosystem
+                                            colours used elsewhere in the room. It carries no meaning on
+                                            its own, which is why the name sits beside it rather than
+                                            behind it.
+                                        -->
+                                        <Grid
+                                            Grid.Column="0"
+                                            VerticalAlignment="Center"
+                                            ColumnSpacing="9">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <Rectangle
+                                                Grid.Column="0"
+                                                Style="{x:Bind local:UiHelpers.SwatchStyle(CategoryIndex)}" />
                                             <TextBlock
+                                                Grid.Column="1"
                                                 Style="{StaticResource SmCellTextStyle}"
                                                 Text="{x:Bind Header}"
-                                                TextTrimming="CharacterEllipsis" />
-                                            <TextBlock
-                                                Style="{StaticResource SmCardSubTextStyle}"
-                                                Text="{x:Bind ResolvedPath}"
                                                 TextTrimming="CharacterEllipsis"
-                                                ToolTipService.ToolTip="{x:Bind ResolvedPath}" />
-                                        </StackPanel>
+                                                ToolTipService.ToolTip="{x:Bind Header}" />
+                                        </Grid>
 
-                                        <Border
+                                        <!--
+                                            LocationText, not ResolvedPath. ResolvedPath is where we
+                                            found the cache and stays fixed so "Move back" knows where
+                                            back is; this column has to follow the cache as it moves.
+                                        -->
+                                        <TextBlock
                                             Grid.Column="1"
-                                            Padding="8,1,8,2"
-                                            HorizontalAlignment="Left"
-                                            VerticalAlignment="Center"
-                                            Background="{x:Bind local:UiHelpers.PillBackground(StatusKind), Mode=OneWay}"
-                                            CornerRadius="{StaticResource SmPillCornerRadius}">
-                                            <TextBlock
-                                                Foreground="{x:Bind local:UiHelpers.PillForeground(StatusKind), Mode=OneWay}"
-                                                Style="{StaticResource SmCardSubTextStyle}"
-                                                Text="{x:Bind StatusText, Mode=OneWay}" />
-                                        </Border>
+                                            Style="{StaticResource SmMonoCellTextStyle}"
+                                            Text="{x:Bind LocationText, Mode=OneWay}"
+                                            ToolTipService.ToolTip="{x:Bind LocationText, Mode=OneWay}" />
 
                                         <TextBlock
                                             Grid.Column="2"
+                                            Style="{x:Bind local:UiHelpers.RedirectCellStyle(IsRedirected), Mode=OneWay}"
+                                            Text="{x:Bind RedirectedByText, Mode=OneWay}"
+                                            ToolTipService.ToolTip="{x:Bind RedirectedByText, Mode=OneWay}" />
+
+                                        <TextBlock
+                                            Grid.Column="3"
                                             VerticalAlignment="Center"
                                             Style="{StaticResource SmNumericCellTextStyle}"
                                             Text="{x:Bind SizeText, Mode=OneWay}" />
 
+                                        <Border Grid.Column="4" Style="{x:Bind local:UiHelpers.PillStyle(StatusKind), Mode=OneWay}">
+                                            <TextBlock Style="{x:Bind local:UiHelpers.PillTextStyle(StatusKind), Mode=OneWay}" Text="{x:Bind StatusText, Mode=OneWay}" />
+                                        </Border>
+
                                         <StackPanel
-                                            Grid.Column="3"
+                                            Grid.Column="5"
                                             HorizontalAlignment="Right"
                                             VerticalAlignment="Center"
                                             Orientation="Horizontal"
@@ -547,11 +525,12 @@
             </Border>
 
             <!--  ================= Inspector =================  -->
-            <Border Grid.Column="2" Style="{StaticResource SmCardStyle}">
+            <Border Grid.Column="1" Style="{StaticResource SmCardStyle}">
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
                     <Border Grid.Row="0" Style="{StaticResource SmCardHeadStyle}">
@@ -596,6 +575,37 @@
                                 TextWrapping="Wrap" />
                         </StackPanel>
                     </ScrollViewer>
+
+                    <!--
+                        What moving actually does, pinned to the foot the way Space and Reclaim pin
+                        theirs. It used to sit under the rail; with the rail gone this is the room's
+                        only place for the question a first-time visitor asks before touching anything.
+                    -->
+                    <Border
+                        Grid.Row="2"
+                        Padding="13,9,13,10"
+                        Background="{ThemeResource SmCardHeaderBrush}"
+                        BorderBrush="{ThemeResource SmDividerBrush}"
+                        BorderThickness="0,1,0,0">
+                        <StackPanel Spacing="6">
+                            <!--
+                                Trimming is off here on purpose. SmCardSubTextStyle trims by default for
+                                single-line captions; this one wraps, so wrapping should decide the height
+                                rather than an ellipsis eating the last clause.
+                            -->
+                            <TextBlock
+                                Style="{StaticResource SmCardSubTextStyle}"
+                                TextTrimming="None"
+                                TextWrapping="Wrap">
+                                Moving copies a cache to your Dev Drive and repoints the tool at it. Nothing is deleted, and every move can be undone.
+                            </TextBlock>
+                            <HyperlinkButton
+                                AutomationProperties.AutomationId="LearnWhatThisDoes"
+                                Padding="0"
+                                Click="LearnAboutCacheMoves_Click"
+                                Content="Learn what this does" />
+                        </StackPanel>
+                    </Border>
                 </Grid>
             </Border>
         </Grid>
