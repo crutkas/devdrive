@@ -37,12 +37,43 @@ public sealed partial class ShellPage : Page
         InitializeComponent();
         Current = this;
 
+        BuildRail();
+
         ViewModel.NavigateToCreateRequested += OnNavigateToCreateRequested;
         ViewModel.LaunchUriRequested += OnLaunchUriRequested;
         ViewModel.PerformanceModeEnableRequested += OnPerformanceModeEnableRequested;
 
         Loaded += OnLoaded;
         ActualThemeChanged += OnActualThemeChanged;
+    }
+
+    /// <summary>
+    /// Builds the rail from <see cref="RoomRegistry"/>, inserting a separator wherever the section
+    /// changes. The section break is load-bearing: crossing it is what tells the user they have moved
+    /// between subsystems rather than just to another list of files.
+    /// </summary>
+    private void BuildRail()
+    {
+        RoomSection? previous = null;
+
+        foreach (Room room in RoomRegistry.All)
+        {
+            if (previous is not null && room.Section != previous)
+            {
+                NavView.MenuItems.Add(new NavigationViewItemSeparator());
+            }
+
+            var item = new NavigationViewItem
+            {
+                Content = room.Title,
+                Tag = room.Tag,
+                Icon = new FontIcon { Glyph = room.Glyph },
+            };
+            AutomationProperties.SetAutomationId(item, room.AutomationId);
+
+            NavView.MenuItems.Add(item);
+            previous = room.Section;
+        }
     }
 
     /// <summary>Select a top-level nav item by its tag (e.g. "caches"), updating the rail and the content frame.</summary>
@@ -98,15 +129,7 @@ public sealed partial class ShellPage : Page
 
     private void Navigate(string tag)
     {
-        Type? target = tag switch
-        {
-            "dashboard" => typeof(DashboardPage),
-            "caches" => typeof(PackageCachesPage),
-            "benchmarks" => typeof(BenchmarksPage),
-            "drives" => typeof(DrivesPage),
-            "create" => typeof(CreateDevDrivePage),
-            _ => null,
-        };
+        Type? target = RoomRegistry.Find(tag)?.PageType;
 
         if (target is not null && ContentFrame.CurrentSourcePageType != target)
         {

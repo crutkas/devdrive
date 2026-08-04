@@ -97,6 +97,7 @@ if ($LASTEXITCODE -ne 0) {
 # ─────────────────────────────────────────────────────────────────────────────
 Test-UI "Shell NavigationView present"      { winapp ui wait-for "ShellNavView"     -a $AppPid -t 6000 }
 Test-UI "Nav: Dashboard present"            { winapp ui wait-for "NavDashboard"     -a $AppPid -t 4000 }
+Test-UI "Nav: Reclaim present"              { winapp ui wait-for "NavReclaim"       -a $AppPid -t 4000 }
 Test-UI "Nav: Package caches present"       { winapp ui wait-for "NavPackageCaches" -a $AppPid -t 4000 }
 Test-UI "Nav: Benchmarks present"           { winapp ui wait-for "NavBenchmarks"    -a $AppPid -t 4000 }
 Test-UI "Nav: Drives present"               { winapp ui wait-for "NavDrives"        -a $AppPid -t 4000 }
@@ -119,6 +120,21 @@ Test-UI "Dashboard: benchmarks card link"    { winapp ui wait-for "OpenBenchmark
 winapp ui screenshot -a $AppPid -o "screenshots\01-dashboard.png" 2>$null | Out-Null
 
 # ─────────────────────────────────────────────────────────────────────────────
+#  (2b) Reclaim — the room the Storage Manager reframe is built around. Scanning is deliberately
+#       NOT started on navigation (a real scan is minutes of I/O), so these assert the resting
+#       state: the room renders, every category is listed, and Scan is offered rather than running.
+# ─────────────────────────────────────────────────────────────────────────────
+Test-UI "Navigate to Reclaim"                { Goto "NavReclaim" "ReclaimCategoryList" }
+Test-UI "Reclaim: Scan present"              { winapp ui wait-for "ReclaimScanButton"   -a $AppPid -t 3000 }
+Test-UI "Reclaim: found total present"       { winapp ui wait-for "ReclaimFoundBytes"   -a $AppPid -t 3000 }
+Test-UI "Reclaim: selected total present"    { winapp ui wait-for "ReclaimSelectedBytes" -a $AppPid -t 3000 }
+Test-UI "Reclaim: does not scan on entry" {
+    $s = Get-Value "ReclaimStatus"
+    if ($s -notmatch 'Nothing scanned yet') { throw "expected an unscanned resting state, got '$s'" }
+}
+winapp ui screenshot -a $AppPid -o "screenshots\01b-reclaim.png" 2>$null | Out-Null
+
+# ─────────────────────────────────────────────────────────────────────────────
 #  (3) Package caches — status-grouped, banded; critical "still on C:" group leads.
 # ─────────────────────────────────────────────────────────────────────────────
 Test-UI "Navigate to Package caches"         { Goto "NavPackageCaches" "PackageCachesScrollViewer" }
@@ -126,7 +142,11 @@ Test-UI "Navigate to Package caches"         { Goto "NavPackageCaches" "PackageC
 # representative row's action button. (This PC: NuGet/pip/Cargo/vcpkg on C:, npm already on G:,
 # uv/Poetry/Gradle/... not installed.)
 Test-UI "Caches: Needs-action row present (Cargo)" { winapp ui wait-for "MoveCache_Cargo" -a $AppPid -t 4000 }
-Test-UI "Caches: On-Dev-Drive row present (npm)"   { winapp ui wait-for "MoveBack_npm"    -a $AppPid -t 4000 }
+# npm's representative is the CARD, not a button: "Move back" is gated on CanMoveBack, which only
+# becomes true after *this app* performs a move in the current session. A cache that was already on
+# the Dev Drive at launch renders the "Already on Dev Drive" checkmark instead, so MoveBack_npm can
+# never exist on a fresh app. The card's name ("npm, On G:") proves the grouping more directly anyway.
+Test-UI "Caches: On-Dev-Drive row present (npm)"   { winapp ui wait-for "PackageCacheCard_npm" -a $AppPid -t 4000 }
 Test-UI "Caches: Not-installed row present (uv)"   { winapp ui wait-for "MapPathInput_uv" -a $AppPid -t 4000 }
 Test-UI "Caches: Move all present"           { winapp ui wait-for "MoveAllButton"     -a $AppPid -t 3000 }
 Test-UI "Caches: 'Learn what this does' link"{ winapp ui wait-for "LearnWhatThisDoes" -a $AppPid -t 3000 }
@@ -247,6 +267,7 @@ Test-UI "Theme override -> System default (restored)" {
 # ─────────────────────────────────────────────────────────────────────────────
 $auditPages = @(
     @{ nav = "NavDashboard";     anchor = "DashboardScrollViewer" },
+    @{ nav = "NavReclaim";       anchor = "ReclaimCategoryList" },
     @{ nav = "NavPackageCaches"; anchor = "PackageCachesScrollViewer" },
     @{ nav = "NavBenchmarks";    anchor = "BenchmarksScrollViewer" },
     @{ nav = "NavDrives";        anchor = "DrivesScrollViewer" },
@@ -273,8 +294,8 @@ foreach ($p in $auditPages) {
     }
 }
 if ($inaccessible.Count -eq 0) {
-    $pass++; $results += @{ name = "Accessibility: all interactive controls are identifiable ($auditedCount audited across 6 pages)"; status = "PASS" }
-    Write-Host "  PASS: Accessibility: all $auditedCount interactive controls (6 pages) expose an AutomationId or Name" -ForegroundColor Green
+    $pass++; $results += @{ name = "Accessibility: all interactive controls are identifiable ($auditedCount audited across $($auditPages.Count) pages)"; status = "PASS" }
+    Write-Host "  PASS: Accessibility: all $auditedCount interactive controls ($($auditPages.Count) pages) expose an AutomationId or Name" -ForegroundColor Green
 } else {
     $fail++
     $names = ($inaccessible | Select-Object -Unique) -join ", "

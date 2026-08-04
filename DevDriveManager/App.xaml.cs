@@ -45,6 +45,14 @@ public partial class App : Application
     public static MainPageViewModel Shared { get; } = new();
 
     /// <summary>
+    /// The shared Reclaim room state. Separate from <see cref="Shared"/> because a reclaim scan is
+    /// minutes long and explicitly user-initiated, so it must not be dragged into the startup load —
+    /// but shared, so navigating away from the room and back does not discard a completed scan or,
+    /// worse, silently abandon one still running.
+    /// </summary>
+    public static ReclaimViewModel SharedReclaim { get; } = new();
+
+    /// <summary>
     /// Initializes the singleton application object.
     /// </summary>
     public App()

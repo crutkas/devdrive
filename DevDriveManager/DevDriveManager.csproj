@@ -98,6 +98,9 @@
   <!-- All Dev Drive logic lives in the UI-agnostic core (public APIs only). -->
   <ItemGroup>
     <ProjectReference Include="..\DevDriveCore\DevDriveCore.csproj" />
+    <!-- Space and Reclaim: the storage scanner and the reclaim detection subsystem. -->
+    <ProjectReference Include="..\DevDriveStorage\DevDriveStorage.csproj" />
+    <ProjectReference Include="..\DevDriveReclaim\DevDriveReclaim.csproj" />
     <!--
       The elevated filter-probe helper (the "Iso app"). ReferenceOutputAssembly=false: we ship its EXE
       next to ours but never link its assembly. GlobalPropertiesToRemove strips the main app's RID /

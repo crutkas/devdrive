@@ -18,51 +18,10 @@
         PaneDisplayMode="Left"
         SelectionChanged="NavView_SelectionChanged">
 
-        <NavigationView.MenuItems>
-            <NavigationViewItem
-                AutomationProperties.AutomationId="NavDashboard"
-                Content="Dashboard"
-                Tag="dashboard">
-                <NavigationViewItem.Icon>
-                    <FontIcon Glyph="&#xE80F;" />
-                </NavigationViewItem.Icon>
-            </NavigationViewItem>
-            <NavigationViewItem
-                AutomationProperties.AutomationId="NavPackageCaches"
-                Content="Package caches"
-                Tag="caches">
-                <NavigationViewItem.Icon>
-                    <FontIcon Glyph="&#xE8B7;" />
-                </NavigationViewItem.Icon>
-            </NavigationViewItem>
-            <NavigationViewItem
-                AutomationProperties.AutomationId="NavBenchmarks"
-                Content="Benchmarks"
-                Tag="benchmarks">
-                <NavigationViewItem.Icon>
-                    <FontIcon Glyph="&#xE9D9;" />
-                </NavigationViewItem.Icon>
-            </NavigationViewItem>
-            <NavigationViewItem
-                AutomationProperties.AutomationId="NavDrives"
-                Content="Drives"
-                Tag="drives">
-                <NavigationViewItem.Icon>
-                    <FontIcon Glyph="&#xEDA2;" />
-                </NavigationViewItem.Icon>
-            </NavigationViewItem>
-
-            <NavigationViewItemSeparator />
-
-            <NavigationViewItem
-                AutomationProperties.AutomationId="NavCreate"
-                Content="Create Dev Drive"
-                Tag="create">
-                <NavigationViewItem.Icon>
-                    <FontIcon Glyph="&#xE710;" />
-                </NavigationViewItem.Icon>
-            </NavigationViewItem>
-        </NavigationView.MenuItems>
+        <!--
+            The rail is built in code from RoomRegistry rather than declared here, so adding a room
+            is one entry in one list instead of edits in three places that can silently disagree.
+        -->
 
         <Frame x:Name="ContentFrame" AutomationProperties.AutomationId="ShellContentFrame" />
     </NavigationView>
