@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using DevDriveCore.Abstractions;
@@ -107,6 +108,27 @@ public partial class TrustFiltersViewModel : ObservableObject
         "Couldn't read filters \u2014 the prompt was declined or the query failed. Try again, or use Restart as administrator.";
 
     /// <summary>
+    /// The filters in the Dev Drive's I/O path, highest altitude first — the order a write passes
+    /// through them.
+    /// </summary>
+    /// <remarks>
+    /// Never reassigned, so the Drives table's binding survives a See-Filters probe: the collection is
+    /// cleared and refilled in place.
+    /// </remarks>
+    public ObservableCollection<FilterRowViewModel> Filters { get; } = [];
+
+    /// <summary>True once we have a filter list to show. Drives the table-versus-empty-state choice.</summary>
+    [ObservableProperty]
+    public partial bool HasFilters { get; set; }
+
+    /// <summary>
+    /// How many of the listed filters are actually attached, as "3 of 6 run on G:". The single fact
+    /// the filters tab exists to deliver.
+    /// </summary>
+    [ObservableProperty]
+    public partial string FilterSummaryText { get; set; } = string.Empty;
+
+    /// <summary>
     /// Projects the (optional, elevation-dependent) trust/filter detail and the derived effective perf
     /// mode into observable state. Mirrors the elevated-at-launch projection. When <paramref name="trust"/>
     /// is null and a Dev Drive exists, the unelevated "See Filters" affordance is shown instead.
@@ -123,6 +145,7 @@ public partial class TrustFiltersViewModel : ObservableObject
             CanTurnOnPerformanceMode = false;
             IsPerformanceModePolicyControlled = false;
             ProtectionStatusText = string.Empty;
+            SetFilters(null, null);
             return;
         }
 
@@ -135,6 +158,7 @@ public partial class TrustFiltersViewModel : ObservableObject
             CanTurnOnPerformanceMode = false;
             IsPerformanceModePolicyControlled = false;
             ProtectionStatusText = string.Empty;
+            SetFilters(null, devLetter);
             return;
         }
 
@@ -172,6 +196,40 @@ public partial class TrustFiltersViewModel : ObservableObject
         IsPerformanceModePolicyControlled =
             effective.State == PerformanceModeEffectiveness.Managed
             || (effective.PolicyEnforced && effective.State != PerformanceModeEffectiveness.On);
+
+        SetFilters(trust, devLetter);
+    }
+
+    /// <summary>
+    /// Rebuilds the filter table from a trust reading, in place so the Drives table's binding survives.
+    /// </summary>
+    /// <remarks>
+    /// The altitude lookup is a per-filter registry read, which any user can do — it is only the filter
+    /// <i>names</i> that need elevation. That is why the altitude column is populated the moment the
+    /// list arrives rather than needing a second, deeper probe.
+    /// </remarks>
+    private void SetFilters(DevDriveTrustInfo? trust, char? devLetter)
+    {
+        Filters.Clear();
+
+        if (trust is null || devLetter is not char letter)
+        {
+            HasFilters = false;
+            FilterSummaryText = string.Empty;
+            return;
+        }
+
+        foreach (FilterDriverInfo info in FilterDriverProjection.Project(trust.AttachedFilters, trust.AllowedFilters))
+        {
+            Filters.Add(new FilterRowViewModel(info, letter));
+        }
+
+        HasFilters = Filters.Count > 0;
+
+        int attached = Filters.Count(row => row.IsAttached);
+        FilterSummaryText = Filters.Count == 0
+            ? "no filters reported"
+            : $"{attached} of {Filters.Count} run on {letter}:";
     }
 
     /// <summary>Builds the one-line Defender Dev Drive protection status for the Trust &amp; filters expander.</summary>

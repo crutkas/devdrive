@@ -46,6 +46,9 @@
     <!--  Trust/filters sub-VM: also UI-agnostic (CommunityToolkit.Mvvm + DevDriveCore + IElevatedFilterProbe),
           so the "See Filters" elevated-probe flow + trust projection are unit-tested headlessly with a fake probe.  -->
     <Compile Include="..\DevDriveManager\ViewModels\TrustFiltersViewModel.cs" Link="SuiteViewModels\TrustFiltersViewModel.cs" />
+    <!--  The filter row VM is what the trust VM projects the elevated probe's output into, so it comes
+          along for compilation and the projection is assertable here rather than only on screen.  -->
+    <Compile Include="..\DevDriveManager\ViewModels\FilterRowViewModel.cs" Link="SuiteViewModels\FilterRowViewModel.cs" />
   </ItemGroup>
 
   <!--

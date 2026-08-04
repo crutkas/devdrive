@@ -244,6 +244,54 @@
         <Setter Property="Foreground" Value="{ThemeResource SmDimBrush}" />
     </Style>
 
+    <!--
+        Status-bar facts, one style per emphasis.
+
+        These exist as Styles rather than as a value converter returning a Brush because a converter
+        resolves the brush once, at the moment the row is realised, and hands back that theme
+        dictionary's instance. Nothing re-runs it when the theme flips, so the bar kept its dark ink
+        on the light surface and the facts went invisible. A Style is theme-independent; its
+        {ThemeResource} setters re-resolve on the change.
+
+        Emphasis is carried by weight as well as hue, so it survives high contrast and readers who
+        cannot separate the two colours.
+    -->
+    <Style
+        x:Key="SmStatusFactStyle"
+        BasedOn="{StaticResource SmStatusTextStyle}"
+        TargetType="TextBlock" />
+
+    <Style
+        x:Key="SmStatusFactGoodStyle"
+        BasedOn="{StaticResource SmStatusTextStyle}"
+        TargetType="TextBlock">
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Foreground" Value="{ThemeResource SmGoodBrush}" />
+    </Style>
+
+    <Style
+        x:Key="SmStatusFactWarnStyle"
+        BasedOn="{StaticResource SmStatusTextStyle}"
+        TargetType="TextBlock">
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Foreground" Value="{ThemeResource SmWarnBrush}" />
+    </Style>
+
+    <Style
+        x:Key="SmStatusFactBadStyle"
+        BasedOn="{StaticResource SmStatusTextStyle}"
+        TargetType="TextBlock">
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Foreground" Value="{ThemeResource SmBadBrush}" />
+    </Style>
+
+    <!--  The rail's section divider. A Style so the rule re-resolves when the theme changes.  -->
+    <Style x:Key="SmRailDividerStyle" TargetType="Rectangle">
+        <Setter Property="Width" Value="32" />
+        <Setter Property="Height" Value="1" />
+        <Setter Property="Fill" Value="{ThemeResource SmDividerBrush}" />
+    </Style>
+
     <Style x:Key="SmRailSectionTextStyle" TargetType="TextBlock">
         <Setter Property="FontSize" Value="10" />
         <Setter Property="CharacterSpacing" Value="100" />
@@ -504,6 +552,83 @@
         <Setter Property="Padding" Value="10,7,10,8" />
     </Style>
 
+    <!--
+        A node in the Drives room's I/O path stack: one filter driver, or one endpoint of the write.
+
+        Three variants rather than one styled by a brush binding, for the same reason the pills are
+        three styles — a function binding that returns a Brush hands back the live theme dictionary's
+        instance and never re-resolves, so it freezes at whatever theme was current when the node was
+        built. A Style is theme-independent and its ThemeResource setters re-resolve on the switch.
+
+        Attached and detached differ in fill AND in text weight, not in colour alone: on a stack where
+        most nodes are one state and a few are the other, colour alone is the thing a colour-blind or
+        high-contrast user loses.
+    -->
+    <Style x:Key="SmStackNodeStyle" TargetType="Border">
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="6" />
+        <Setter Property="Padding" Value="10,6,10,7" />
+        <Setter Property="HorizontalAlignment" Value="Stretch" />
+        <Setter Property="Background" Value="{ThemeResource SmMuteTintBrush}" />
+        <Setter Property="BorderBrush" Value="{ThemeResource SmStrokeBrush}" />
+    </Style>
+
+    <Style
+        x:Key="SmStackNodeOnStyle"
+        BasedOn="{StaticResource SmStackNodeStyle}"
+        TargetType="Border">
+        <Setter Property="Background" Value="{ThemeResource SmGoodTintBrush}" />
+        <Setter Property="BorderBrush" Value="{ThemeResource SmGoodEdgeBrush}" />
+    </Style>
+
+    <Style
+        x:Key="SmStackNodeOffStyle"
+        BasedOn="{StaticResource SmStackNodeStyle}"
+        TargetType="Border">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="{ThemeResource SmDividerBrush}" />
+    </Style>
+
+    <!--  The two ends of the path — where the write comes from and where it lands.  -->
+    <Style
+        x:Key="SmStackNodeEndStyle"
+        BasedOn="{StaticResource SmStackNodeStyle}"
+        TargetType="Border">
+        <Setter Property="Background" Value="{ThemeResource SmAccentTintBrush}" />
+        <Setter Property="BorderBrush" Value="{ThemeResource SmAccentEdgeBrush}" />
+    </Style>
+
+    <Style x:Key="SmStackNodeTitleTextStyle" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="Consolas, Cascadia Mono, Segoe UI" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Foreground" Value="{ThemeResource SmTextBrush}" />
+        <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+    </Style>
+
+    <!--  A filter that does not run here: quietened, and not bold, so the stack reads at a glance.  -->
+    <Style
+        x:Key="SmStackNodeTitleFaintTextStyle"
+        BasedOn="{StaticResource SmStackNodeTitleTextStyle}"
+        TargetType="TextBlock">
+        <Setter Property="FontWeight" Value="Normal" />
+        <Setter Property="Foreground" Value="{ThemeResource SmMutedBrush}" />
+    </Style>
+
+    <Style x:Key="SmStackNodeCaptionTextStyle" TargetType="TextBlock">
+        <Setter Property="FontSize" Value="10.5" />
+        <Setter Property="Foreground" Value="{ThemeResource SmDimBrush}" />
+        <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+    </Style>
+
+    <!--  The connector between two nodes. A rule, not a glyph, so it scales with the row spacing.  -->
+    <Style x:Key="SmStackArrowStyle" TargetType="Rectangle">
+        <Setter Property="Width" Value="1" />
+        <Setter Property="Height" Value="10" />
+        <Setter Property="HorizontalAlignment" Value="Center" />
+        <Setter Property="Fill" Value="{ThemeResource SmStrokeBrush}" />
+    </Style>
+
     <Style x:Key="SmCardTitleTextStyle" TargetType="TextBlock">
         <Setter Property="FontSize" Value="13" />
         <Setter Property="FontWeight" Value="SemiBold" />
@@ -665,6 +790,7 @@
                             Background="Transparent"
                             CornerRadius="6">
                             <ContentPresenter
+                                x:Name="ContentHost"
                                 HorizontalAlignment="Stretch"
                                 Content="{TemplateBinding Content}"
                                 Foreground="{TemplateBinding Foreground}" />
@@ -688,6 +814,13 @@
                             <!--
                                 Selection is its own state group so hovering the current room does
                                 not read as leaving it.
+
+                                The selected room's ink is set here, not in code. Assigning
+                                Button.Foreground imperatively writes a local value that outranks the
+                                style AND never re-resolves, so the rail kept its dark ink when the
+                                theme flipped to light and every label went invisible. A VisualState
+                                setter with a {ThemeResource} value re-resolves on the theme change,
+                                and clears cleanly when the state is left.
                             -->
                             <VisualStateGroup x:Name="SelectionStates">
                                 <VisualState x:Name="Unselected" />
@@ -695,6 +828,7 @@
                                     <VisualState.Setters>
                                         <Setter Target="AccentBar.Visibility" Value="Visible" />
                                         <Setter Target="Fill.Background" Value="{ThemeResource SmSelectionBrush}" />
+                                        <Setter Target="ContentHost.Foreground" Value="{ThemeResource SmTextBrush}" />
                                     </VisualState.Setters>
                                 </VisualState>
                             </VisualStateGroup>
@@ -712,6 +846,66 @@
         <Setter Property="FontWeight" Value="SemiBold" />
         <Setter Property="Foreground" Value="{ThemeResource SmFaintBrush}" />
         <Setter Property="HorizontalAlignment" Value="Center" />
+    </Style>
+
+    <!--
+        Risk chips (Reclaim). Same reason as the status facts: a Style, not a converted Brush, so the
+        chip re-inks on a theme switch. Border and text are separate styles because the chip's colour
+        has to reach both the outline and the label, and a Border does not pass Foreground down.
+
+        These sit at the end of the dictionary because BasedOn uses {StaticResource}, which only sees
+        keys declared above it — SmChipStyle and SmCardSubTextStyle are both defined further up.
+    -->
+    <Style
+        x:Key="SmRiskChipStyle"
+        BasedOn="{StaticResource SmChipStyle}"
+        TargetType="Border" />
+
+    <Style
+        x:Key="SmRiskChipGoodStyle"
+        BasedOn="{StaticResource SmChipStyle}"
+        TargetType="Border">
+        <Setter Property="BorderBrush" Value="{ThemeResource SmGoodBrush}" />
+    </Style>
+
+    <Style
+        x:Key="SmRiskChipWarnStyle"
+        BasedOn="{StaticResource SmChipStyle}"
+        TargetType="Border">
+        <Setter Property="BorderBrush" Value="{ThemeResource SmWarnBrush}" />
+    </Style>
+
+    <Style
+        x:Key="SmRiskChipBadStyle"
+        BasedOn="{StaticResource SmChipStyle}"
+        TargetType="Border">
+        <Setter Property="BorderBrush" Value="{ThemeResource SmBadBrush}" />
+    </Style>
+
+    <Style
+        x:Key="SmRiskChipTextStyle"
+        BasedOn="{StaticResource SmCardSubTextStyle}"
+        TargetType="TextBlock" />
+
+    <Style
+        x:Key="SmRiskChipTextGoodStyle"
+        BasedOn="{StaticResource SmCardSubTextStyle}"
+        TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{ThemeResource SmGoodBrush}" />
+    </Style>
+
+    <Style
+        x:Key="SmRiskChipTextWarnStyle"
+        BasedOn="{StaticResource SmCardSubTextStyle}"
+        TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{ThemeResource SmWarnBrush}" />
+    </Style>
+
+    <Style
+        x:Key="SmRiskChipTextBadStyle"
+        BasedOn="{StaticResource SmCardSubTextStyle}"
+        TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{ThemeResource SmBadBrush}" />
     </Style>
 
 </ResourceDictionary>

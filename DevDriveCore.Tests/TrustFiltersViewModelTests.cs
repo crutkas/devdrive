@@ -291,6 +291,77 @@ public sealed class TrustFiltersViewModelTests
         StringAssert.Contains(vm.CouldNotReadFiltersNote, "filters");
     }
 
+    // ---- Filter table projection ---------------------------------------------------------------
+    //
+    // The Drives room's Filter drivers tab is only populated after an elevated read, so on an
+    // unelevated developer machine it cannot be verified by looking at it. These assertions are the
+    // proof that the tab is right.
+
+    [TestMethod]
+    public void UpdateTrust_Elevated_ProjectsAFilterRowPerReportedFilter()
+    {
+        TrustFiltersViewModel vm = NewVm(new FakeElevatedFilterProbe());
+        DevDriveTrustInfo trust = TrustedUnmanaged();
+
+        vm.UpdateTrust(trust, PerformanceModeEvaluator.Evaluate(trust, globalPerformanceModeOn: true), 'G');
+
+        Assert.IsTrue(vm.HasFilters);
+        // The union of attached and allowed, not just attached: an allowed filter that is NOT running
+        // is the interesting row, because that absence is where the speed comes from.
+        Assert.IsTrue(vm.Filters.Count >= trust.AttachedFilters.Count);
+        Assert.IsTrue(vm.Filters.Any(row => row.Name == "PrjFlt"), "An allowed-but-detached filter must be listed.");
+        Assert.IsTrue(vm.Filters.Any(row => row is { Name: "WdFilter", IsAttached: true }));
+    }
+
+    [TestMethod]
+    public void UpdateTrust_Elevated_SummarisesHowManyFiltersActuallyRun()
+    {
+        TrustFiltersViewModel vm = NewVm(new FakeElevatedFilterProbe());
+        DevDriveTrustInfo trust = TrustedUnmanaged();
+
+        vm.UpdateTrust(trust, PerformanceModeEvaluator.Evaluate(trust, globalPerformanceModeOn: true), 'G');
+
+        int attached = vm.Filters.Count(row => row.IsAttached);
+        Assert.AreEqual($"{attached} of {vm.Filters.Count} run on G:", vm.FilterSummaryText);
+    }
+
+    [TestMethod]
+    public void UpdateTrust_Unelevated_LeavesTheFilterTableEmptyRatherThanGuessing()
+    {
+        TrustFiltersViewModel vm = UnelevatedForG(new FakeElevatedFilterProbe());
+
+        Assert.HasCount(0, vm.Filters);
+        Assert.IsFalse(vm.HasFilters);
+        Assert.AreEqual(string.Empty, vm.FilterSummaryText);
+    }
+
+    [TestMethod]
+    public async Task SeeFilters_PopulatesTheFilterTableFromTheElevatedRead()
+    {
+        var probe = new FakeElevatedFilterProbe(TrustedUnmanaged());
+        TrustFiltersViewModel vm = UnelevatedForG(probe);
+        Assert.HasCount(0, vm.Filters, "Precondition: nothing to show before the elevated read.");
+
+        await vm.SeeFiltersCommand.ExecuteAsync(null);
+
+        Assert.IsTrue(vm.HasFilters);
+        StringAssert.Contains(vm.FilterSummaryText, "run on G:");
+    }
+
+    [TestMethod]
+    public async Task SeeFilters_ProbeDeclined_LeavesTheFilterTableEmpty()
+    {
+        // A declined UAC prompt must not leave a half-populated table behind — an empty table with an
+        // explanation is honest; stale rows claiming to describe this volume are not.
+        var probe = new FakeElevatedFilterProbe(result: null);
+        TrustFiltersViewModel vm = UnelevatedForG(probe);
+
+        await vm.SeeFiltersCommand.ExecuteAsync(null);
+
+        Assert.HasCount(0, vm.Filters);
+        Assert.IsFalse(vm.HasFilters);
+    }
+
     // ---- OnPerformanceModeEnabled callback ----------------------------------------------------
 
     [TestMethod]

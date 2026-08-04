@@ -5,15 +5,11 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:controls="using:DevDriveManager.Controls"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:local="using:DevDriveManager"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     Height="{StaticResource SmStatusBarHeight}"
     d:DesignWidth="900"
     mc:Ignorable="d">
-
-    <UserControl.Resources>
-        <controls:StatusEmphasisToBrushConverter x:Key="EmphasisBrush" />
-        <controls:StatusEmphasisToWeightConverter x:Key="EmphasisWeight" />
-    </UserControl.Resources>
 
     <!--
         The bar every room ends with. Facts on the left, keyboard hints pushed right.
@@ -44,11 +40,7 @@
                 </ItemsControl.ItemsPanel>
                 <ItemsControl.ItemTemplate>
                     <DataTemplate x:DataType="controls:StatusFact">
-                        <TextBlock
-                            FontWeight="{x:Bind Emphasis, Converter={StaticResource EmphasisWeight}}"
-                            Foreground="{x:Bind Emphasis, Converter={StaticResource EmphasisBrush}}"
-                            Style="{StaticResource SmStatusTextStyle}"
-                            Text="{x:Bind Text}" />
+                        <TextBlock Style="{x:Bind local:UiHelpers.StatusFactStyle(Emphasis)}" Text="{x:Bind Text}" />
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
             </ItemsControl>

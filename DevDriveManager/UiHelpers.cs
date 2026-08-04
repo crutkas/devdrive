@@ -11,9 +11,12 @@ namespace DevDriveManager;
 /// Drives and Settings pages.
 /// </summary>
 /// <remarks>
-/// The pill / ratio / drive-glyph / band brushes are resolved imperatively against the live
-/// <see cref="Application.Resources"/> so they pick up the current theme dictionary. Rows are rebuilt on
-/// a theme switch (the shell reloads), so a OneTime/OneWay bind to these is correct after a reload.
+/// The functions that return a <see cref="Style"/> are safe across a theme switch: the Style object
+/// is theme-independent and its <c>{ThemeResource}</c> setters re-resolve when the theme changes.
+/// The ones that return a <see cref="Brush"/> are NOT — they hand back the brush instance that was
+/// live at the moment the row was realised, and nothing re-runs an <c>x:Bind</c> function binding on
+/// a theme change, so the row keeps its old ink. Prefer a Style for anything themed; the remaining
+/// brush helpers are legacy and should each become a Style as their room is restyled.
 /// </remarks>
 public static class UiHelpers
 {
@@ -97,12 +100,52 @@ public static class UiHelpers
         Resource<Style>(isSelected ? "SmTabSelectedTextStyle" : "SmTabNormalTextStyle");
 
     /// <summary>
-    /// Themed foreground for a volume's header glyph: accent for a Dev Drive, the default text color for a
-    /// normal volume. Returns a resolved brush in both cases (a <c>null</c> Foreground would render the
-    /// icon transparent rather than inheriting).
+    /// The border of one node in the Drives room's I/O path stack, keyed by <c>"on"</c> (a filter that
+    /// runs on this volume), <c>"off"</c> (one that is skipped) or <c>"end"</c> (either end of the write).
     /// </summary>
-    public static Brush? DriveGlyphBrush(bool isDevDrive) =>
-        Resource(isDevDrive ? "AccentTextFillColorPrimaryBrush" : "TextFillColorPrimaryBrush");
+    public static Style? StackNodeStyle(string kind) => Resource<Style>(kind switch
+    {
+        "on" => "SmStackNodeOnStyle",
+        "end" => "SmStackNodeEndStyle",
+        _ => "SmStackNodeOffStyle",
+    });
+
+    /// <summary>
+    /// The title inside a stack node. A skipped filter is quietened and unbolded, so the difference
+    /// between running and skipped survives high contrast and reads without relying on colour.
+    /// </summary>
+    public static Style? StackNodeTitleStyle(string kind) =>
+        Resource<Style>(kind == "off" ? "SmStackNodeTitleFaintTextStyle" : "SmStackNodeTitleTextStyle");
+
+    /// <summary>
+    /// Text style for one status-bar fact, keyed by how strongly it should read. Returns a Style
+    /// rather than a Brush so the ink re-resolves when the theme changes — see the styles themselves.
+    /// </summary>
+    public static Style? StatusFactStyle(Controls.StatusEmphasis emphasis) => Resource<Style>(emphasis switch
+    {
+        Controls.StatusEmphasis.Good => "SmStatusFactGoodStyle",
+        Controls.StatusEmphasis.Warn => "SmStatusFactWarnStyle",
+        Controls.StatusEmphasis.Bad => "SmStatusFactBadStyle",
+        _ => "SmStatusFactStyle",
+    });
+
+    /// <summary>Outline of a Reclaim risk chip, keyed by the risk it carries.</summary>
+    public static Style? RiskChipStyle(Controls.StatusEmphasis emphasis) => Resource<Style>(emphasis switch
+    {
+        Controls.StatusEmphasis.Good => "SmRiskChipGoodStyle",
+        Controls.StatusEmphasis.Warn => "SmRiskChipWarnStyle",
+        Controls.StatusEmphasis.Bad => "SmRiskChipBadStyle",
+        _ => "SmRiskChipStyle",
+    });
+
+    /// <summary>Label inside a Reclaim risk chip, keyed by the risk it carries.</summary>
+    public static Style? RiskChipTextStyle(Controls.StatusEmphasis emphasis) => Resource<Style>(emphasis switch
+    {
+        Controls.StatusEmphasis.Good => "SmRiskChipTextGoodStyle",
+        Controls.StatusEmphasis.Warn => "SmRiskChipTextWarnStyle",
+        Controls.StatusEmphasis.Bad => "SmRiskChipTextBadStyle",
+        _ => "SmRiskChipTextStyle",
+    });
 
     /// <summary>Foreground brush for a speed-test ratio: success green when the Dev Drive wins (or ties), neutral otherwise.</summary>
     public static Brush? RatioBrush(bool isFavorable) =>

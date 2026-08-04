@@ -6,6 +6,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:controls="using:DevDriveManager.Controls"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:local="using:DevDriveManager"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:storage="using:DevDriveStorage"
     xmlns:vm="using:DevDriveManager.ViewModels"
@@ -13,7 +14,6 @@
 
     <Page.Resources>
         <controls:VolumeAccentRoleToBrushConverter x:Key="VolumeAccent" />
-        <controls:StatusEmphasisToBrushConverter x:Key="StatusBrush" />
     </Page.Resources>
 
     <Grid>
@@ -441,11 +441,9 @@
                                         <Border
                                             Grid.Column="1"
                                             HorizontalAlignment="Left"
-                                            BorderBrush="{x:Bind RiskEmphasis, Converter={StaticResource StatusBrush}}"
-                                            Style="{StaticResource SmChipStyle}">
+                                            Style="{x:Bind local:UiHelpers.RiskChipStyle(RiskEmphasis)}">
                                             <TextBlock
-                                                Foreground="{x:Bind RiskEmphasis, Converter={StaticResource StatusBrush}}"
-                                                Style="{StaticResource SmCardSubTextStyle}"
+                                                Style="{x:Bind local:UiHelpers.RiskChipTextStyle(RiskEmphasis)}"
                                                 Text="{x:Bind RiskText}" />
                                         </Border>
 

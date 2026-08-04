@@ -178,27 +178,49 @@ Test-UI "Benchmarks: git-clone workload row" { winapp ui wait-for "RunRow_git-cl
 winapp ui screenshot -a $AppPid -o "screenshots\03-benchmarks.png" 2>$null | Out-Null
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  (5) Drives — Dev Drive hero + banded all-volumes table. G: is the real ReFS Dev Drive.
+#  (5) Drives — volumes / filter drivers tabs over one table. G: is the real ReFS Dev Drive.
 # ─────────────────────────────────────────────────────────────────────────────
-Test-UI "Navigate to Drives"                 { Goto "NavDrives" "DrivesScrollViewer" }
-# The Dev Drive hero is a Border (no peer); assert on its child buttons.
-Test-UI "Drives: hero 'Manage in Storage'"   { winapp ui wait-for "ManageInStorageButton" -a $AppPid -t 4000 }
-Test-UI "Drives: hero 'See filter drivers'"  { winapp ui wait-for "SeeFiltersButton"      -a $AppPid -t 4000 }
-Test-UI "Drives: G: row present"             { winapp ui wait-for "VolumeCard_G"    -a $AppPid -t 4000 }
-Test-UI "Drives: C: row present"             { winapp ui wait-for "VolumeCard_C"    -a $AppPid -t 4000 }
-Test-UI "Drives: G: shows Dev Drive badge"   { winapp ui wait-for "DevDriveBadge_G" -a $AppPid -t 4000 }
-Test-UI "Drives: C: has NO Dev Drive badge"  { winapp ui wait-for "DevDriveBadge_C" -a $AppPid --gone -t 3000 }
+Test-UI "Navigate to Drives"                 { Goto "NavDrives" "VolumesList" }
+Test-UI "Drives: tab strip present"          { winapp ui wait-for "DriveTab_Volumes"     -a $AppPid -t 3000 }
+Test-UI "Drives: 'Manage in Storage'"        { winapp ui wait-for "ManageInStorageButton" -a $AppPid -t 4000 }
+Test-UI "Drives: G: row present"             { winapp ui wait-for "VolumeRow_G"     -a $AppPid -t 4000 }
+Test-UI "Drives: C: row present"             { winapp ui wait-for "VolumeRow_C"     -a $AppPid -t 4000 }
+# Every row now carries a DEV DRIVE pill; C:'s reads "No". Absence would be the ambiguous
+# assertion — a missing pill and a missing row look the same.
+Test-UI "Drives: G: shows Dev Drive badge"    { winapp ui wait-for "DevDriveBadge_G" -a $AppPid -t 4000 }
+Test-UI "Drives: C: is marked not a Dev Drive" {
+    $n = Get-Name "DevDriveBadge_C"
+    if ($n -ne 'No') { throw "expected C:'s DEV DRIVE cell to read 'No' but got: '$n'" }
+}
 Test-UI "Drives: G: row reports ReFS" {
-    $n = Get-Name "VolumeCard_G"
+    $n = Get-Name "VolumeRow_G"
     if ($n -notmatch 'ReFS') { throw "expected 'ReFS' in G: row name but got: '$n'" }
 }
 Test-UI "Drives: G: row advertises Dev Drive" {
-    $n = Get-Name "VolumeCard_G"
+    $n = Get-Name "VolumeRow_G"
     if ($n -notmatch 'Dev Drive') { throw "expected 'Dev Drive' in G: row name but got: '$n'" }
 }
 Test-UI "Drives: C: row reports NTFS" {
-    $n = Get-Name "VolumeCard_C"
+    $n = Get-Name "VolumeRow_C"
     if ($n -notmatch 'NTFS') { throw "expected 'NTFS' in C: row name but got: '$n'" }
+}
+Test-UI "Drives: inspector names the selection" {
+    $n = Get-Name "DrivesInspectorName"
+    if ([string]::IsNullOrWhiteSpace($n)) { throw "inspector title was empty" }
+}
+Test-UI "Drives: Filter-drivers tab switches" {
+    winapp ui invoke "DriveTab_FilterDrivers" -a $AppPid
+    winapp ui wait-for "VolumesList" -a $AppPid --gone -t 3000
+}
+# Reading attached filters is privileged. Elevated we get the table; unelevated we get the button
+# that offers the one-shot read. Either is correct — an empty tab would not be.
+Test-UI "Drives: Filter-drivers tab has content" {
+    winapp ui wait-for "FiltersList" -a $AppPid -t 2000 2>$null | Out-Null
+    if ($LASTEXITCODE -ne 0) { winapp ui wait-for "SeeFiltersButton" -a $AppPid -t 3000 }
+}
+Test-UI "Drives: back to Volumes" {
+    winapp ui invoke "DriveTab_Volumes" -a $AppPid
+    winapp ui wait-for "VolumeRow_G" -a $AppPid -t 3000
 }
 winapp ui screenshot -a $AppPid -o "screenshots\04-drives.png" 2>$null | Out-Null
 
@@ -286,7 +308,7 @@ $auditPages = @(
     @{ nav = "NavSpace";         anchor = "SpaceItemsList" },
     @{ nav = "NavPackageCaches"; anchor = "PackageCachesScrollViewer" },
     @{ nav = "NavBenchmarks";    anchor = "BenchmarksScrollViewer" },
-    @{ nav = "NavDrives";        anchor = "DrivesScrollViewer" },
+    @{ nav = "NavDrives";        anchor = "VolumesList" },
     @{ nav = "NavCreate";        anchor = "SourceComboBox" },
     @{ nav = "SettingsItem";     anchor = "ThemeSelector" }
 )

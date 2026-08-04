@@ -66,10 +66,8 @@ public sealed partial class ShellPage : Page
                 {
                     RailItems.Children.Add(new Rectangle
                     {
-                        Width = 32,
-                        Height = 1,
                         Margin = new Thickness(0, 8, 0, 2),
-                        Fill = Resolve<Brush>("SmDividerBrush"),
+                        Style = Resolve<Style>("SmRailDividerStyle"),
                     });
                 }
 
@@ -159,13 +157,17 @@ public sealed partial class ShellPage : Page
     /// Moves the selected state to one rail button. Selection is visual state plus an automation
     /// item status, because the accent bar alone says nothing to a screen reader.
     /// </summary>
+    /// <remarks>
+    /// The ink is deliberately not set here. The <c>Selected</c> visual state carries it, so it
+    /// re-resolves when the theme changes; assigning <c>Foreground</c> imperatively wrote a local
+    /// value that outranked the style and froze at whichever theme was live when the rail was built.
+    /// </remarks>
     private void SelectRailButton(Button? selected)
     {
         foreach (Button button in RailItems.Children.OfType<Button>().Append(SettingsRailButton))
         {
             bool isSelected = ReferenceEquals(button, selected);
             VisualStateManager.GoToState(button, isSelected ? "Selected" : "Unselected", false);
-            button.Foreground = Resolve<Brush>(isSelected ? "SmTextBrush" : "SmDimBrush");
             AutomationProperties.SetItemStatus(button, isSelected ? "Selected" : string.Empty);
         }
     }

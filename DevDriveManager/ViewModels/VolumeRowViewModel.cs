@@ -31,11 +31,23 @@ public sealed class VolumeRowViewModel
         Description = $"{fileSystem}  ·  {free} free of {size}";
 
         FileSystemType = fileSystem;
-        UsedPercent = volume.UsedFraction * 100d;
 
-        // Stable automation ids so UI tests can locate this specific row and its badge.
+        CapacityText = size;
+        FreeText = free;
+        DevDrivePillText = volume.IsDevDrive ? (volume.IsTrusted ? "Trusted" : "Untrusted") : "No";
+
+        // A Dev Drive we could not confirm the trust of is not the good state and not the neutral one
+        // — it is the case worth looking at, which is what the warn pill is for.
+        DevDrivePillKind = !volume.IsDevDrive ? "mute" : volume.IsTrusted ? "dev" : "system";
+
+        NotesText = BuildNotes(volume);
+
+        // Stable automation ids so UI tests can locate this specific row and its badge. Deliberately
+        // not "VolumeCard_" — the context strip's VolumeCard control already owns that prefix, and the
+        // Drives room shows the strip and this table at once, so sharing it would make every lookup
+        // ambiguous.
         string idSuffix = volume.DriveLetter is char dl ? dl.ToString() : (label.Replace(' ', '_'));
-        AutomationId = $"VolumeCard_{idSuffix}";
+        AutomationId = $"VolumeRow_{idSuffix}";
         DevDriveBadgeAutomationId = $"DevDriveBadge_{idSuffix}";
 
         AutomationName = BuildAutomationName(label, fileSystem, size, free);
@@ -51,9 +63,29 @@ public sealed class VolumeRowViewModel
 
     public string FileSystemType { get; }
 
-    public double UsedPercent { get; }
+    /// <summary>The volume's total size. Its own column in the volumes table.</summary>
+    public string CapacityText { get; }
 
-    public string GlyphCode { get; } = "\uEDA2"; // Segoe Fluent Icons: Hard drive
+    /// <summary>Free bytes. Beside capacity rather than folded into a caption, so the two compare.</summary>
+    public string FreeText { get; }
+
+    /// <summary>"Trusted" / "Untrusted" / "No" — the volume's Dev Drive standing in one word.</summary>
+    public string DevDrivePillText { get; }
+
+    /// <summary>Pill kind for <see cref="DevDrivePillText"/>: dev, system (needs a look) or mute.</summary>
+    public string DevDrivePillKind { get; }
+
+    /// <summary>
+    /// The one thing worth saying about this volume that no other column carries — what it is for, or
+    /// what it is backed by. Empty when there is nothing true and useful to add.
+    /// </summary>
+    public string NotesText { get; }
+
+    /// <summary>
+    /// Index into the room's category swatch ramp. Assigned by the loader in row order so the volume
+    /// colours line up with the capacity strip above the table.
+    /// </summary>
+    public int CategoryIndex { get; set; }
 
     public bool IsDevDrive { get; }
 
@@ -63,19 +95,11 @@ public sealed class VolumeRowViewModel
 
     public string? VhdFilePath { get; }
 
-    public bool HasVhdPath => !string.IsNullOrEmpty(VhdFilePath);
-
     public string AutomationId { get; }
 
     public string DevDriveBadgeAutomationId { get; }
 
     public string AutomationName { get; }
-
-    /// <summary>
-    /// True for alternate ("banded") rows so the volumes table gives the eye a stripe to follow. Assigned
-    /// by the loader in row order; bound OneTime by the Drives page.
-    /// </summary>
-    public bool BandAlt { get; set; }
 
     private string BuildAutomationName(string label, string fileSystem, string size, string free)
     {
@@ -84,5 +108,48 @@ public sealed class VolumeRowViewModel
         badges += IsTrusted ? ", Trusted" : string.Empty;
         badges += IsVhd ? ", VHD backed" : string.Empty;
         return $"{head}, {fileSystem}, {free} free of {size}{badges}";
+    }
+
+    /// <summary>
+    /// The volume's one-line "what is this for", for the notes column.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately not a shrinkable-space figure. Free space is not shrinkable space — a shrink can
+    /// only use free space that is contiguous and at the end of the volume — so printing free bytes
+    /// under the word "shrink" would be a number the user could act on and we could not stand behind.
+    /// The Create room does that arithmetic properly, with the guard rails attached.
+    /// </remarks>
+    private static string BuildNotes(VolumeInfo volume)
+    {
+        if (volume.IsDevDrive)
+        {
+            return volume.IsVhd
+                ? $"Dev Drive on a virtual disk \u00B7 {volume.VhdFilePath}"
+                : "Dev Drive on a real partition \u00B7 no host filesystem in the way";
+        }
+
+        if (IsSystemVolume(volume))
+        {
+            return "System volume \u00B7 Windows, installed apps and your profile";
+        }
+
+        if (volume.IsVhd)
+        {
+            return $"Virtual disk \u00B7 {volume.VhdFilePath}";
+        }
+
+        return string.Empty;
+    }
+
+    /// <summary>True for the volume Windows itself is installed on.</summary>
+    private static bool IsSystemVolume(VolumeInfo volume)
+    {
+        if (volume.DriveLetter is not char letter)
+        {
+            return false;
+        }
+
+        string system = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+        return system.Length > 0 && char.ToUpperInvariant(system[0]) == char.ToUpperInvariant(letter);
     }
 }
