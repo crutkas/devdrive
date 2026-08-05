@@ -1191,4 +1191,17 @@
         <Setter Property="VerticalAlignment" Value="Center" />
     </Style>
 
+    <!--
+        The track a benchmark bar is drawn in. Fixed width on purpose: PerfSuiteRowViewModel computes
+        SystemBarWidth and DevBarWidth in pixels against a maxBarWidth it was constructed with, not as
+        a fraction, so the track has to be the width that math assumed or every bar lies about its
+        ratio. 300 is that number, and it is asserted by PerfSuiteViewModelTests.
+    -->
+    <Style x:Key="SmBenchBarTrackStyle" TargetType="Border">
+        <Setter Property="Height" Value="11" />
+        <Setter Property="Background" Value="{ThemeResource SmMuteTintBrush}" />
+        <Setter Property="CornerRadius" Value="4" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
 </ResourceDictionary>

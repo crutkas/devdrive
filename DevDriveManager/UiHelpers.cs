@@ -166,18 +166,6 @@ public static class UiHelpers
         _ => "SmImpactTextStyle",
     });
 
-    /// <summary>Foreground brush for a speed-test ratio: success green when the Dev Drive wins (or ties), neutral otherwise.</summary>
-    public static Brush? RatioBrush(bool isFavorable) =>
-        Resource(isFavorable ? "SystemFillColorSuccessBrush" : "TextFillColorSecondaryBrush");
-
-    /// <summary>
-    /// Alternating-row ("banded") background so the eye flows across a multi-row grid. The base row uses
-    /// the standard card fill; the alternate row uses the secondary card fill — one subtle, theme-correct
-    /// step apart in Light, Dark and High Contrast.
-    /// </summary>
-    public static Brush? BandBrush(bool isAlternate) =>
-        Resource(isAlternate ? "CardBackgroundFillColorSecondaryBrush" : "CardBackgroundFillColorDefaultBrush");
-
     /// <summary>
     /// Resolves a named <see cref="Brush"/> from the merged application resources.
     /// </summary>

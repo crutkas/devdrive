@@ -1,323 +1,755 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <Page
     x:Class="DevDriveManager.Pages.BenchmarksPage"
+    x:Name="BenchmarksRoot"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:DevDriveManager.Controls"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:local="using:DevDriveManager"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:pages="using:DevDriveManager.Pages"
+    xmlns:storage="using:DevDriveStorage"
     xmlns:vm="using:DevDriveManager.ViewModels"
     mc:Ignorable="d">
 
-    <ScrollViewer AutomationProperties.AutomationId="BenchmarksScrollViewer" VerticalScrollBarVisibility="Auto">
-        <StackPanel
-            MaxWidth="1000"
-            Padding="36,24,36,40"
-            HorizontalAlignment="Stretch"
-            Spacing="20">
+    <Page.Resources>
+        <controls:VolumeAccentRoleToBrushConverter x:Key="VolumeAccent" />
+    </Page.Resources>
 
-            <!--  Page header  -->
-            <StackPanel Spacing="2">
-                <TextBlock Style="{StaticResource TitleTextBlockStyle}" Text="Benchmarks" />
-                <TextBlock
-                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                    Style="{StaticResource BodyTextBlockStyle}"
-                    Text="{x:Bind ViewModel.Suite.Subtitle, Mode=OneWay}"
-                    TextWrapping="Wrap" />
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!--
+            Context strip. This room compares two volumes against each other, so the two tiles above
+            the table are the two things every number below is about. The run verbs ride on the strip
+            like every other room's primary action.
+        -->
+        <Grid
+            Grid.Row="0"
+            Padding="18,10"
+            ColumnSpacing="14"
+            BorderBrush="{ThemeResource SmDividerBrush}"
+            BorderThickness="0,0,0,1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <ItemsControl
+                Grid.Column="0"
+                AutomationProperties.AutomationId="BenchmarksVolumeStrip"
+                AutomationProperties.Name="Volumes being compared"
+                ItemsSource="{x:Bind VolumeStripEntries}">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <StackPanel Orientation="Horizontal" Spacing="10" />
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="storage:VolumeStripEntry">
+                        <controls:VolumeCard
+                            AccentBrush="{x:Bind AccentRole, Converter={StaticResource VolumeAccent}}"
+                            IsSystemVolume="{x:Bind IsSystemVolume}"
+                            ReclaimableBytes="{x:Bind ReclaimableBytes}"
+                            Volume="{x:Bind Volume}" />
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <StackPanel
+                Grid.Column="1"
+                VerticalAlignment="Center"
+                Orientation="Horizontal"
+                Spacing="8">
+                <Button
+                    AutomationProperties.AutomationId="CancelTestsButton"
+                    Command="{x:Bind ViewModel.Suite.CancelCommand}"
+                    Content="Cancel"
+                    Visibility="{x:Bind local:UiHelpers.BoolToVisibility(ViewModel.Suite.IsRunning), Mode=OneWay}" />
+                <Button
+                    AutomationProperties.AutomationId="RunAllTestsButton"
+                    Command="{x:Bind ViewModel.Suite.RunAllCommand}"
+                    Content="Run all tests"
+                    Style="{StaticResource AccentButtonStyle}" />
             </StackPanel>
+        </Grid>
 
-            <InfoBar
-                AutomationProperties.AutomationId="SystemDriveBaselineNotice"
-                IsClosable="False"
-                IsOpen="True"
-                Message="These timings remain useful now and become the comparison baseline after you add a Dev Drive."
-                Severity="Informational"
-                Title="Running on the system drive"
-                Visibility="{x:Bind local:UiHelpers.BoolToVisibility(ViewModel.Suite.ShowSystemDriveBaseline), Mode=OneWay}" />
+        <!--
+            The room. Same two columns as Caches and Drives: the centre answers "which ones and how
+            fast", the inspector answers "what does that number actually mean".
+        -->
+        <Grid
+            Grid.Row="1"
+            Padding="18,11"
+            ColumnSpacing="11">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" MinWidth="560" />
+                <ColumnDefinition Width="312" />
+            </Grid.ColumnDefinitions>
 
-            <InfoBar
-                AutomationProperties.AutomationId="BenchmarksRefreshing"
-                IsClosable="False"
-                IsOpen="True"
-                Message="Benchmark commands will return when the refresh completes."
-                Severity="Informational"
-                Title="Checking drive status"
-                Visibility="{x:Bind local:UiHelpers.InvertBoolToVisibility(ViewModel.Suite.IsAvailable), Mode=OneWay}" />
+            <Grid Grid.Column="0" RowSpacing="11">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*" MinHeight="200" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
 
-            <!--  ── Hero: run-all + streaming headline ──  -->
-            <Border
-                Padding="18"
-                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                BorderThickness="1"
-                CornerRadius="{StaticResource ControlCornerRadius}">
-                <StackPanel Spacing="12">
-                    <Grid ColumnSpacing="12">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <FontIcon
-                            Grid.Column="0"
-                            VerticalAlignment="Center"
-                            FontSize="22"
-                            Glyph="{x:Bind ViewModel.Suite.SuiteGlyph, Mode=OneTime}" />
-                        <TextBlock
-                            Grid.Column="1"
-                            VerticalAlignment="Center"
-                            AutomationProperties.AutomationId="EcosystemsSummary"
-                            Style="{StaticResource BodyStrongTextBlockStyle}"
-                            Text="{x:Bind ViewModel.Suite.SummaryText, Mode=OneWay}"
-                            TextWrapping="Wrap" />
-                        <StackPanel
-                            Grid.Column="2"
-                            Orientation="Horizontal"
-                            Spacing="8">
-                            <Button
-                                AutomationProperties.AutomationId="CancelTestsButton"
-                                Command="{x:Bind ViewModel.Suite.CancelCommand}"
-                                Content="Cancel"
-                                Visibility="{x:Bind local:UiHelpers.BoolToVisibility(ViewModel.Suite.IsRunning), Mode=OneWay}" />
-                            <Button
-                                AutomationProperties.AutomationId="RunAllTestsButton"
-                                Command="{x:Bind ViewModel.Suite.RunAllCommand}"
-                                Style="{StaticResource AccentButtonStyle}">
-                                <StackPanel Orientation="Horizontal" Spacing="6">
-                                    <FontIcon FontSize="14" Glyph="{x:Bind ViewModel.Suite.RunGlyph, Mode=OneTime}" />
-                                    <TextBlock Text="Run all tests" />
-                                </StackPanel>
-                            </Button>
-                        </StackPanel>
-                    </Grid>
+                <!--  ================= Workloads / suggestions =================  -->
+                <Border
+                    Grid.Row="0"
+                    SizeChanged="TableCard_SizeChanged"
+                    Style="{StaticResource SmCardStyle}">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
 
-                    <StackPanel
-                        Spacing="4"
-                        Visibility="{x:Bind local:UiHelpers.BoolToVisibility(ViewModel.Suite.IsRunning), Mode=OneWay}">
-                        <ProgressBar
-                            Maximum="{x:Bind ViewModel.Suite.RunProgressMax, Mode=OneWay}"
-                            Value="{x:Bind ViewModel.Suite.RunProgressValue, Mode=OneWay}" />
-                        <TextBlock
-                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                            Style="{StaticResource CaptionTextBlockStyle}"
-                            Text="{x:Bind ViewModel.Suite.RunStatusText, Mode=OneWay}" />
-                    </StackPanel>
+                        <!--
+                            Tabs, not a title. "How fast is it today" and "what would make it faster"
+                            are two questions about one machine, and a title would have to name one.
+                        -->
+                        <Border Grid.Row="0" Padding="0" Style="{StaticResource SmCardHeadStyle}">
+                            <Grid ColumnSpacing="10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
 
-                    <StackPanel
-                        Orientation="Horizontal"
-                        Spacing="8"
-                        Visibility="{x:Bind local:UiHelpers.BoolToVisibility(ViewModel.Suite.HasHeadline), Mode=OneWay}">
-                        <TextBlock
-                            Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
-                            Style="{StaticResource SubtitleTextBlockStyle}"
-                            Text="{x:Bind ViewModel.Suite.HeadlineValue, Mode=OneWay}" />
-                        <TextBlock
-                            Margin="0,0,0,3"
-                            VerticalAlignment="Bottom"
-                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                            Style="{StaticResource CaptionTextBlockStyle}"
-                            Text="{x:Bind ViewModel.Suite.HeadlineCaption, Mode=OneWay}" />
-                    </StackPanel>
+                                <ItemsControl
+                                    Grid.Column="0"
+                                    VerticalAlignment="Stretch"
+                                    AutomationProperties.AutomationId="BenchTabStrip"
+                                    AutomationProperties.Name="What to show"
+                                    ItemsSource="{x:Bind Tabs}">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <StackPanel Orientation="Horizontal" Spacing="2" />
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate x:DataType="vm:BenchTabViewModel">
+                                            <Grid>
+                                                <Button
+                                                    AutomationProperties.AutomationId="{x:Bind AutomationId}"
+                                                    AutomationProperties.Name="{x:Bind AutomationName, Mode=OneWay}"
+                                                    Click="SelectTab_Click"
+                                                    Style="{StaticResource SmTabButtonStyle}"
+                                                    Tag="{x:Bind}">
+                                                    <StackPanel Orientation="Horizontal" Spacing="5">
+                                                        <TextBlock Style="{x:Bind local:UiHelpers.TabTextStyle(IsSelected), Mode=OneWay}" Text="{x:Bind Title, Mode=OneWay}" />
+                                                        <TextBlock Style="{StaticResource SmTabCountTextStyle}" Text="{x:Bind Count, Mode=OneWay}" />
+                                                    </StackPanel>
+                                                </Button>
+                                                <Rectangle
+                                                    Height="2.5"
+                                                    Margin="12,0,12,4"
+                                                    VerticalAlignment="Bottom"
+                                                    Fill="{ThemeResource SmAccentBrush}"
+                                                    RadiusX="2"
+                                                    RadiusY="2"
+                                                    Visibility="{x:Bind local:UiHelpers.BoolToVisibility(IsSelected), Mode=OneWay}" />
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
 
-                    <StackPanel
-                        Orientation="Horizontal"
-                        Spacing="8"
-                        Visibility="{x:Bind local:UiHelpers.BoolToVisibility(ViewModel.Suite.ShowPerformanceModeCaption), Mode=OneWay}">
-                        <FontIcon
-                            VerticalAlignment="Top"
-                            FontSize="14"
-                            Glyph="{x:Bind ViewModel.Suite.CaveatGlyph, Mode=OneTime}" />
-                        <TextBlock
-                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                            Style="{StaticResource CaptionTextBlockStyle}"
-                            Text="{x:Bind ViewModel.Suite.PerformanceModeCaptionMessage, Mode=OneTime}"
-                            TextWrapping="Wrap" />
-                    </StackPanel>
+                                <TextBlock
+                                    Grid.Column="1"
+                                    VerticalAlignment="Center"
+                                    AutomationProperties.AutomationId="BenchmarksSubhead"
+                                    Style="{StaticResource SmCardSubTextStyle}"
+                                    Text="{x:Bind SubheadText, Mode=OneWay}"
+                                    TextTrimming="CharacterEllipsis"
+                                    ToolTipService.ToolTip="{x:Bind SubheadText, Mode=OneWay}" />
 
-                    <TextBlock
-                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                        Style="{StaticResource CaptionTextBlockStyle}"
-                        Text="{x:Bind ViewModel.Suite.SuiteHonestyLine, Mode=OneTime}"
-                        TextWrapping="Wrap" />
-                </StackPanel>
-            </Border>
-
-            <!--  ── Per-workload measured rows (banded) ──  -->
-            <StackPanel Spacing="8">
-                <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Workloads" />
-
-                <ItemsControl
-                    AutomationProperties.AutomationId="BenchmarkWorkloadsList"
-                    HorizontalContentAlignment="Stretch"
-                    ItemsSource="{x:Bind BenchmarkCards, Mode=OneWay}">
-                    <ItemsControl.ItemsPanel>
-                        <ItemsPanelTemplate>
-                            <StackPanel Spacing="2" />
-                        </ItemsPanelTemplate>
-                    </ItemsControl.ItemsPanel>
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate x:DataType="vm:EcosystemCardViewModel">
-                            <Border
-                                Padding="16"
-                                AutomationProperties.AutomationId="{x:Bind AutomationId}"
-                                AutomationProperties.Name="{x:Bind Name}"
-                                Background="{x:Bind local:UiHelpers.BandBrush(BandAlt), Mode=OneWay}"
-                                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                                BorderThickness="1"
-                                CornerRadius="{StaticResource ControlCornerRadius}">
-                                <StackPanel Spacing="10">
-                                    <Grid ColumnSpacing="12">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="Auto" />
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <FontIcon
-                                            Grid.Column="0"
-                                            VerticalAlignment="Center"
-                                            FontSize="18"
-                                            Glyph="{x:Bind Glyph}" />
-                                        <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">
-                                            <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="{x:Bind Name}" />
-                                            <TextBlock
-                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                                Style="{StaticResource CaptionTextBlockStyle}"
-                                                Text="{x:Bind ToolsLine}" />
-                                        </StackPanel>
-                                        <TextBlock
-                                            Grid.Column="2"
-                                            Margin="0,0,8,0"
-                                            VerticalAlignment="Center"
-                                            Foreground="{x:Bind local:UiHelpers.RatioBrush(Benchmark.DeltaIsFavorable), Mode=OneWay}"
-                                            Style="{StaticResource SubtitleTextBlockStyle}"
-                                            Text="{x:Bind Benchmark.DeltaText, Mode=OneWay}"
-                                            Visibility="{x:Bind local:UiHelpers.BoolToVisibility(Benchmark.ShowComparisonResult), Mode=OneWay}" />
-                                        <Button
-                                            Grid.Column="3"
-                                            AutomationProperties.AutomationId="{x:Bind Benchmark.RunButtonAutomationId, Mode=OneTime}"
-                                            AutomationProperties.Name="{x:Bind Benchmark.RunAccessibleName, Mode=OneTime}"
-                                            Command="{x:Bind Benchmark.RunCommand}">
-                                            <StackPanel Orientation="Horizontal" Spacing="6">
-                                                <FontIcon FontSize="14" Glyph="&#xE768;" />
-                                                <TextBlock Text="Run test" />
-                                            </StackPanel>
-                                        </Button>
-                                    </Grid>
-
-                                    <!--  Running indicator  -->
+                                <Border
+                                    Grid.Column="2"
+                                    Margin="0,0,14,0"
+                                    Style="{StaticResource SmChipStyle}">
                                     <TextBlock
-                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                        Style="{StaticResource CaptionTextBlockStyle}"
-                                        Text="{x:Bind Benchmark.RunStatusText, Mode=OneWay}"
-                                        TextWrapping="Wrap"
-                                        Visibility="{x:Bind local:UiHelpers.BoolToVisibility(Benchmark.IsRunning), Mode=OneWay}" />
+                                        AutomationProperties.AutomationId="BenchmarksStatus"
+                                        Style="{StaticResource SmCardSubTextStyle}"
+                                        Text="{x:Bind StatusText, Mode=OneWay}" />
+                                </Border>
+                            </Grid>
+                        </Border>
 
-                                    <!--  Required CLI availability  -->
+                        <!--
+                            The run is streamed here rather than in a dialog: the suite takes minutes
+                            and the point of a benchmark room is watching the numbers arrive.
+                        -->
+                        <Grid
+                            Grid.Row="1"
+                            Padding="14,9,14,9"
+                            ColumnSpacing="12"
+                            BorderBrush="{ThemeResource SmDividerBrush}"
+                            BorderThickness="0,0,0,1"
+                            Visibility="{x:Bind local:UiHelpers.BoolToVisibility(ViewModel.Suite.IsRunning), Mode=OneWay}">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <ProgressBar
+                                Grid.Column="0"
+                                VerticalAlignment="Center"
+                                AutomationProperties.AutomationId="BenchmarkProgress"
+                                Maximum="{x:Bind ViewModel.Suite.RunProgressMax, Mode=OneWay}"
+                                Value="{x:Bind ViewModel.Suite.RunProgressValue, Mode=OneWay}" />
+                            <TextBlock
+                                Grid.Column="1"
+                                AutomationProperties.AutomationId="BenchmarkProgressText"
+                                Style="{StaticResource SmCardSubTextStyle}"
+                                Text="{x:Bind ViewModel.Suite.RunStatusText, Mode=OneWay}" />
+                        </Grid>
+
+                        <!--  Two column headers, one per tab, both reading the shared flex width.  -->
+                        <Border
+                            Grid.Row="2"
+                            Padding="14,7,14,7"
+                            BorderBrush="{ThemeResource SmDividerBrush}"
+                            BorderThickness="0,0,0,1">
+                            <Grid>
+                                <Grid ColumnSpacing="12" Visibility="{x:Bind local:UiHelpers.BoolToVisibility(ShowWorkloads), Mode=OneWay}">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="168" />
+                                        <ColumnDefinition Width="{x:Bind FlexColumnWidth, Mode=OneWay}" />
+                                        <ColumnDefinition Width="88" />
+                                        <ColumnDefinition Width="88" />
+                                        <ColumnDefinition Width="96" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
                                     <TextBlock
-                                        AutomationProperties.AutomationId="{x:Bind Benchmark.ToolAvailabilityAutomationId, Mode=OneTime}"
-                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                        Style="{StaticResource CaptionTextBlockStyle}"
-                                        Text="{x:Bind Benchmark.ToolAvailabilityText, Mode=OneWay}"
-                                        TextWrapping="Wrap"
-                                        Visibility="{x:Bind local:UiHelpers.BoolToVisibility(Benchmark.ShowToolAvailability), Mode=OneWay}" />
+                                        Grid.Column="0"
+                                        Style="{StaticResource SmColumnHeaderTextStyle}"
+                                        Text="WORKLOAD" />
+                                    <TextBlock
+                                        Grid.Column="1"
+                                        Style="{StaticResource SmColumnHeaderTextStyle}"
+                                        Text="WHAT IT BUILDS" />
+                                    <TextBlock
+                                        Grid.Column="2"
+                                        HorizontalAlignment="Right"
+                                        AutomationProperties.AutomationId="SystemColumnHeader"
+                                        Style="{StaticResource SmColumnHeaderTextStyle}"
+                                        Text="{x:Bind SystemColumnHeader, Mode=OneWay}" />
+                                    <TextBlock
+                                        Grid.Column="3"
+                                        HorizontalAlignment="Right"
+                                        AutomationProperties.AutomationId="DevColumnHeader"
+                                        Style="{StaticResource SmColumnHeaderTextStyle}"
+                                        Text="{x:Bind DevColumnHeader, Mode=OneWay}" />
+                                    <TextBlock
+                                        Grid.Column="4"
+                                        Style="{StaticResource SmColumnHeaderTextStyle}"
+                                        Text="DIFFERENCE" />
+                                    <TextBlock
+                                        Grid.Column="5"
+                                        Style="{StaticResource SmColumnHeaderTextStyle}"
+                                        Text="ACTION" />
+                                </Grid>
 
-                                    <!--  Done: side-by-side C:/Dev bars (slower drive = longer bar; accent = Dev Drive)  -->
-                                    <StackPanel
-                                        Spacing="5"
-                                        Visibility="{x:Bind local:UiHelpers.BoolToVisibility(Benchmark.IsDone), Mode=OneWay}">
-                                        <Grid ColumnSpacing="8">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="28" />
-                                                <ColumnDefinition Width="320" />
-                                                <ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock
-                                                VerticalAlignment="Center"
-                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                                Style="{StaticResource CaptionTextBlockStyle}"
-                                                Text="{x:Bind Benchmark.SystemDriveLabel, Mode=OneTime}" />
-                                            <Border
-                                                Grid.Column="1"
-                                                Height="16"
-                                                HorizontalAlignment="Left"
-                                                Background="{ThemeResource ControlFillColorSecondaryBrush}"
-                                                CornerRadius="4">
-                                                <Border
-                                                    Width="{x:Bind Benchmark.SystemBarWidth, Mode=OneWay}"
-                                                    HorizontalAlignment="Left"
-                                                    Background="{ThemeResource PerfBaselineBarBrush}"
-                                                    CornerRadius="4" />
-                                            </Border>
-                                            <TextBlock
-                                                Grid.Column="2"
-                                                VerticalAlignment="Center"
-                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                                Style="{StaticResource CaptionTextBlockStyle}"
-                                                Text="{x:Bind Benchmark.SystemValueText, Mode=OneWay}" />
-                                        </Grid>
+                                <Grid ColumnSpacing="12" Visibility="{x:Bind local:UiHelpers.BoolToVisibility(ShowSuggestions), Mode=OneWay}">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="228" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock
+                                        Grid.Column="0"
+                                        Style="{StaticResource SmColumnHeaderTextStyle}"
+                                        Text="LEVER" />
+                                    <TextBlock
+                                        Grid.Column="1"
+                                        Style="{StaticResource SmColumnHeaderTextStyle}"
+                                        Text="WHAT IT IS WORTH" />
+                                    <TextBlock
+                                        Grid.Column="2"
+                                        Style="{StaticResource SmColumnHeaderTextStyle}"
+                                        Text="ACTION" />
+                                </Grid>
+                            </Grid>
+                        </Border>
+
+                        <Grid Grid.Row="3">
+                            <!--  ================= Workloads =================  -->
+                            <ListView
+                                AutomationProperties.AutomationId="WorkloadsList"
+                                AutomationProperties.Name="Measurable build workloads"
+                                ItemsSource="{x:Bind Workloads, Mode=OneWay}"
+                                SelectedItem="{x:Bind SelectedWorkload, Mode=TwoWay}"
+                                SelectionMode="Single"
+                                Visibility="{x:Bind local:UiHelpers.BoolToVisibility(ShowWorkloads), Mode=OneWay}">
+                                <ListView.ItemContainerStyle>
+                                    <Style TargetType="ListViewItem">
+                                        <Setter Property="Padding" Value="0" />
+                                        <Setter Property="MinHeight" Value="0" />
+                                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                    </Style>
+                                </ListView.ItemContainerStyle>
+                                <ListView.ItemTemplate>
+                                    <DataTemplate x:DataType="vm:BenchWorkloadViewModel">
                                         <Grid
-                                            ColumnSpacing="8"
-                                            Visibility="{x:Bind local:UiHelpers.BoolToVisibility(Benchmark.HasComparison), Mode=OneTime}">
+                                            Padding="14,8,14,8"
+                                            AutomationProperties.AutomationId="{x:Bind RowAutomationId}"
+                                            AutomationProperties.Name="{x:Bind RowAccessibleName}"
+                                            ColumnSpacing="12">
                                             <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="28" />
-                                                <ColumnDefinition Width="320" />
+                                                <ColumnDefinition Width="168" />
+                                                <ColumnDefinition Width="{Binding FlexColumnWidth, ElementName=BenchmarksRoot}" />
+                                                <ColumnDefinition Width="88" />
+                                                <ColumnDefinition Width="88" />
+                                                <ColumnDefinition Width="96" />
                                                 <ColumnDefinition Width="Auto" />
                                             </Grid.ColumnDefinitions>
-                                            <TextBlock
+
+                                            <Grid
+                                                Grid.Column="0"
                                                 VerticalAlignment="Center"
-                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                                Style="{StaticResource CaptionTextBlockStyle}"
-                                                Text="{x:Bind Benchmark.DevDriveLabel, Mode=OneTime}" />
-                                            <Border
+                                                ColumnSpacing="9">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+                                                <FontIcon
+                                                    Grid.Column="0"
+                                                    FontSize="15"
+                                                    Glyph="{x:Bind Glyph}" />
+                                                <TextBlock
+                                                    Grid.Column="1"
+                                                    Style="{StaticResource SmCellTextStyle}"
+                                                    Text="{x:Bind Name}"
+                                                    TextTrimming="CharacterEllipsis" />
+                                            </Grid>
+
+                                            <TextBlock
                                                 Grid.Column="1"
-                                                Height="16"
-                                                HorizontalAlignment="Left"
-                                                Background="{ThemeResource ControlFillColorSecondaryBrush}"
-                                                CornerRadius="4">
-                                                <Border
-                                                    Width="{x:Bind Benchmark.DevBarWidth, Mode=OneWay}"
-                                                    HorizontalAlignment="Left"
-                                                    Background="{ThemeResource PerfDevDriveBarBrush}"
-                                                    CornerRadius="4" />
-                                            </Border>
+                                                VerticalAlignment="Center"
+                                                Style="{StaticResource SmCardSubTextStyle}"
+                                                Text="{x:Bind WhatItBuilds, Mode=OneWay}"
+                                                TextTrimming="CharacterEllipsis"
+                                                ToolTipService.ToolTip="{x:Bind WhatItBuilds, Mode=OneWay}" />
+
+                                            <!--
+                                                An em dash, not a blank. Under a column header an empty
+                                                cell reads as data we failed to load rather than a run
+                                                that has not happened.
+                                            -->
                                             <TextBlock
                                                 Grid.Column="2"
                                                 VerticalAlignment="Center"
-                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                                Style="{StaticResource CaptionTextBlockStyle}"
-                                                Text="{x:Bind Benchmark.DevValueText, Mode=OneWay}" />
+                                                AutomationProperties.AutomationId="{x:Bind SystemCellAutomationId}"
+                                                Style="{StaticResource SmNumericCellTextStyle}"
+                                                Text="{x:Bind SystemCell, Mode=OneWay}" />
+
+                                            <TextBlock
+                                                Grid.Column="3"
+                                                VerticalAlignment="Center"
+                                                AutomationProperties.AutomationId="{x:Bind DevCellAutomationId}"
+                                                Style="{StaticResource SmNumericCellTextStyle}"
+                                                Text="{x:Bind DevCell, Mode=OneWay}" />
+
+                                            <Border
+                                                Grid.Column="4"
+                                                VerticalAlignment="Center"
+                                                Style="{x:Bind local:UiHelpers.PillStyle(DeltaKind), Mode=OneWay}">
+                                                <TextBlock
+                                                    AutomationProperties.AutomationId="{x:Bind DeltaAutomationId}"
+                                                    Style="{x:Bind local:UiHelpers.PillTextStyle(DeltaKind), Mode=OneWay}"
+                                                    Text="{x:Bind DeltaLabel, Mode=OneWay}" />
+                                            </Border>
+
+                                            <Button
+                                                Grid.Column="5"
+                                                VerticalAlignment="Center"
+                                                AutomationProperties.AutomationId="{x:Bind Row.RunButtonAutomationId, Mode=OneTime}"
+                                                AutomationProperties.Name="{x:Bind Row.RunAccessibleName, Mode=OneTime}"
+                                                Command="{x:Bind Row.RunCommand}"
+                                                Content="Run"
+                                                Style="{StaticResource SmCompactButtonStyle}" />
                                         </Grid>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+
+                            <!--  ================= Suggestions =================  -->
+                            <ListView
+                                AutomationProperties.AutomationId="SuggestionsList"
+                                AutomationProperties.Name="Levers that change these numbers"
+                                ItemsSource="{x:Bind Suggestions, Mode=OneWay}"
+                                SelectionMode="None"
+                                Visibility="{x:Bind local:UiHelpers.BoolToVisibility(ShowSuggestions), Mode=OneWay}">
+                                <ListView.ItemContainerStyle>
+                                    <Style TargetType="ListViewItem">
+                                        <Setter Property="Padding" Value="0" />
+                                        <Setter Property="MinHeight" Value="0" />
+                                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                    </Style>
+                                </ListView.ItemContainerStyle>
+                                <ListView.ItemTemplate>
+                                    <DataTemplate x:DataType="vm:BenchSuggestionViewModel">
+                                        <Grid
+                                            Padding="14,9,14,9"
+                                            AutomationProperties.AutomationId="{x:Bind AutomationId}"
+                                            AutomationProperties.Name="{x:Bind Title}"
+                                            ColumnSpacing="12">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="228" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock
+                                                Grid.Column="0"
+                                                VerticalAlignment="Center"
+                                                Style="{StaticResource SmCellTextStyle}"
+                                                Text="{x:Bind Title}"
+                                                TextWrapping="Wrap" />
+                                            <TextBlock
+                                                Grid.Column="1"
+                                                VerticalAlignment="Center"
+                                                Style="{StaticResource SmCardSubTextStyle}"
+                                                Text="{x:Bind Detail}"
+                                                TextWrapping="Wrap" />
+                                            <Button
+                                                Grid.Column="2"
+                                                VerticalAlignment="Center"
+                                                AutomationProperties.AutomationId="{x:Bind ActionAutomationId}"
+                                                Click="Suggestion_Click"
+                                                Content="{x:Bind ActionText}"
+                                                Style="{StaticResource SmCompactButtonStyle}"
+                                                Tag="{x:Bind}"
+                                                Visibility="{x:Bind local:UiHelpers.BoolToVisibility(HasAction)}" />
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+                        </Grid>
+                    </Grid>
+                </Border>
+
+                <!--
+                    The comparison. The table states the numbers; this states their relationship, and
+                    two bars of different lengths say "1.6x" faster than the characters "1.6x" do.
+
+                    It also carries the room's slack, and it lists the workloads that have NOT been
+                    measured alongside the ones that have — a comparison chart that silently omits
+                    what it does not know is the dishonest kind.
+                -->
+                <Border Grid.Row="1" Style="{StaticResource SmCardStyle}">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <Border Grid.Row="0" Style="{StaticResource SmCardHeadStyle}">
+                            <Grid ColumnSpacing="10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock
+                                    Grid.Column="0"
+                                    VerticalAlignment="Center"
+                                    AutomationProperties.AutomationId="MeasuredRunsHead"
+                                    Style="{StaticResource SmCardTitleTextStyle}"
+                                    Text="Measured runs" />
+                                <TextBlock
+                                    Grid.Column="1"
+                                    VerticalAlignment="Center"
+                                    Style="{StaticResource SmCardSubTextStyle}"
+                                    Text="a longer bar is a slower build"
+                                    TextTrimming="CharacterEllipsis" />
+
+                                <StackPanel
+                                    Grid.Column="2"
+                                    Margin="0,0,14,0"
+                                    VerticalAlignment="Center"
+                                    Orientation="Horizontal"
+                                    Spacing="14">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <Rectangle
+                                            VerticalAlignment="Center"
+                                            Fill="{ThemeResource PerfBaselineBarBrush}"
+                                            Style="{StaticResource SmLegendSwatchStyle}" />
+                                        <TextBlock Style="{StaticResource SmCardSubTextStyle}" Text="{x:Bind ViewModel.Suite.SystemLegend, Mode=OneWay}" />
                                     </StackPanel>
-
-                                    <!--  Skipped: honest reason  -->
-                                    <TextBlock
-                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                        Style="{StaticResource CaptionTextBlockStyle}"
-                                        Text="{x:Bind Benchmark.SkipReasonText, Mode=OneWay}"
-                                        TextWrapping="Wrap"
-                                        Visibility="{x:Bind local:UiHelpers.BoolToVisibility(Benchmark.IsSkipped), Mode=OneWay}" />
-
-                                    <!--  Methodology / what the build is  -->
-                                    <TextBlock
-                                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                        Style="{StaticResource CaptionTextBlockStyle}"
-                                        Text="{x:Bind Benchmark.Sub, Mode=OneWay}"
-                                        TextWrapping="Wrap" />
-
-                                    <!--  Where the wall-clock went (after a run)  -->
-                                    <TextBlock
-                                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                        Style="{StaticResource CaptionTextBlockStyle}"
-                                        Text="{x:Bind Benchmark.PhaseBreakdownText, Mode=OneWay}"
-                                        TextWrapping="Wrap"
-                                        Visibility="{x:Bind local:UiHelpers.BoolToVisibility(Benchmark.HasPhaseBreakdown), Mode=OneWay}" />
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <Rectangle
+                                            VerticalAlignment="Center"
+                                            Fill="{ThemeResource PerfDevDriveBarBrush}"
+                                            Style="{StaticResource SmLegendSwatchStyle}" />
+                                        <TextBlock Style="{StaticResource SmCardSubTextStyle}" Text="{x:Bind ViewModel.Suite.DevLegend, Mode=OneWay}" />
+                                    </StackPanel>
                                 </StackPanel>
-                            </Border>
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
-            </StackPanel>
-        </StackPanel>
-    </ScrollViewer>
+                            </Grid>
+                        </Border>
+
+                        <ScrollViewer
+                            Grid.Row="1"
+                            MaxHeight="286"
+                            VerticalScrollBarVisibility="Auto">
+                            <ItemsControl
+                                Margin="14,12,14,12"
+                                AutomationProperties.AutomationId="MeasuredRunsList"
+                                AutomationProperties.Name="Measured runs per workload"
+                                ItemsSource="{x:Bind Workloads, Mode=OneWay}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <StackPanel Spacing="12" />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="vm:BenchWorkloadViewModel">
+                                        <Grid ColumnSpacing="14" RowSpacing="4">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="168" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                            </Grid.RowDefinitions>
+
+                                            <!--
+                                                The id lives on the name, not on the row Grid. A layout-only Grid
+                                                inside a DataTemplate is filtered out of the UIA control view, so an
+                                                id on it resolves to nothing; the label is the row's only guaranteed
+                                                peer whether the workload has bars yet or not.
+                                            -->
+                                            <TextBlock
+                                                Grid.Row="0"
+                                                Grid.RowSpan="2"
+                                                Grid.Column="0"
+                                                VerticalAlignment="Center"
+                                                AutomationProperties.AutomationId="{x:Bind RunsRowAutomationId}"
+                                                Style="{StaticResource SmCellTextStyle}"
+                                                Text="{x:Bind Name}"
+                                                TextTrimming="CharacterEllipsis" />
+
+                                            <!--  Nothing measured yet: say so where the bars would be.  -->
+                                            <TextBlock
+                                                Grid.Row="0"
+                                                Grid.RowSpan="2"
+                                                Grid.Column="1"
+                                                VerticalAlignment="Center"
+                                                Style="{StaticResource SmCardSubTextStyle}"
+                                                Text="{x:Bind UnmeasuredNote, Mode=OneWay}"
+                                                TextWrapping="Wrap"
+                                                Visibility="{x:Bind local:UiHelpers.InvertBoolToVisibility(IsMeasured), Mode=OneWay}" />
+
+                                            <Grid
+                                                Grid.Row="0"
+                                                Grid.Column="1"
+                                                ColumnSpacing="9"
+                                                Visibility="{x:Bind local:UiHelpers.BoolToVisibility(IsMeasured), Mode=OneWay}">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="26" />
+                                                    <ColumnDefinition Width="300" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock
+                                                    Grid.Column="0"
+                                                    VerticalAlignment="Center"
+                                                    Style="{StaticResource SmCardSubTextStyle}"
+                                                    Text="{x:Bind Row.SystemDriveLabel, Mode=OneTime}" />
+                                                <Border Grid.Column="1" Style="{StaticResource SmBenchBarTrackStyle}">
+                                                    <Border
+                                                        Width="{x:Bind Row.SystemBarWidth, Mode=OneWay}"
+                                                        HorizontalAlignment="Left"
+                                                        Background="{ThemeResource PerfBaselineBarBrush}"
+                                                        CornerRadius="4" />
+                                                </Border>
+                                                <TextBlock
+                                                    Grid.Column="2"
+                                                    VerticalAlignment="Center"
+                                                    Style="{StaticResource SmCardSubTextStyle}"
+                                                    Text="{x:Bind Row.SystemValueText, Mode=OneWay}" />
+                                            </Grid>
+
+                                            <Grid
+                                                Grid.Row="1"
+                                                Grid.Column="1"
+                                                ColumnSpacing="9"
+                                                Visibility="{x:Bind local:UiHelpers.BoolToVisibility(ShowDevBar), Mode=OneWay}">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="26" />
+                                                    <ColumnDefinition Width="300" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock
+                                                    Grid.Column="0"
+                                                    VerticalAlignment="Center"
+                                                    Style="{StaticResource SmCardSubTextStyle}"
+                                                    Text="{x:Bind Row.DevDriveLabel, Mode=OneTime}" />
+                                                <Border Grid.Column="1" Style="{StaticResource SmBenchBarTrackStyle}">
+                                                    <Border
+                                                        Width="{x:Bind Row.DevBarWidth, Mode=OneWay}"
+                                                        HorizontalAlignment="Left"
+                                                        Background="{ThemeResource PerfDevDriveBarBrush}"
+                                                        CornerRadius="4" />
+                                                </Border>
+                                                <TextBlock
+                                                    Grid.Column="2"
+                                                    VerticalAlignment="Center"
+                                                    Style="{StaticResource SmCardSubTextStyle}"
+                                                    Text="{x:Bind Row.DevValueText, Mode=OneWay}" />
+                                            </Grid>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+
+                        <!--
+                            Why there is no MB/s figure anywhere in this room. It belongs under the
+                            chart it is about, not in the inspector, because it is a claim about the
+                            whole comparison rather than about any one workload.
+                        -->
+                        <Border
+                            Grid.Row="2"
+                            Padding="14,9,14,10"
+                            Background="{ThemeResource SmCardHeaderBrush}"
+                            BorderBrush="{ThemeResource SmDividerBrush}"
+                            BorderThickness="0,1,0,0">
+                            <TextBlock
+                                AutomationProperties.AutomationId="DiskSpeedAbsenceNote"
+                                Style="{StaticResource SmCardSubTextStyle}"
+                                Text="{x:Bind ViewModel.Suite.DiskSpeedAbsenceNote, Mode=OneTime}"
+                                TextWrapping="Wrap" />
+                        </Border>
+                    </Grid>
+                </Border>
+            </Grid>
+
+            <!--  ================= Inspector =================  -->
+            <Border Grid.Column="1" Style="{StaticResource SmCardStyle}">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <Border Grid.Row="0" Style="{StaticResource SmCardHeadStyle}">
+                        <StackPanel VerticalAlignment="Center" Spacing="1">
+                            <TextBlock
+                                AutomationProperties.AutomationId="BenchInspectorTitle"
+                                Style="{StaticResource SmCardTitleTextStyle}"
+                                Text="{x:Bind InspectorTitle, Mode=OneWay}"
+                                TextTrimming="CharacterEllipsis" />
+                            <TextBlock
+                                AutomationProperties.AutomationId="BenchInspectorTools"
+                                MaxLines="2"
+                                Style="{StaticResource SmCardSubTextStyle}"
+                                Text="{x:Bind InspectorSubtitle, Mode=OneWay}"
+                                TextTrimming="CharacterEllipsis"
+                                TextWrapping="Wrap"
+                                ToolTipService.ToolTip="{x:Bind InspectorSubtitle, Mode=OneWay}" />
+                        </StackPanel>
+                    </Border>
+
+                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                        <StackPanel Padding="13,12,13,14">
+                            <Grid Margin="0,0,0,12" ColumnSpacing="9">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Border Grid.Column="0" Style="{StaticResource SmTierCardStyle}">
+                                    <StackPanel Spacing="3">
+                                        <TextBlock
+                                            AutomationProperties.AutomationId="InspectorSystemLabel"
+                                            Style="{StaticResource SmMetricLabelTextStyle}"
+                                            Text="{x:Bind SystemColumnHeader, Mode=OneWay}" />
+                                        <TextBlock
+                                            AutomationProperties.AutomationId="InspectorSystemValue"
+                                            Style="{StaticResource SmMetricValueTextStyle}"
+                                            Text="{x:Bind InspectorSystemValue, Mode=OneWay}" />
+                                    </StackPanel>
+                                </Border>
+                                <Border Grid.Column="1" Style="{StaticResource SmTierCardStyle}">
+                                    <StackPanel Spacing="3">
+                                        <TextBlock
+                                            AutomationProperties.AutomationId="InspectorDevLabel"
+                                            Style="{StaticResource SmMetricLabelTextStyle}"
+                                            Text="{x:Bind DevColumnHeader, Mode=OneWay}" />
+                                        <TextBlock
+                                            AutomationProperties.AutomationId="InspectorDevValue"
+                                            Style="{StaticResource SmMetricValueTextStyle}"
+                                            Text="{x:Bind InspectorDevValue, Mode=OneWay}" />
+                                    </StackPanel>
+                                </Border>
+                            </Grid>
+
+                            <TextBlock Style="{StaticResource SmSectionLabelTextStyle}" Text="WHAT THIS MEASURES" />
+                            <TextBlock
+                                Margin="0,0,0,10"
+                                AutomationProperties.AutomationId="BenchInspectorWhat"
+                                Style="{StaticResource SmKeyValueTextStyle}"
+                                Text="{x:Bind InspectorWhat, Mode=OneWay}"
+                                TextWrapping="Wrap" />
+
+                            <TextBlock Style="{StaticResource SmSectionLabelTextStyle}" Text="THE COMMAND IT RUNS" />
+                            <TextBlock
+                                Margin="0,0,0,10"
+                                AutomationProperties.AutomationId="BenchInspectorCommand"
+                                Style="{StaticResource SmMonoCellTextStyle}"
+                                Text="{x:Bind InspectorCommand, Mode=OneWay}"
+                                TextWrapping="Wrap" />
+
+                            <TextBlock Style="{StaticResource SmSectionLabelTextStyle}" Text="HOW IT IS TIMED" />
+                            <TextBlock
+                                Margin="0,0,0,10"
+                                AutomationProperties.AutomationId="BenchInspectorMethod"
+                                Style="{StaticResource SmKeyValueTextStyle}"
+                                Text="{x:Bind InspectorMethod, Mode=OneWay}"
+                                TextWrapping="Wrap" />
+
+                            <TextBlock Style="{StaticResource SmSectionLabelTextStyle}" Text="THE RUNS BEHIND THE NUMBER" />
+                            <TextBlock
+                                AutomationProperties.AutomationId="BenchInspectorRuns"
+                                Style="{StaticResource SmKeyValueTextStyle}"
+                                Text="{x:Bind InspectorRuns, Mode=OneWay}"
+                                TextWrapping="Wrap" />
+                        </StackPanel>
+                    </ScrollViewer>
+
+                    <!--
+                        The honesty line, pinned to the foot the way every room pins its "what does
+                        this actually do to my machine". This is now the only place it lives.
+                    -->
+                    <Border
+                        Grid.Row="2"
+                        Padding="13,9,13,10"
+                        Background="{ThemeResource SmCardHeaderBrush}"
+                        BorderBrush="{ThemeResource SmDividerBrush}"
+                        BorderThickness="0,1,0,0">
+                        <TextBlock
+                            AutomationProperties.AutomationId="SuiteHonestyLine"
+                            Style="{StaticResource SmCardSubTextStyle}"
+                            Text="{x:Bind ViewModel.Suite.SuiteHonestyLine, Mode=OneTime}"
+                            TextWrapping="Wrap" />
+                    </Border>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!--  The room's closing edge: live facts on the left, keyboard hints on the right.  -->
+        <controls:RoomStatusBar
+            x:Name="StatusBar"
+            Grid.Row="2"
+            AutomationProperties.AutomationId="BenchmarksStatusBar"
+            AutomationProperties.Name="Benchmarks status"
+            Hints="Enter select &#xB7; Tab to actions" />
+    </Grid>
 </Page>

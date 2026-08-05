@@ -99,6 +99,21 @@ function Goto([string]$navId, [string]$anchorId) {
     winapp ui wait-for $anchorId -a $AppPid -t 5000 | Out-Null
 }
 
+# Click a row and wait until a companion element reflects the selection.
+#
+# `winapp ui click` simulates a mouse, so it is sensitive to whatever is on screen at that instant --
+# a tooltip PopupHost, a window that has not finished laying out, focus moving elsewhere. The
+# interaction itself is sound; only the timing is not. Retry a bounded number of times rather than
+# sleeping longer and hoping.
+function Click-Until([string]$target, [string]$probeId, [string]$expected, [int]$tries = 4) {
+    for ($i = 1; $i -le $tries; $i++) {
+        winapp ui click $target -a $AppPid 2>$null | Out-Null
+        Start-Sleep -Milliseconds (300 * $i)
+        if ((Get-Name $probeId) -eq $expected) { return $true }
+    }
+    return $false
+}
+
 # Select a ComboBox item by its AutomationId (expand, then invoke the item).
 function Select-Combo([string]$comboId, [string]$itemId) {
     winapp ui invoke $comboId -a $AppPid 2>$null | Out-Null   # ExpandCollapse
@@ -173,9 +188,7 @@ Test-UI "Overview: selecting a signal explains it without navigating" {
         winapp ui wait-for "SignalsSubtitle" -a $AppPid -t 3000 | Out-Null
         return
     }
-    winapp ui click $row -a $AppPid 2>$null | Out-Null
-    Start-Sleep -Milliseconds 400
-    if ((Get-Name "OverviewInspectorTitle") -ne 'About this signal') {
+    if (-not (Click-Until $row "OverviewInspectorTitle" 'About this signal')) {
         throw "selecting a signal did not fill the inspector"
     }
     if ([string]::IsNullOrWhiteSpace((Get-Name "OverviewSelectionDetail"))) {
@@ -245,14 +258,64 @@ Test-UI "Caches: 'Learn what this does' link"{ winapp ui wait-for "LearnWhatThis
 winapp ui screenshot -a $AppPid -o "screenshots\02-caches.png" 2>$null | Out-Null
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  (4) Benchmarks — demoted to on-demand; run-all hero + per-workload rows.
+#  (4) Benchmarks — strip / tabbed table / measured-runs chart / inspector.
+#      Two tabs: how fast it is today, and what would change that.
 # ─────────────────────────────────────────────────────────────────────────────
-Test-UI "Navigate to Benchmarks"             { Goto "NavBenchmarks" "BenchmarksScrollViewer" }
+Test-UI "Navigate to Benchmarks"             { Goto "NavBenchmarks" "WorkloadsList" }
 Test-UI "Benchmarks: Run all present"        { winapp ui wait-for "RunAllTestsButton" -a $AppPid -t 4000 }
-# The workloads list is a banded ItemsControl (no peer); assert on the universal git-clone row's
-# Run button (the filesystem baseline that's always present).
-Test-UI "Benchmarks: git-clone workload row" { winapp ui wait-for "RunRow_git-clone"  -a $AppPid -t 4000 }
+Test-UI "Benchmarks: tab strip present"      { winapp ui wait-for "BenchTab_Workloads" -a $AppPid -t 3000 }
+Test-UI "Benchmarks: git-clone workload row" { winapp ui wait-for "BenchRow_git-clone" -a $AppPid -t 4000 }
+Test-UI "Benchmarks: git-clone Run button"   { winapp ui wait-for "RunRow_git-clone"   -a $AppPid -t 4000 }
+Test-UI "Benchmarks: measured-runs card"     { winapp ui wait-for "MeasuredRunsList"   -a $AppPid -t 4000 }
+Test-UI "Benchmarks: git-clone row in measured runs" { winapp ui wait-for "BenchRuns_git-clone" -a $AppPid -t 4000 }
+
+# Nothing has been run, so every cell must say so rather than sit blank — an empty cell under a
+# column header reads as data we failed to load, not as a measurement that has not happened.
+Test-UI "Benchmarks: unrun row shows an em dash, not a blank" {
+    $n = Get-Name "BenchSystem_git-clone"
+    if ($n -ne [char]0x2014) { throw "expected an em dash in the unrun system cell but got: '$n'" }
+}
+Test-UI "Benchmarks: unrun difference reads 'Not measured'" {
+    $n = Get-Name "BenchDelta_git-clone"
+    if ($n -ne 'Not measured') { throw "expected 'Not measured' in the difference pill but got: '$n'" }
+}
+Test-UI "Benchmarks: head chip counts what is measured" {
+    $n = Get-Name "BenchmarksStatus"
+    if ($n -notmatch 'measured') { throw "expected the head chip to count measurements but got: '$n'" }
+}
+
+# The inspector explains the selected workload. The room selects the first row on load, so it must
+# be answering a real question before anything is clicked.
+Test-UI "Benchmarks: inspector names a workload" {
+    $n = Get-Name "BenchInspectorTitle"
+    if ([string]::IsNullOrWhiteSpace($n) -or $n -eq 'Select a workload') {
+        throw "expected the inspector to open on the first workload but got: '$n'"
+    }
+}
+Test-UI "Benchmarks: inspector shows the command"  { winapp ui wait-for "BenchInspectorCommand" -a $AppPid -t 3000 }
+Test-UI "Benchmarks: honesty line is present"      { winapp ui wait-for "SuiteHonestyLine"      -a $AppPid -t 3000 }
+Test-UI "Benchmarks: raw-throughput note present"  { winapp ui wait-for "DiskSpeedAbsenceNote"  -a $AppPid -t 3000 }
+Test-UI "Benchmarks: status bar present"           { winapp ui wait-for "BenchmarksStatusBar"   -a $AppPid -t 3000 }
+
+# The Suggestions tab is the only place the suite's Upside* copy renders. Switching to it must swap
+# the table, not merely highlight a tab.
+Test-UI "Benchmarks: switch to Suggestions" {
+    winapp ui invoke "BenchTab_Suggestions" -a $AppPid 2>$null | Out-Null
+    Start-Sleep -Milliseconds 400
+    winapp ui wait-for "SuggestionsList" -a $AppPid -t 4000
+}
+Test-UI "Benchmarks: source lever present"   { winapp ui wait-for "Suggestion_Source" -a $AppPid -t 3000 }
+Test-UI "Benchmarks: caches lever present"   { winapp ui wait-for "Suggestion_Caches" -a $AppPid -t 3000 }
+Test-UI "Benchmarks: a lever routes somewhere" {
+    $n = Get-Name "Suggestion_Caches_Action"
+    if ([string]::IsNullOrWhiteSpace($n)) { throw "expected the caches lever to carry a room button" }
+}
 winapp ui screenshot -a $AppPid -o "screenshots\03-benchmarks.png" 2>$null | Out-Null
+Test-UI "Benchmarks: back to Workloads" {
+    winapp ui invoke "BenchTab_Workloads" -a $AppPid 2>$null | Out-Null
+    Start-Sleep -Milliseconds 400
+    winapp ui wait-for "WorkloadsList" -a $AppPid -t 4000
+}
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  (5) Drives — volumes / filter drivers tabs over one table. G: is the real ReFS Dev Drive.
@@ -464,7 +527,7 @@ $auditPages = @(
     @{ nav = "NavReclaim";       anchor = "ReclaimCategoryList" },
     @{ nav = "NavSpace";         anchor = "SpaceItemsList" },
     @{ nav = "NavPackageCaches"; anchor = "PackageCachesScrollViewer" },
-    @{ nav = "NavBenchmarks";    anchor = "BenchmarksScrollViewer" },
+    @{ nav = "NavBenchmarks";    anchor = "WorkloadsList" },
     @{ nav = "NavDrives";        anchor = "VolumesList" },
     @{ nav = "NavCreate";        anchor = "SourceComboBox" },
     @{ nav = "SettingsItem";     anchor = "ThemeSelector" }

@@ -75,3 +75,6 @@ $RECYCLE.BIN/
 **/screenshot.png
 **/test-screenshot.png
 **/test-results.json
+
+# PID handle dropped by 'winapp run'
+.apppid
