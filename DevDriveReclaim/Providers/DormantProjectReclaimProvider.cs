@@ -45,8 +45,8 @@ public sealed class DormantProjectReclaimProvider(IWorktreeInspector? inspector 
         {
             var candidates = new List<ReclaimCandidate>();
 
-            IEnumerable<DiscoveredRepository> repositories = RepositoryWalker
-                .Discover(context.SourceRoots, cancellationToken)
+            IEnumerable<DiscoveredRepository> repositories = context
+                .Repositories(cancellationToken)
                 .Where(r => !r.IsWorktree);
 
             foreach (DiscoveredRepository repository in repositories)

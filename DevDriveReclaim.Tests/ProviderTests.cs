@@ -181,6 +181,76 @@ public sealed class ProviderTests
         Assert.AreEqual(@"G:\", candidate.VolumeRoot);
     }
 
+    [TestMethod]
+    public void TheSharedRepositoryListCannotBeMutatedByAProvider()
+    {
+        using var fixture = new ReclaimFixture();
+        fixture.Repo("main-repo");
+
+        IReadOnlyList<DiscoveredRepository> shared =
+            Context(fixture).Repositories(CancellationToken.None);
+
+        // Three providers read this concurrently, so one of them reaching through the interface
+        // and mutating would corrupt the other two mid-enumeration.
+        Assert.IsNotInstanceOfType<List<DiscoveredRepository>>(shared,
+            "A shared list must not be castable back to the mutable one the walker built.");
+    }
+
     private static ReclaimScanContext Context(ReclaimFixture fixture) =>
         new([@"C:\"], [fixture.Root], minimumCandidateBytes: 1);
+
+    [TestMethod]
+    public void TheRepositoryWalkHappensOncePerContext()
+    {
+        using var fixture = new ReclaimFixture();
+        fixture.Repo("main-repo");
+        fixture.Worktree("side-tree", @"C:\main-repo\.git\worktrees\side");
+
+        ReclaimScanContext context = Context(fixture);
+
+        IReadOnlyList<DiscoveredRepository> first = context.Repositories(CancellationToken.None);
+        IReadOnlyList<DiscoveredRepository> second = context.Repositories(CancellationToken.None);
+
+        Assert.HasCount(2, first);
+        Assert.AreSame(first, second,
+            "A second walk would be the same answer bought twice, and two lists free to disagree.");
+    }
+
+    [TestMethod]
+    public async Task ConcurrentProvidersShareOneRepositoryWalk()
+    {
+        using var fixture = new ReclaimFixture();
+        fixture.Repo("main-repo");
+        fixture.Worktree("side-tree", @"C:\main-repo\.git\worktrees\side");
+
+        ReclaimScanContext context = Context(fixture);
+
+        // The engine fans providers out with Task.WhenAll, so this is the shape that actually
+        // happens: three callers arriving at once. Identity is the proof — separate walks could
+        // not return the same list instance.
+        IReadOnlyList<DiscoveredRepository>[] results = await Task.WhenAll(
+            Enumerable.Range(0, 3).Select(_ =>
+                Task.Run(() => context.Repositories(CancellationToken.None))));
+
+        Assert.AreSame(results[0], results[1]);
+        Assert.AreSame(results[0], results[2]);
+    }
+
+    [TestMethod]
+    public void ACancelledWalkDoesNotPoisonTheContext()
+    {
+        using var fixture = new ReclaimFixture();
+        fixture.Repo("main-repo");
+
+        ReclaimScanContext context = Context(fixture);
+
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+
+        Assert.ThrowsExactly<OperationCanceledException>(
+            () => context.Repositories(cancelled.Token));
+
+        // A Lazy<T> would have cached that exception and refused to ever answer again.
+        Assert.HasCount(1, context.Repositories(CancellationToken.None));
+    }
 }

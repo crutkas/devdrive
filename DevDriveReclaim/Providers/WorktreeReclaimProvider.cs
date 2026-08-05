@@ -37,8 +37,8 @@ public sealed class WorktreeReclaimProvider(IWorktreeInspector? inspector = null
         {
             var candidates = new List<ReclaimCandidate>();
 
-            IEnumerable<DiscoveredRepository> worktrees = RepositoryWalker
-                .Discover(context.SourceRoots, cancellationToken)
+            IEnumerable<DiscoveredRepository> worktrees = context
+                .Repositories(cancellationToken)
                 .Where(r => r.IsWorktree);
 
             foreach (DiscoveredRepository worktree in worktrees)

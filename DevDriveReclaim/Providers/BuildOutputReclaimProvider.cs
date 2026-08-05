@@ -53,7 +53,7 @@ public sealed class BuildOutputReclaimProvider : IReclaimProvider
         return Task.Run<IReadOnlyList<ReclaimCandidate>>(() =>
         {
             IReadOnlyList<DiscoveredRepository> repositories =
-                RepositoryWalker.Discover(context.SourceRoots, cancellationToken);
+                context.Repositories(cancellationToken);
 
             var candidates = new List<ReclaimCandidate>();
 
