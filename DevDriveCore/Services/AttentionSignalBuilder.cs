@@ -40,6 +40,22 @@ public sealed record AttentionInputs
 
     /// <summary>True once a space scan has produced a snapshot.</summary>
     public bool HasSpaceScan { get; init; }
+
+    /// <summary>
+    /// Below this fraction free, a volume is called out. Defaults to
+    /// <see cref="AttentionSignalBuilder.LowFreeFraction"/>; Settings can move it.
+    /// </summary>
+    public double LowFreeFraction { get; init; } = AttentionSignalBuilder.LowFreeFraction;
+
+    /// <summary>
+    /// How many caches can sit off a Dev Drive before they are reported as one signal instead of one
+    /// each. Zero means never roll up. Defaults to
+    /// <see cref="AttentionSignalBuilder.DefaultCacheRollupThreshold"/>.
+    /// </summary>
+    public int CacheRollupThreshold { get; init; } = AttentionSignalBuilder.DefaultCacheRollupThreshold;
+
+    /// <summary>Whether cache placement is reported at all.</summary>
+    public bool WatchCachesOffDevDrive { get; init; } = true;
 }
 
 /// <summary>
@@ -60,10 +76,21 @@ public sealed record AttentionInputs
 public static class AttentionSignalBuilder
 {
     /// <summary>
-    /// Below this fraction free, a volume is called out. Matches the headroom Windows itself wants
-    /// for servicing, and is roughly where NTFS fragmentation and ReFS allocation both start to bite.
+    /// Below this fraction free, a volume is called out by default. Matches the headroom Windows
+    /// itself wants for servicing, and is roughly where NTFS fragmentation and ReFS allocation both
+    /// start to bite. Settings can move it; see <see cref="AttentionInputs.LowFreeFraction"/>.
     /// </summary>
     public const double LowFreeFraction = 0.15d;
+
+    /// <summary>
+    /// How many caches can sit off the Dev Drive by default before they are reported as one signal
+    /// instead of one row each.
+    /// </summary>
+    /// <remarks>
+    /// Above this, the per-ecosystem rows say the same sentence in different words and crowd out
+    /// findings that are not about caches at all. This room ranks; the Caches room enumerates.
+    /// </remarks>
+    public const int DefaultCacheRollupThreshold = 3;
 
     /// <summary>Builds the ranked signal list.</summary>
     public static IReadOnlyList<AttentionSignal> Build(AttentionInputs inputs)
@@ -104,7 +131,7 @@ public static class AttentionSignalBuilder
         foreach (VolumeInfo volume in inputs.Volumes.Where(v => v.SizeBytes > 0))
         {
             double free = 1d - volume.UsedFraction;
-            if (free >= LowFreeFraction)
+            if (free >= inputs.LowFreeFraction)
             {
                 continue;
             }
@@ -115,10 +142,10 @@ public static class AttentionSignalBuilder
                 Id = $"LowSpace_{Slug(name)}",
                 Title = $"{name} is {volume.UsedFraction * 100:0}% full",
                 Detail = $"{ByteSizeFormatter.Format(volume.FreeBytes)} free — below the "
-                    + $"{LowFreeFraction * 100:0}% Windows wants to keep",
+                    + $"{inputs.LowFreeFraction * 100:0}% Windows wants to keep",
                 Where = name,
                 Impact = $"{free * 100:0}% free",
-                Kind = free < LowFreeFraction / 2d ? SignalKind.Bad : SignalKind.Warn,
+                Kind = free < inputs.LowFreeFraction / 2d ? SignalKind.Bad : SignalKind.Warn,
                 RoomTag = "reclaim",
                 RoomLabel = "Reclaim",
                 IsUrgent = true,
@@ -160,10 +187,13 @@ public static class AttentionSignalBuilder
     /// Above this, the per-ecosystem rows say the same sentence in different words and crowd out
     /// findings that are not about caches at all. This room ranks; the Caches room enumerates.
     /// </remarks>
-    private const int CacheRollupThreshold = 3;
-
     private static IEnumerable<AttentionSignal> CacheSignals(AttentionInputs inputs)
     {
+        if (!inputs.WatchCachesOffDevDrive)
+        {
+            yield break;
+        }
+
         // Only worth raising once a Dev Drive exists to move them to. Without one the actionable
         // signal is "there is no Dev Drive", and saying both is the same advice twice.
         if (!inputs.Volumes.Any(v => v.IsDevDrive))
@@ -175,7 +205,7 @@ public static class AttentionSignalBuilder
         int moved = inputs.CachesOnDevDrive;
         int total = moved + off.Count;
 
-        if (off.Count >= CacheRollupThreshold)
+        if (inputs.CacheRollupThreshold > 0 && off.Count >= inputs.CacheRollupThreshold)
         {
             long bytes = off.Sum(c => c.SizeBytes);
             yield return new AttentionSignal

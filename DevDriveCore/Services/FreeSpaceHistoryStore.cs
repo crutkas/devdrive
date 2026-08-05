@@ -14,6 +14,9 @@ public interface IFreeSpaceHistoryStore
     /// </summary>
     /// <returns>The history after the write.</returns>
     IReadOnlyList<FreeSpaceSample> Append(FreeSpaceSample sample);
+
+    /// <summary>Forgets every reading. Never throws.</summary>
+    void Clear();
 }
 
 /// <summary>
@@ -82,6 +85,23 @@ public sealed class JsonFreeSpaceHistoryStore : IFreeSpaceHistoryStore
             }
 
             return updated;
+        }
+    }
+
+    /// <inheritdoc />
+    public void Clear()
+    {
+        lock (_gate)
+        {
+            try
+            {
+                File.Delete(_path);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Same contract as every other write here: a history we could not clear is a chart
+                // that keeps showing what it showed. Nothing about that warrants a dialog.
+            }
         }
     }
 

@@ -229,14 +229,48 @@ public sealed class FreeSpaceHistoryTests
     }
 
     [TestMethod]
-    public void Store_ReadsACorruptFileAsEmpty()
+    public void Store_ClearForgetsEveryReading()
     {
         string path = Path.Combine(Path.GetTempPath(), $"ddm-history-{Guid.NewGuid():N}.json");
         try
         {
-            File.WriteAllText(path, "{ this is not json");
+            JsonFreeSpaceHistoryStore store = new(path);
+            store.Append(Sample(0, 400));
+            store.Append(Sample(1, 390));
 
-            Assert.IsEmpty(new JsonFreeSpaceHistoryStore(path).Load());
+            store.Clear();
+
+            Assert.IsEmpty(store.Load());
+            Assert.IsFalse(File.Exists(path));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [TestMethod]
+    public void Store_ClearOnAnEmptyStoreIsHarmless()
+    {
+        string path = Path.Combine(Path.GetTempPath(), $"ddm-history-{Guid.NewGuid():N}.json");
+        JsonFreeSpaceHistoryStore store = new(path);
+
+        store.Clear();
+
+        Assert.IsEmpty(store.Load());
+    }
+
+    [TestMethod]
+    public void Store_RecordsAgainAfterAClear()
+    {
+        string path = Path.Combine(Path.GetTempPath(), $"ddm-history-{Guid.NewGuid():N}.json");
+        try
+        {
+            JsonFreeSpaceHistoryStore store = new(path);
+            store.Append(Sample(0, 400));
+            store.Clear();
+
+            Assert.HasCount(1, store.Append(Sample(1, 390)));
         }
         finally
         {

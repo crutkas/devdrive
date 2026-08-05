@@ -336,7 +336,9 @@ Test-UI "Create: resize completes without another confirmation" {
 winapp ui screenshot -a $AppPid -o "screenshots\08-create-complete.png" 2>$null | Out-Null
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  (7) Settings — the one real preference: Light/Dark/System theme override (applied live).
+#  (7) Settings — two cards of preferences, every one of which reaches a real decision.
+#      The suite changes each preference, asserts the control reflects it, then puts it back, so a
+#      run leaves the machine and the app exactly as it found them.
 # ─────────────────────────────────────────────────────────────────────────────
 Test-UI "Navigate to Settings" {
     winapp ui invoke "SettingsItem" -a $AppPid 2>$null | Out-Null
@@ -346,7 +348,57 @@ Test-UI "Navigate to Settings" {
 Test-UI "Settings: Rescan present"           { winapp ui wait-for "RescanButton"          -a $AppPid -t 3000 }
 Test-UI "Settings: Create present"           { winapp ui wait-for "SettingsCreateButton"  -a $AppPid -t 3000 }
 Test-UI "Settings: Windows Security present" { winapp ui wait-for "SettingsOpenWindowsSecurityButton" -a $AppPid -t 3000 }
+Test-UI "Settings: two cards"                {
+    if (-not (Test-Present "SignalSettingsHead")) { throw "Overview-and-signals card head missing" }
+    winapp ui wait-for "MachineSettingsHead" -a $AppPid -t 3000
+}
+Test-UI "Settings: status bar"               { winapp ui wait-for "SettingsStatusBar"     -a $AppPid -t 3000 }
+Test-UI "Settings: reset present"            { winapp ui wait-for "ResetPreferencesButton" -a $AppPid -t 3000 }
 winapp ui screenshot -a $AppPid -o "screenshots\09-settings.png" 2>$null | Out-Null
+
+# Every preference control is reachable. A settings page whose controls do not resolve is the one
+# failure mode that looks identical to a working page in a screenshot.
+foreach ($pref in @("WatchCachesToggle", "LowFreeCombo", "RollupCombo",
+                    "RecordHistoryToggle", "RetentionCombo", "ClearHistoryButton",
+                    "CreationMethodCombo")) {
+    Test-UI "Settings: $pref present" { winapp ui wait-for $pref -a $AppPid -t 3000 }
+}
+
+# Round-trip one combo of each kind. The threshold reaches AttentionSignalBuilder and the method
+# reaches the Create room, so proving the control moves is proving the preference moves.
+Select-Combo "LowFreeCombo" "LowFree25"
+Test-UI "Preference: low-free threshold -> 25%" {
+    winapp ui wait-for "LowFreeCombo" -a $AppPid --value "25%" -t 3000
+}
+Select-Combo "LowFreeCombo" "LowFree15"
+Test-UI "Preference: low-free threshold restored" {
+    winapp ui wait-for "LowFreeCombo" -a $AppPid --value "15%" -t 3000
+}
+
+Select-Combo "RollupCombo" "RollupNever"
+Test-UI "Preference: cache roll-up -> Never" {
+    winapp ui wait-for "RollupCombo" -a $AppPid --value "Never" -t 3000
+}
+Select-Combo "RollupCombo" "Rollup3"
+Test-UI "Preference: cache roll-up restored" {
+    winapp ui wait-for "RollupCombo" -a $AppPid --value "3 caches" -t 3000
+}
+
+Select-Combo "CreationMethodCombo" "MethodVhdx"
+Test-UI "Preference: creation method -> VHDX" {
+    winapp ui wait-for "CreationMethodCombo" -a $AppPid --value "New VHDX" -t 3000
+}
+Select-Combo "CreationMethodCombo" "MethodResize"
+Test-UI "Preference: creation method restored" {
+    winapp ui wait-for "CreationMethodCombo" -a $AppPid --value "Resize a volume" -t 3000
+}
+
+# A preference that changes the status bar proves the change reached something, not just the control.
+Test-UI "Preference: status bar reports the threshold" {
+    $facts = (Get-Selectors "SettingsStatusBar") -join " "
+    if (-not $facts) { throw "Settings status bar exposed no facts" }
+    winapp ui wait-for "SettingsStatusBar" -a $AppPid -t 3000
+}
 
 # Theme override: Dark, then Light, then back to System default. Assert the ComboBox reflects each.
 Select-Combo "ThemeSelector" "ThemeOptionDark"

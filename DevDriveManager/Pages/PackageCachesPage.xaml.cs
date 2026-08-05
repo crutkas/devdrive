@@ -48,6 +48,10 @@ public sealed partial class PackageCachesPage : Page, INotifyPropertyChanged
 
     private double _locationColumnWidth = 220;
 
+    // Guards ContentDialog re-entrancy: WinUI allows one dialog at a time and a second ShowAsync
+    // throws, which a double-click on the explainer link would otherwise reach.
+    private bool _dialogOpen;
+
     public PackageCachesPage()
     {
         InitializeComponent();
@@ -572,8 +576,17 @@ public sealed partial class PackageCachesPage : Page, INotifyPropertyChanged
     }
 
     /// <summary>Shows a long-form, selectable read-only doc in a scrollable content dialog.</summary>
+    /// <remarks>
+    /// Guarded because WinUI allows exactly one <see cref="ContentDialog"/> at a time and a second
+    /// <c>ShowAsync</c> throws. A double-click on the button is the obvious way to reach that.
+    /// </remarks>
     private async System.Threading.Tasks.Task ShowDocDialogAsync(string title, string message, string automationId)
     {
+        if (_dialogOpen)
+        {
+            return;
+        }
+
         var dialog = new ContentDialog
         {
             Title = title,
@@ -594,7 +607,16 @@ public sealed partial class PackageCachesPage : Page, INotifyPropertyChanged
         };
         ApplyDialogStyle(dialog);
         AutomationProperties.SetAutomationId(dialog, automationId);
-        await dialog.ShowAsync();
+
+        _dialogOpen = true;
+        try
+        {
+            await dialog.ShowAsync();
+        }
+        finally
+        {
+            _dialogOpen = false;
+        }
     }
 
     private static void ApplyDialogStyle(ContentDialog dialog)

@@ -1112,5 +1112,83 @@
             </Setter.Value>
         </Setter>
     </Style>
+    <!--
+        ================= Settings rows =================
+
+        A setting row is a label, a one-line explanation, and one control, separated by a hairline.
+        Spec: 8px 14px padding, 13.5px label at weight 500, 11.5px dim sub, both at 1.4 line-height.
+
+        The divider is on the row rather than between rows so a card can hold any number of them
+        without the caller having to know which one is last — the final hairline lands on the card's
+        own edge and reads as the card border.
+    -->
+    <Style x:Key="SmSetRowStyle" TargetType="Border">
+        <Setter Property="Padding" Value="14,8" />
+        <Setter Property="BorderBrush" Value="{ThemeResource SmDividerBrush}" />
+        <Setter Property="BorderThickness" Value="0,0,0,1" />
+    </Style>
+
+    <Style x:Key="SmSetLabelTextStyle" TargetType="TextBlock">
+        <Setter Property="FontSize" Value="13.5" />
+        <Setter Property="FontWeight" Value="Medium" />
+        <Setter Property="LineHeight" Value="19" />
+        <Setter Property="Foreground" Value="{ThemeResource SmTextBrush}" />
+        <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+
+    <Style x:Key="SmSetSubTextStyle" TargetType="TextBlock">
+        <Setter Property="FontSize" Value="11.5" />
+        <Setter Property="LineHeight" Value="16" />
+        <Setter Property="Foreground" Value="{ThemeResource SmDimBrush}" />
+        <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+
+    <!--
+        The setting-row combo. Sized to the comp's .combo (12.5px, 4px 10px, 5px radius) rather than
+        the platform default, which is 32px tall and turns eleven rows into two screens.
+    -->
+    <Style
+        x:Key="SmSetComboStyle"
+        BasedOn="{StaticResource DefaultComboBoxStyle}"
+        TargetType="ComboBox">
+        <Setter Property="MinHeight" Value="0" />
+        <Setter Property="MinWidth" Value="0" />
+        <Setter Property="Padding" Value="10,3,6,4" />
+        <Setter Property="FontSize" Value="12.5" />
+        <Setter Property="CornerRadius" Value="5" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <!--
+        The setting-row switch. WinUI's ToggleSwitch reserves ~100px for on/off labels it is not
+        showing here; with the label to its left that reservation is dead space, so the width is
+        pinned to the knob.
+    -->
+    <Style
+        x:Key="SmSetToggleStyle"
+        BasedOn="{StaticResource DefaultToggleSwitchStyle}"
+        TargetType="ToggleSwitch">
+        <Setter Property="MinWidth" Value="0" />
+        <Setter Property="Width" Value="44" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <!--
+        The "way back" cell in the Settings write-surface table. Two styles rather than a brush from
+        a function binding: a Style is theme-independent, and its ThemeResource setters re-resolve
+        when the theme changes. The words carry the meaning on their own; the ink only reinforces it.
+    -->
+    <Style x:Key="SmReturnPathTextStyle" TargetType="TextBlock">
+        <Setter Property="FontSize" Value="12.5" />
+        <Setter Property="Foreground" Value="{ThemeResource SmTextBrush}" />
+        <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <Style x:Key="SmReturnNoneTextStyle" TargetType="TextBlock">
+        <Setter Property="FontSize" Value="12.5" />
+        <Setter Property="Foreground" Value="{ThemeResource SmDimBrush}" />
+        <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
 
 </ResourceDictionary>

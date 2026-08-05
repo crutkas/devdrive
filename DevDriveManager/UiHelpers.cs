@@ -80,6 +80,13 @@ public static class UiHelpers
         Resource<Style>(isSelected ? "SmTabSelectedTextStyle" : "SmTabNormalTextStyle");
 
     /// <summary>
+    /// The "way back" cell in Settings' write-surface table. Quietened when there is no route back
+    /// from inside the app, so the two claims do not read as equally actionable.
+    /// </summary>
+    public static Style? WriteSurfaceReturnStyle(bool isReversible) =>
+        Resource<Style>(isReversible ? "SmReturnPathTextStyle" : "SmReturnNoneTextStyle");
+
+    /// <summary>
     /// The border of one node in the Drives room's I/O path stack, keyed by <c>"on"</c> (a filter that
     /// runs on this volume), <c>"off"</c> (one that is skipped) or <c>"end"</c> (either end of the write).
     /// </summary>

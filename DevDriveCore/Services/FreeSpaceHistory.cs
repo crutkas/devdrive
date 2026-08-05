@@ -25,6 +25,32 @@ public static class FreeSpaceHistory
     public const int MaxSamplesPerVolume = 400;
 
     /// <summary>
+    /// Drops readings older than <paramref name="retention"/>.
+    /// </summary>
+    /// <remarks>
+    /// Separate from the per-volume cap because the two answer different questions. The cap bounds
+    /// the file; retention is the user's answer to "how far back should this remember", and a
+    /// machine that is only touched weekly would keep two years of readings under the cap alone.
+    /// </remarks>
+    /// <returns>The surviving readings, oldest first. The input is never mutated.</returns>
+    public static IReadOnlyList<FreeSpaceSample> Trim(
+        IReadOnlyList<FreeSpaceSample> existing,
+        DateTimeOffset now,
+        TimeSpan retention)
+    {
+        ArgumentNullException.ThrowIfNull(existing);
+
+        if (retention <= TimeSpan.Zero)
+        {
+            return [.. existing.OrderBy(s => s.TakenAtUtc)];
+        }
+
+        return [.. existing
+            .Where(s => now - s.TakenAtUtc <= retention)
+            .OrderBy(s => s.TakenAtUtc)];
+    }
+
+    /// <summary>
     /// Adds a reading to the history, dropping it when an existing reading for the same volume is
     /// newer than <see cref="MinimumInterval"/>, and trimming the oldest readings past the cap.
     /// </summary>

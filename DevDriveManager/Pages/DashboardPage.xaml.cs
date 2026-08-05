@@ -7,6 +7,7 @@ using DevDriveCore;
 using DevDriveCore.Models;
 using DevDriveCore.Services;
 using DevDriveManager.Controls;
+using DevDriveManager.Services;
 using DevDriveManager.ViewModels;
 using DevDriveStorage;
 using Microsoft.UI.Xaml;
@@ -249,6 +250,7 @@ public sealed partial class DashboardPage : Page, INotifyPropertyChanged
         ViewModel.PackageCaches.InventoryReset += OnSourceChanged;
         Reclaim.PropertyChanged += OnReclaimChanged;
         Space.PropertyChanged += OnSpaceChanged;
+        PreferencesService.Changed += OnPreferencesChanged;
 
         Refresh();
     }
@@ -260,7 +262,12 @@ public sealed partial class DashboardPage : Page, INotifyPropertyChanged
         ViewModel.PackageCaches.InventoryReset -= OnSourceChanged;
         Reclaim.PropertyChanged -= OnReclaimChanged;
         Space.PropertyChanged -= OnSpaceChanged;
+        PreferencesService.Changed -= OnPreferencesChanged;
     }
+
+    // Every preference this room reads changes what the signal list says, so any of them is a
+    // reason to rebuild — there is nothing cheap enough here to be worth narrowing.
+    private void OnPreferencesChanged(object? sender, EventArgs e) => RequestRefresh();
 
     private void OnVolumesChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e) =>
         RequestRefresh();
@@ -344,6 +351,9 @@ public sealed partial class DashboardPage : Page, INotifyPropertyChanged
                     row.Header, row.LocationText, (long)row.SizeBytes, row.IsRedirected))],
             CachesOnDevDrive = ViewModel.PackageCaches.Caches.Count(row => row.IsOnDevDrive),
             HasSpaceScan = Space.Snapshot is not null,
+            LowFreeFraction = PreferencesService.Current.LowFreeFraction,
+            CacheRollupThreshold = PreferencesService.Current.CacheRollupThreshold,
+            WatchCachesOffDevDrive = PreferencesService.Current.WatchCachesOffDevDrive,
         });
 
         _signals.Clear();
@@ -395,19 +405,28 @@ public sealed partial class DashboardPage : Page, INotifyPropertyChanged
     /// </summary>
     private void RecordFreeSpace()
     {
+        AppPreferences prefs = PreferencesService.Current;
         DateTimeOffset now = DateTimeOffset.UtcNow;
         IReadOnlyList<FreeSpaceSample> history = _history.Load();
 
-        foreach (VolumeRowViewModel row in ViewModel.Volumes.Where(r => r.Volume.SizeBytes > 0))
+        if (prefs.RecordFreeSpaceHistory)
         {
-            history = _history.Append(new FreeSpaceSample
+            foreach (VolumeRowViewModel row in ViewModel.Volumes.Where(r => r.Volume.SizeBytes > 0))
             {
-                TakenAtUtc = now,
-                VolumeId = VolumeId(row.Volume),
-                TotalBytes = (long)row.Volume.SizeBytes,
-                FreeBytes = (long)row.Volume.FreeBytes,
-            });
+                history = _history.Append(new FreeSpaceSample
+                {
+                    TakenAtUtc = now,
+                    VolumeId = VolumeId(row.Volume),
+                    TotalBytes = (long)row.Volume.SizeBytes,
+                    FreeBytes = (long)row.Volume.FreeBytes,
+                });
+            }
         }
+
+        // Retention is applied on the way out as well as on the way in, so shortening it takes
+        // effect on the next visit rather than only on the next reading — the reader who just
+        // shortened it is looking at the chart when they do.
+        history = FreeSpaceHistory.Trim(history, now, prefs.HistoryRetention);
 
         // The Dev Drive is the volume this app is about; without one, the system volume is the one
         // whose free space anyone is actually watching.

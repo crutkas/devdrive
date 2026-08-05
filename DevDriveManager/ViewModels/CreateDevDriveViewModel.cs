@@ -78,8 +78,13 @@ public partial class CreateDevDriveViewModel : ObservableObject
     // ---- Source choice --------------------------------------------------------------------------
 
     /// <summary>0 = new VHDX, 1 = resize an existing volume.</summary>
+    /// <remarks>
+    /// Seeded from the user's preferred creation method. Resize is the default because it gives a
+    /// real volume; a VHDX is a file that has to mount at boot before anything on it exists.
+    /// </remarks>
     [ObservableProperty]
-    public partial int SourceIndex { get; set; }
+    public partial int SourceIndex { get; set; } =
+        Services.PreferencesService.Current.PreferResizeOverVhdx ? 1 : 0;
 
     public bool IsVhdx => SourceIndex == 0;
 

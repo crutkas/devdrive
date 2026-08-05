@@ -46,5 +46,8 @@ public sealed partial class MainWindow : Window
         // Apply the persisted theme override (System / Light / Dark) to the live content root.
         DevDriveManager.Services.ThemeService.Initialize();
         RootFrame.RequestedTheme = DevDriveManager.Services.ThemeService.Mode;
+
+        // Load the rest of the preferences before any room reads them.
+        DevDriveManager.Services.PreferencesService.Initialize();
     }
 }
