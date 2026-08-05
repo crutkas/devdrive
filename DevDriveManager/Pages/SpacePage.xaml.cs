@@ -52,7 +52,8 @@ public sealed partial class SpacePage : Page, INotifyPropertyChanged
     private static readonly string[] DerivedProperties =
     [
         nameof(ShowOverlay),
-        nameof(ShowLiveScanStrip),
+        nameof(IsScanning),
+        nameof(CanRescan),
         nameof(LiveScanText),
         nameof(OverlayTitle),
         nameof(OverlayDetail),
@@ -156,11 +157,17 @@ public sealed partial class SpacePage : Page, INotifyPropertyChanged
         (ViewModel.ScanState is ExplorerScanState.Scanning && ViewModel.Snapshot is null);
 
     /// <summary>
-    /// True while a scan is filling the room in place. This is what keeps the progress bar and the
-    /// cancel button reachable after the overlay has stepped aside.
+    /// True while a scan is running, whether or not rows have started arriving. This drives the
+    /// scan controls on the volume strip, which is the single place in the room that owns scan
+    /// state — there is no second progress bar or cancel button anywhere below it.
     /// </summary>
-    public bool ShowLiveScanStrip =>
-        ViewModel.ScanState is ExplorerScanState.Scanning && ViewModel.Snapshot is not null;
+    public bool IsScanning => ViewModel.ScanState is ExplorerScanState.Scanning;
+
+    /// <summary>
+    /// Rescan re-runs the scope that is already loaded, so it has nothing to act on until a first
+    /// scan has produced one. Before that the volume cards are the way in, and the overlay says so.
+    /// </summary>
+    public bool CanRescan => ViewModel.Snapshot is not null && !IsScanning;
 
     /// <summary>Reminds the reader that live rows are still moving, and offers the way out.</summary>
     public string LiveScanText => _pendingVolumeLabel is null
@@ -515,6 +522,12 @@ public sealed partial class SpacePage : Page, INotifyPropertyChanged
 
     private void RetryScanButton_Click(object sender, RoutedEventArgs args) =>
         _ = ViewModel.RetryAsync();
+
+    /// <summary>
+    /// Same act as F5, on the strip where the room's other scan controls live.
+    /// </summary>
+    private void RescanButton_Click(object sender, RoutedEventArgs args) =>
+        _ = ViewModel.RefreshAsync();
 
     private void Page_KeyDown(object sender, KeyRoutedEventArgs args)
     {

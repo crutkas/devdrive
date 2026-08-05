@@ -35,31 +35,78 @@
         </Grid.RowDefinitions>
 
         <!--
-            Volume context strip — and the room's scope selector. Selecting a card scans that
-            volume, so the strip is doing real work rather than only reporting.
+            Context strip, in the same grammar as Reclaim: the volumes on the left, the room's scan
+            controls on the right. Here the strip is also the scope selector — selecting a card
+            scans that volume — so the thing you act on and the thing you act with sit together and
+            there is exactly one place on screen that owns scan state.
         -->
-        <ItemsControl
-            x:Name="VolumeStripHost"
+        <Grid
             Grid.Row="0"
-            Padding="18,11,18,0"
-            AutomationProperties.AutomationId="SpaceVolumeStrip"
-            AutomationProperties.Name="Volumes on this machine, select one to scan"
-            ItemsSource="{x:Bind StripEntries}">
-            <ItemsControl.ItemsPanel>
-                <ItemsPanelTemplate>
-                    <StackPanel Orientation="Horizontal" Spacing="10" />
-                </ItemsPanelTemplate>
-            </ItemsControl.ItemsPanel>
-            <ItemsControl.ItemTemplate>
-                <DataTemplate x:DataType="storage:VolumeStripEntry">
-                    <controls:VolumeCard
-                        AccentRole="{x:Bind AccentRole}"
-                        IsSystemVolume="{x:Bind IsSystemVolume}"
-                        Selected="VolumeCard_Selected"
-                        Volume="{x:Bind Volume}" />
-                </DataTemplate>
-            </ItemsControl.ItemTemplate>
-        </ItemsControl>
+            Padding="18,10"
+            ColumnSpacing="14"
+            BorderBrush="{ThemeResource SmDividerBrush}"
+            BorderThickness="0,0,0,1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <ItemsControl
+                x:Name="VolumeStripHost"
+                Grid.Column="0"
+                AutomationProperties.AutomationId="SpaceVolumeStrip"
+                AutomationProperties.Name="Volumes on this machine, select one to scan"
+                ItemsSource="{x:Bind StripEntries}">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <StackPanel Orientation="Horizontal" Spacing="10" />
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="storage:VolumeStripEntry">
+                        <controls:VolumeCard
+                            AccentRole="{x:Bind AccentRole}"
+                            IsSystemVolume="{x:Bind IsSystemVolume}"
+                            Selected="VolumeCard_Selected"
+                            Volume="{x:Bind Volume}" />
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <StackPanel
+                Grid.Column="1"
+                VerticalAlignment="Center"
+                Orientation="Horizontal"
+                Spacing="8">
+                <TextBlock
+                    MaxWidth="420"
+                    VerticalAlignment="Center"
+                    AutomationProperties.AutomationId="SpaceLiveScanLabel"
+                    Style="{StaticResource SmCardSubTextStyle}"
+                    Text="{x:Bind LiveScanText, Mode=OneWay}"
+                    TextTrimming="CharacterEllipsis"
+                    Visibility="{x:Bind local:SpacePage.BoolToVisibility(IsScanning), Mode=OneWay}" />
+                <ProgressBar
+                    Width="140"
+                    VerticalAlignment="Center"
+                    AutomationProperties.AutomationId="SpaceLiveScanProgress"
+                    IsIndeterminate="{x:Bind local:SpacePage.IsIndeterminate(ViewModel.Progress), Mode=OneWay}"
+                    Maximum="1"
+                    Value="{x:Bind ViewModel.Progress, Mode=OneWay}"
+                    Visibility="{x:Bind local:SpacePage.BoolToVisibility(IsScanning), Mode=OneWay}" />
+                <Button
+                    AutomationProperties.AutomationId="SpaceLiveCancelScan"
+                    Click="CancelScanButton_Click"
+                    Content="Cancel"
+                    Visibility="{x:Bind local:SpacePage.BoolToVisibility(IsScanning), Mode=OneWay}" />
+                <Button
+                    AutomationProperties.AutomationId="SpaceRescanButton"
+                    Click="RescanButton_Click"
+                    Content="Rescan"
+                    IsEnabled="{x:Bind CanRescan, Mode=OneWay}"
+                    Style="{StaticResource AccentButtonStyle}" />
+            </StackPanel>
+        </Grid>
 
         <!--  The room. Spec: 11px gap, 11px/18px padding, three columns.  -->
         <Grid
@@ -180,54 +227,10 @@
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
 
-                        <!--
-                            Takes over from the overlay once results start arriving: the numbers on
-                            screen are real but still climbing, and that has to stay obvious without
-                            covering the rows the user came to watch.
-                        -->
                         <Border
                             Grid.Row="0"
-                            Padding="14,7,14,7"
-                            BorderBrush="{ThemeResource SmDividerBrush}"
-                            BorderThickness="0,0,0,1"
-                            Visibility="{x:Bind local:SpacePage.BoolToVisibility(ShowLiveScanStrip), Mode=OneWay}">
-                            <Grid ColumnSpacing="10">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-
-                                <TextBlock
-                                    Grid.Column="0"
-                                    VerticalAlignment="Center"
-                                    AutomationProperties.AutomationId="SpaceLiveScanLabel"
-                                    Style="{StaticResource SmCardSubTextStyle}"
-                                    Text="{x:Bind LiveScanText, Mode=OneWay}"
-                                    TextTrimming="CharacterEllipsis" />
-
-                                <ProgressBar
-                                    Grid.Column="1"
-                                    Width="140"
-                                    VerticalAlignment="Center"
-                                    AutomationProperties.AutomationId="SpaceLiveScanProgress"
-                                    IsIndeterminate="{x:Bind local:SpacePage.IsIndeterminate(ViewModel.Progress), Mode=OneWay}"
-                                    Maximum="1"
-                                    Value="{x:Bind ViewModel.Progress, Mode=OneWay}" />
-
-                                <Button
-                                    Grid.Column="2"
-                                    AutomationProperties.AutomationId="SpaceLiveCancelScan"
-                                    Click="CancelScanButton_Click"
-                                    Content="Cancel" />
-                            </Grid>
-                        </Border>
-
-                        <Border
-                            Grid.Row="1"
                             Padding="14,0,14,0"
                             Style="{StaticResource SmCardHeadStyle}">
                             <Grid ColumnSpacing="10">
@@ -285,7 +288,7 @@
 
                         <!--  Column header. Widths are shared with the row template below.  -->
                         <Border
-                            Grid.Row="2"
+                            Grid.Row="1"
                             Padding="14,7,14,7"
                             BorderBrush="{ThemeResource SmDividerBrush}"
                             BorderThickness="0,0,0,1">
@@ -326,7 +329,7 @@
 
                         <ListView
                             x:Name="ItemsList"
-                            Grid.Row="3"
+                            Grid.Row="2"
                             MaxHeight="268"
                             AutomationProperties.AutomationId="SpaceItemsList"
                             AutomationProperties.Name="Items in the current scope"
