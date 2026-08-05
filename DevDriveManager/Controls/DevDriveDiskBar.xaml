@@ -90,9 +90,28 @@
             </Grid>
         </Border>
 
-        <!--  Legend (swatches match the bar's segment fills).  -->
-        <StackPanel Orientation="Horizontal" Spacing="16">
-            <StackPanel Orientation="Horizontal" Spacing="6">
+        <!--
+            Legend (swatches match the bar's segment fills). Laid out as a grid rather than one
+            horizontal run, because this bar lives in a 336px column and three labels carrying byte
+            counts do not fit on one line there — a horizontal StackPanel hands its children
+            unconstrained width, so the third entry is silently cut by the card edge instead of
+            wrapping.
+        -->
+        <Grid ColumnSpacing="14" RowSpacing="5">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <StackPanel
+                Grid.Row="0"
+                Grid.Column="0"
+                Orientation="Horizontal"
+                Spacing="6">
                 <Border
                     Width="10"
                     Height="10"
@@ -104,7 +123,11 @@
                     Style="{StaticResource CaptionTextBlockStyle}"
                     Text="{x:Bind UsedLabel, Mode=OneWay}" />
             </StackPanel>
-            <StackPanel Orientation="Horizontal" Spacing="6">
+            <StackPanel
+                Grid.Row="0"
+                Grid.Column="1"
+                Orientation="Horizontal"
+                Spacing="6">
                 <Border
                     Width="10"
                     Height="10"
@@ -118,7 +141,12 @@
                     Style="{StaticResource CaptionTextBlockStyle}"
                     Text="{x:Bind RemainingLabel, Mode=OneWay}" />
             </StackPanel>
-            <StackPanel Orientation="Horizontal" Spacing="6">
+            <StackPanel
+                Grid.Row="1"
+                Grid.Column="0"
+                Grid.ColumnSpan="2"
+                Orientation="Horizontal"
+                Spacing="6">
                 <Border
                     Width="10"
                     Height="10"
@@ -130,6 +158,6 @@
                     Style="{StaticResource CaptionTextBlockStyle}"
                     Text="{x:Bind DevDriveLabel, Mode=OneWay}" />
             </StackPanel>
-        </StackPanel>
+        </Grid>
     </StackPanel>
 </UserControl>

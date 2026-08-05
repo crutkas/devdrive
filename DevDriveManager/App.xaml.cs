@@ -65,6 +65,14 @@ public partial class App : Application
         new(new LiveStorageSnapshotSource());
 
     /// <summary>
+    /// The shared Create room state. A half-filled create form is exactly the kind of state a user
+    /// expects to find where they left it, and WinUI rebuilds a page on every navigation to it — so a
+    /// page-owned view model would silently reset the size, letter and label the moment someone
+    /// stepped over to Reclaim to free space first, which the room itself recommends.
+    /// </summary>
+    public static CreateDevDriveViewModel SharedCreate { get; } = CreateDevDriveViewModel.CreateDefault();
+
+    /// <summary>
     /// Initializes the singleton application object.
     /// </summary>
     public App()

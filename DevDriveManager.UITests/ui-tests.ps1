@@ -302,17 +302,42 @@ Test-UI "Drives: back to Volumes" {
 winapp ui screenshot -a $AppPid -o "screenshots\04-drives.png" 2>$null | Out-Null
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  (6) Create Dev Drive — one confirmation verifies and executes through the safe in-memory seam.
+#  (6) Create Dev Drive — the form is a field list, not a wizard, and one confirmation
+#      verifies and executes through the safe in-memory seam.
 # ─────────────────────────────────────────────────────────────────────────────
-Test-UI "Navigate to Create Dev Drive"       { Goto "NavCreate" "SourceComboBox" }
-Test-UI "Create: guardrails info bar present"{ winapp ui wait-for "GuardrailsInfoBar" -a $AppPid -t 3000 }
+Test-UI "Navigate to Create Dev Drive"       { Goto "NavCreate" "CreateFormHead" }
+Test-UI "Create: room grammar is present" {
+    Test-Present @("CreateVolumeStrip", "CreateFormHead", "AfterCreateHead", "CreateStatusBar")
+}
+Test-UI "Create: guardrails note present"    { winapp ui wait-for "GuardrailsInfoBar" -a $AppPid -t 3000 }
+Test-UI "Create: size row carries a slider and its ceiling" {
+    Test-Present @("SizeSlider", "SizeNumberBox", "SizeMaximumTick")
+    if ((Get-Name "SizeMaximumTick") -notmatch '^[0-9,]+ GB \u2014 ') { throw "Maximum tick does not name its ceiling." }
+}
+Test-UI "Create: format is stated, not chosen" {
+    if ((Get-Name "FormatPill") -notmatch 'ReFS') { throw "Format pill does not say ReFS." }
+}
+Test-UI "Create: the reclaim tie-in is present" { winapp ui wait-for "ReclaimTieIn" -a $AppPid -t 3000 }
 winapp ui screenshot -a $AppPid -o "screenshots\05-create.png" 2>$null | Out-Null
 
-Select-Combo "SourceComboBox" "ResizeSourceItem"
+Test-UI "Create: method is two options, resize is the default" {
+    Test-Present @("MethodResizeOption", "MethodVhdxOption")
+    winapp ui invoke "MethodResizeOption" -a $AppPid 2>$null | Out-Null
+    winapp ui wait-for "MethodResizeOption" -a $AppPid -p IsSelected --value "True" -t 3000
+}
 Test-UI "Create: resize action is Create" {
     winapp ui wait-for "ResizeSourceComboBox" -a $AppPid -t 3000 2>$null | Out-Null
     if ((Get-Name "CreateButton") -ne "Create") { throw "Resize action is not Create." }
     winapp ui wait-for "CreateButton" -a $AppPid -p IsEnabled --value "True" -t 3000
+}
+Test-UI "Create: picking VHDX swaps the source row for a path row" {
+    winapp ui invoke "MethodVhdxOption" -a $AppPid 2>$null | Out-Null
+    winapp ui wait-for "VhdPathTextBox" -a $AppPid -t 3000 2>$null | Out-Null
+    winapp ui wait-for "ResizeSourceComboBox" -a $AppPid --gone -t 3000
+}
+Test-UI "Create: going back to resize restores the source row" {
+    winapp ui invoke "MethodResizeOption" -a $AppPid 2>$null | Out-Null
+    winapp ui wait-for "ResizeSourceComboBox" -a $AppPid -t 3000
 }
 winapp ui screenshot -a $AppPid -o "screenshots\06-create-resize.png" 2>$null | Out-Null
 
@@ -332,6 +357,9 @@ Test-UI "Create: resize completes without another confirmation" {
     winapp ui invoke "PrimaryButton" -a $AppPid 2>$null | Out-Null
     winapp ui wait-for "GoToManagementButton" -a $AppPid -t 5000 2>$null | Out-Null
     winapp ui wait-for "PrimaryButton" -a $AppPid --gone -t 3000
+}
+Test-UI "Create: the done card offers the two next rooms" {
+    Test-Present @("CompletionTitle", "MovePackageCachesButton", "RunSpeedTestButton")
 }
 winapp ui screenshot -a $AppPid -o "screenshots\08-create-complete.png" 2>$null | Out-Null
 

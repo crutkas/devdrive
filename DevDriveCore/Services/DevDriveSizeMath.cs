@@ -39,6 +39,44 @@ public static class DevDriveSizeMath
 
     public const double VhdContainerHeadroomBytes = VhdContainerHeadroomBytesExact;
 
+    /// <summary>The size we would pre-select if the source had unlimited room: 256 GiB.</summary>
+    public const double PreferredSizeBytes = 256d * BytesPerGigabyte;
+
+    /// <summary>
+    /// The free space a default selection tries to leave behind on the source, in bytes: 45 GiB.
+    /// </summary>
+    /// <remarks>
+    /// A reserve stated in absolute bytes rather than as a percentage of capacity, because the
+    /// question "is there enough room left to work" does not scale with how big the disk is — 5% of
+    /// a 4 TB disk is roomy and 5% of a 256 GB disk is not. 45 GiB is the point below which Windows,
+    /// a page file, an update staging area and a build tree stop fitting comfortably together.
+    /// </remarks>
+    public const double ComfortableReserveBytes = 45d * BytesPerGigabyte;
+
+    /// <summary>
+    /// The size to pre-select for a source that can give at most <paramref name="maximumSelectableBytes"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Never "everything the volume will give". Taking the whole maximum is a valid thing to ask for
+    /// and a terrible thing to arrive at by doing nothing: it leaves the source with zero free space,
+    /// and a create form that opens on that value is proposing it. So the default keeps
+    /// <see cref="ComfortableReserveBytes"/> behind whenever the arithmetic allows.
+    /// </para>
+    /// <para>
+    /// When the source is small enough that the reserve and a viable Dev Drive cannot both fit, the
+    /// 50 GiB minimum wins and the reserve is given up — a Dev Drive below the minimum is not a
+    /// smaller Dev Drive, it is no Dev Drive. The user can still drag the slider anywhere in range;
+    /// this only decides where it starts.
+    /// </para>
+    /// </remarks>
+    public static double DefaultSizeBytes(double maximumSelectableBytes)
+    {
+        double max = Math.Max(0d, maximumSelectableBytes);
+        double afterReserve = max - ComfortableReserveBytes;
+        return ClampSizeBytes(Math.Min(PreferredSizeBytes, afterReserve), max);
+    }
+
     /// <summary>
     /// Clamps <paramref name="requestedBytes"/> into the valid Dev Drive range
     /// <c>[<see cref="MinimumSizeBytes"/>, <paramref name="maximumSelectableBytes"/>]</c>. When the

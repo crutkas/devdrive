@@ -26,8 +26,6 @@ namespace DevDriveManager.ViewModels;
 /// </remarks>
 public partial class CreateDevDriveViewModel : ObservableObject
 {
-    /// <summary>Default Dev Drive size we pre-select (clamped to the source's free space): 256 GiB.</summary>
-    private const double DefaultPreferredBytes = 256d * DevDriveSizeMath.BytesPerGigabyte;
 
     private readonly IDevDriveService _volumeService;
     private readonly IDevDriveCreationService _creationService;
@@ -219,7 +217,16 @@ public partial class CreateDevDriveViewModel : ObservableObject
     public partial string CompletionMessage { get; set; } = string.Empty;
 
     public string GuardrailsMessage =>
-        "Creation requires administrator approval. Drive resizing is verified before any changes are made.";
+        "Windows asks for administrator approval once, before step 1. Nothing is written until you approve it.";
+
+    /// <summary>What pressing the primary action does, in order, for the method currently chosen.</summary>
+    /// <remarks>
+    /// This is where the guardrail sentence lives now. It used to sit at the foot of the form as its
+    /// own note, saying the same thing in weaker words next to fields it did not qualify; attached to
+    /// the steps it qualifies, it is both shorter and more precise.
+    /// </remarks>
+    [ObservableProperty]
+    public partial IReadOnlyList<CreatePlanStep> PlanSteps { get; set; } = [];
 
     /// <summary>Chosen drive letter without the colon (e.g. <c>'D'</c>).</summary>
     public char DriveLetterChar =>
@@ -626,8 +633,8 @@ public partial class CreateDevDriveViewModel : ObservableObject
             DevDriveSizeMath.BytesToGigabytes(DevDriveSizeMath.MinimumSizeBytes),
             Math.Floor(DevDriveSizeMath.BytesToGigabytes(MaximumSelectableBytes)));
 
-        double preferred = Math.Min(MaximumSelectableBytes, DefaultPreferredBytes);
-        ApplySize(DevDriveSizeMath.ClampSizeBytes(preferred, MaximumSelectableBytes));
+        double preferred = DevDriveSizeMath.DefaultSizeBytes(MaximumSelectableBytes);
+        ApplySize(preferred);
 
         UpdateSummary();
         RefreshCanCreate();
@@ -650,6 +657,52 @@ public partial class CreateDevDriveViewModel : ObservableObject
             string kind = VhdTypeIndex == 0 ? "dynamically expanding" : "fixed-size";
             SummaryTitle = $"{letter}: \u2014 {size} ReFS Dev Drive";
             SummaryDetail = $"{kind} VHDX. Creates and formats with admin approval. Host keeps {remaining} free.";
+        }
+
+        UpdatePlanSteps(letter, size, remaining);
+    }
+
+    /// <summary>
+    /// Rebuilds <see cref="PlanSteps"/> for the current method and size.
+    /// </summary>
+    /// <remarks>
+    /// The steps are shown in the room, before the button, rather than only inside the confirmation
+    /// dialog. A modal that is the first place a reader learns what an action does is a modal they
+    /// have to read under time pressure with their hand already committed; showing the same sequence
+    /// while they are still choosing turns the dialog into a yes/no about something already
+    /// understood.
+    /// </remarks>
+    private void UpdatePlanSteps(char letter, string size, string remaining)
+    {
+        if (IsResize)
+        {
+            char src = SelectedSourceVolume?.Letter ?? _systemLetter;
+            PlanSteps =
+            [
+                new(1, $"Check {src}: can give up {size}",
+                    "Reads the live volume layout and confirms the free space is contiguous and at the end of the volume. If it is not, nothing changes."),
+                new(2, $"Shrink {src}: to {remaining} free",
+                    "Only the volume's end boundary moves. No file is copied, moved or deleted, and the volume stays online."),
+                new(3, $"Create {letter}: at {size}",
+                    "A new partition in the space that was just freed."),
+                new(4, $"Format {letter}: as ReFS and mark it trusted",
+                    "Marking the volume trusted is what lets the antivirus filter detach. That is where the speed comes from."),
+            ];
+        }
+        else
+        {
+            string kind = VhdTypeIndex == 0 ? "grows on demand" : "claims its full size immediately";
+            PlanSteps =
+            [
+                new(1, $"Create a {size} virtual disk file",
+                    $"Written to the path above; it {kind}. Nothing on the host volume is repartitioned."),
+                new(2, "Attach it and initialise it as GPT",
+                    "The file starts behaving like a disk. Windows re-attaches it at every sign-in."),
+                new(3, $"Format one ReFS partition and mark it trusted",
+                    "Marking the volume trusted is what lets the antivirus filter detach. That is where the speed comes from."),
+                new(4, $"Mount it as {letter}:\\",
+                    $"The host volume keeps {remaining} free \u2014 every read and write still passes through it."),
+            ];
         }
     }
 
@@ -848,6 +901,16 @@ public sealed record SourceVolumeOption(char Letter, string Display, ulong SizeB
 {
     /// <summary>ComboBox shows this when no item template is supplied.</summary>
     public override string ToString() => Display;
+}
+
+/// <summary>One step of what pressing Create will do.</summary>
+/// <param name="Number">1-based position, rendered as the step's badge.</param>
+/// <param name="Title">The action, in the imperative, naming the volumes and sizes involved.</param>
+/// <param name="Detail">Why it is safe, or what it costs. One sentence.</param>
+public sealed record CreatePlanStep(int Number, string Title, string Detail)
+{
+    /// <summary>The badge text. A string because a badge is a label, not a number to be formatted.</summary>
+    public string Badge => Number.ToString(System.Globalization.CultureInfo.InvariantCulture);
 }
 
 /// <summary>What the page needs to render the gating confirmation dialog for a creation/resize.</summary>

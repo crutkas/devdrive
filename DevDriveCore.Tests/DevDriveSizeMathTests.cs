@@ -102,4 +102,71 @@ public sealed class DevDriveSizeMathTests
         Assert.AreEqual(0d, DevDriveSizeMath.UsedFraction(0d, Gib(10)));
         Assert.AreEqual(0d, DevDriveSizeMath.RemainingFraction(0d, Gib(10), Gib(5)));
     }
+
+    // ---- Default size ------------------------------------------------------------------------
+    // The rule these prove: a create form must never open on "take everything". Each case below is
+    // one band of source size, because the default is a different compromise in each.
+
+    [TestMethod]
+    public void DefaultSize_RoomySource_TakesThePreferredSize()
+    {
+        // 420 GiB selectable is more than 256 + 45, so nothing forces a compromise.
+        Assert.AreEqual(Gib(256), DevDriveSizeMath.DefaultSizeBytes(Gib(MaxGib)), 1d);
+    }
+
+    [TestMethod]
+    public void DefaultSize_ExactlyPreferredPlusReserve_StillTakesThePreferredSize()
+    {
+        Assert.AreEqual(Gib(256), DevDriveSizeMath.DefaultSizeBytes(Gib(301)), 1d);
+    }
+
+    [TestMethod]
+    public void DefaultSize_ModestSource_LeavesTheReserveBehind()
+    {
+        // The real shape of this machine: ~101 GiB shrinkable. Before this rule the default was the
+        // whole 101, i.e. a proposal to leave the system volume with nothing.
+        Assert.AreEqual(Gib(56), DevDriveSizeMath.DefaultSizeBytes(Gib(101)), 1d);
+    }
+
+    [TestMethod]
+    public void DefaultSize_NeverProposesTakingEverything()
+    {
+        foreach (double maxGib in new[] { 96d, 101d, 150d, 200d, 300d, 420d, 4000d })
+        {
+            double selectable = Gib(maxGib);
+            Assert.IsLessThan(
+                selectable,
+                DevDriveSizeMath.DefaultSizeBytes(selectable),
+                $"Default consumed the entire {maxGib} GiB source.");
+        }
+    }
+
+    [TestMethod]
+    public void DefaultSize_TightSource_GivesUpTheReserveForAViableDrive()
+    {
+        // 60 GiB minus the 45 GiB reserve is 15 GiB, which is not a Dev Drive. The 50 GiB floor wins
+        // and the reserve is what gets sacrificed, because a sub-minimum drive cannot exist at all.
+        Assert.AreEqual(DevDriveSizeMath.MinimumSizeBytes, DevDriveSizeMath.DefaultSizeBytes(Gib(60)));
+    }
+
+    [TestMethod]
+    public void DefaultSize_SourceTooSmall_StillReturnsTheMinimum()
+    {
+        // Callers gate on HasEligibleSource; the clamp must not return something below the platform
+        // minimum just because the source cannot honour it.
+        Assert.AreEqual(DevDriveSizeMath.MinimumSizeBytes, DevDriveSizeMath.DefaultSizeBytes(Gib(10)));
+        Assert.AreEqual(DevDriveSizeMath.MinimumSizeBytes, DevDriveSizeMath.DefaultSizeBytes(0d));
+        Assert.AreEqual(DevDriveSizeMath.MinimumSizeBytes, DevDriveSizeMath.DefaultSizeBytes(-1d));
+    }
+
+    [TestMethod]
+    public void DefaultSize_IsAlwaysInRange()
+    {
+        foreach (double maxGib in new[] { 0d, 10d, 50d, 60d, 96d, 101d, 300d, 4000d })
+        {
+            double selectable = Gib(maxGib);
+            double actual = DevDriveSizeMath.DefaultSizeBytes(selectable);
+            Assert.AreEqual(DevDriveSizeMath.ClampSizeBytes(actual, selectable), actual, 1d);
+        }
+    }
 }
