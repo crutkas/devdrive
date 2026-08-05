@@ -26,6 +26,7 @@ public sealed partial class TreemapPane : UserControl
     private const double Gap = 4;
 
     private INotifyCollectionChanged? _observableRows;
+    private bool _renderQueued;
 
     public static readonly DependencyProperty RowsProperty =
         DependencyProperty.Register(
@@ -33,6 +34,22 @@ public sealed partial class TreemapPane : UserControl
             typeof(object),
             typeof(TreemapPane),
             new PropertyMetadata(null, OnRowsChanged));
+
+    /// <summary>
+    /// A counter the host bumps whenever the rows have been brought up to date.
+    /// </summary>
+    /// <remarks>
+    /// The treemap is drawn from scratch each time, so it needs to know that something changed
+    /// without caring what. Collection notifications alone stopped being sufficient once the host
+    /// began editing its projection in place: a tick that only grows the numbers moves no rows at
+    /// all, and a tick that re-ranks them raises several notifications rather than one reset.
+    /// </remarks>
+    public static readonly DependencyProperty RevisionProperty =
+        DependencyProperty.Register(
+            nameof(Revision),
+            typeof(int),
+            typeof(TreemapPane),
+            new PropertyMetadata(0, OnRevisionChanged));
 
     public static readonly DependencyProperty SelectedRowProperty =
         DependencyProperty.Register(
@@ -53,6 +70,12 @@ public sealed partial class TreemapPane : UserControl
     {
         get => GetValue(RowsProperty);
         set => SetValue(RowsProperty, value);
+    }
+
+    public int Revision
+    {
+        get => (int)GetValue(RevisionProperty);
+        set => SetValue(RevisionProperty, value);
     }
 
     public StorageRowViewModel? SelectedRow
@@ -80,15 +103,44 @@ public sealed partial class TreemapPane : UserControl
         pane.Render();
     }
 
+    private static void OnRevisionChanged(
+        DependencyObject dependencyObject,
+        DependencyPropertyChangedEventArgs args) =>
+        ((TreemapPane)dependencyObject).QueueRender();
+
     private static void OnSelectedRowChanged(
         DependencyObject dependencyObject,
         DependencyPropertyChangedEventArgs args) =>
         ((TreemapPane)dependencyObject).ApplySelection();
 
     private void Rows_CollectionChanged(object? sender, NotifyCollectionChangedEventArgs args) =>
-        Render();
+        QueueRender();
 
     private void TreemapCanvas_SizeChanged(object sender, SizeChangedEventArgs args) => Render();
+
+    /// <summary>
+    /// Collapses every reason to redraw that arrives in one turn of the UI thread into a single
+    /// layout pass. A streaming scan can move a dozen rows and bump the revision in the same tick,
+    /// and each of those on its own would otherwise rebuild all twenty-four rectangles.
+    /// </summary>
+    private void QueueRender()
+    {
+        if (_renderQueued)
+        {
+            return;
+        }
+
+        _renderQueued = true;
+        if (!DispatcherQueue.TryEnqueue(() =>
+        {
+            _renderQueued = false;
+            Render();
+        }))
+        {
+            _renderQueued = false;
+            Render();
+        }
+    }
 
     private void Render()
     {

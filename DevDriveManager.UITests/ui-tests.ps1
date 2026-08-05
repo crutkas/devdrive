@@ -99,15 +99,15 @@ function Goto([string]$navId, [string]$anchorId) {
     winapp ui wait-for $anchorId -a $AppPid -t 5000 | Out-Null
 }
 
-# Click a row and wait until a companion element reflects the selection.
+# Select a row and wait until a companion element reflects the selection.
 #
-# `winapp ui click` simulates a mouse, so it is sensitive to whatever is on screen at that instant --
-# a tooltip PopupHost, a window that has not finished laying out, focus moving elsewhere. The
-# interaction itself is sound; only the timing is not. Retry a bounded number of times rather than
-# sleeping longer and hoping.
-function Click-Until([string]$target, [string]$probeId, [string]$expected, [int]$tries = 4) {
+# This goes through UIA's SelectionItemPattern rather than `winapp ui click`, which simulates a
+# mouse: injected input is at the mercy of whatever is on screen at that instant, and a locked-down
+# desktop refuses it outright with "SendInput failed" before the app is ever involved. Retry a
+# bounded number of times anyway, since the room may still be laying out.
+function Select-Until([string]$target, [string]$probeId, [string]$expected, [int]$tries = 4) {
     for ($i = 1; $i -le $tries; $i++) {
-        winapp ui click $target -a $AppPid 2>$null | Out-Null
+        winapp ui invoke $target -a $AppPid 2>$null | Out-Null
         Start-Sleep -Milliseconds (300 * $i)
         if ((Get-Name $probeId) -eq $expected) { return $true }
     }
@@ -188,7 +188,7 @@ Test-UI "Overview: selecting a signal explains it without navigating" {
         winapp ui wait-for "SignalsSubtitle" -a $AppPid -t 3000 | Out-Null
         return
     }
-    if (-not (Click-Until $row "OverviewInspectorTitle" 'About this signal')) {
+    if (-not (Select-Until $row "OverviewInspectorTitle" 'About this signal')) {
         throw "selecting a signal did not fill the inspector"
     }
     if ([string]::IsNullOrWhiteSpace((Get-Name "OverviewSelectionDetail"))) {

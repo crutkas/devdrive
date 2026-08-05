@@ -226,6 +226,7 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
         CancellationToken cancellationToken)
     {
         int counter = 0;
+        directory.IsMeasured = true;
         foreach (NativeDirEntry entry in entries)
         {
             if (++counter % 256 == 0)
@@ -257,6 +258,7 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
                 SelfAllocated = allocated,
                 SelfLogical = apparent,
                 IsLeaf = true,
+                IsMeasured = true,
                 IsReparsePoint = isReparse,
                 SelfModifiedAtUtc = new DateTimeOffset(entry.LastWriteTimeUtcTicks, TimeSpan.Zero),
             };
@@ -295,6 +297,7 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
         }
 
         int counter = 0;
+        directory.IsMeasured = true;
         foreach (FileSystemInfo info in entries)
         {
             if (++counter % 256 == 0)
@@ -508,7 +511,10 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
             itemCount,
             entry.ModifiedAtUtc,
             provider,
-            logical);
+            logical)
+        {
+            IsMeasured = entry.IsMeasured,
+        };
     }
 
     private static long? TryGetVolumeUsedBytes(string fullRoot)
@@ -638,6 +644,15 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
         public int ItemCount { get; set; }
 
         public bool IsLeaf { get; set; }
+
+        /// <summary>
+        /// Whether this folder has been looked inside. A directory is discovered by its parent's
+        /// enumeration and only walked later, so between those two moments a partial snapshot knows
+        /// it exists and nothing else. Emitting that as zero bytes reads as "measured, and empty",
+        /// which is a different and false claim &mdash; the UI shows an em dash instead.
+        /// Leaves are measured at discovery, so this is only ever false for a pending folder.
+        /// </summary>
+        public bool IsMeasured { get; set; }
 
         public bool IsReparsePoint { get; set; }
 

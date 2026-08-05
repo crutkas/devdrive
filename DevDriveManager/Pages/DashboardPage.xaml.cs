@@ -11,6 +11,7 @@ using DevDriveManager.Services;
 using DevDriveManager.ViewModels;
 using DevDriveStorage;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Windows.System;
@@ -394,6 +395,31 @@ public sealed partial class DashboardPage : Page, INotifyPropertyChanged
         {
             e.Handled = true;
             ShellPage.Current?.SelectNavItem(row.RoomTag);
+        }
+    }
+
+    /// <summary>
+    /// Puts each signal's identifier on the container rather than on the template's root grid.
+    /// </summary>
+    /// <remarks>
+    /// The grid is layout only, so it surfaces as a group with no automation patterns: the identifier
+    /// was reachable but not selectable, which left a mouse click as the only way to select a row.
+    /// Injected input is refused outright on a locked-down desktop, so that made this the one
+    /// assertion in the suite that could fail for reasons having nothing to do with the app. The
+    /// container is the element that carries selection, so it is the one that should carry the name
+    /// selection is asked for by — for a screen reader as much as for a test.
+    /// <para>
+    /// A style setter cannot do this because the value has to come from the item, and WinUI does not
+    /// support a binding in <c>Setter.Value</c>.
+    /// </para>
+    /// </remarks>
+    private void Signals_ContainerContentChanging(
+        ListViewBase sender,
+        ContainerContentChangingEventArgs args)
+    {
+        if (args.ItemContainer is not null && args.Item is AttentionSignalViewModel signal)
+        {
+            AutomationProperties.SetAutomationId(args.ItemContainer, signal.AutomationId);
         }
     }
 

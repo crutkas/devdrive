@@ -105,17 +105,30 @@ public sealed record StorageNode
     /// </summary>
     public long? LogicalBytes { get; init; }
 
-    public string SizeDisplay => ByteSizeFormatter.Format(SizeBytes);
+    /// <summary>
+    /// Whether this node's bytes have actually been counted. A streaming scan discovers a folder
+    /// from its parent's listing and walks it later, and in that window the honest answer to "how
+    /// big is it" is <em>we have not looked yet</em> — not zero, which claims we looked and found
+    /// nothing. Also false for a folder we were denied, where the answer is unknowable rather than
+    /// merely pending. Defaults to <see langword="true"/> so a completed scan, a mock scenario and a
+    /// deserialised snapshot all keep meaning exactly what they say.
+    /// </summary>
+    public bool IsMeasured { get; init; } = true;
 
-    public string LogicalDisplay =>
-        LogicalBytes is long logical ? ByteSizeFormatter.Format(logical) : "—";
+    public string SizeDisplay => IsMeasured ? ByteSizeFormatter.Format(SizeBytes) : "—";
+
+    public string LogicalDisplay => IsMeasured && LogicalBytes is long logical
+        ? ByteSizeFormatter.Format(logical)
+        : "—";
 
     public bool HasLogicalDifference =>
-        LogicalBytes is long logical && logical != SizeBytes;
+        IsMeasured && LogicalBytes is long logical && logical != SizeBytes;
 
     public string KindDisplay => Kind == StorageNodeKind.Folder ? "Folder" : "File";
 
-    public string ItemCountDisplay => Kind == StorageNodeKind.Folder ? $"{ItemCount:N0}" : "—";
+    public string ItemCountDisplay => Kind == StorageNodeKind.Folder && IsMeasured
+        ? $"{ItemCount:N0}"
+        : "—";
 
     public string ProviderDisplay => Provider?.ProviderName ?? "No provider metadata";
 

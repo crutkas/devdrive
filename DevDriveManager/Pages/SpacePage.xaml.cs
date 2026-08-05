@@ -63,6 +63,7 @@ public sealed partial class SpacePage : Page, INotifyPropertyChanged
     ];
 
     private readonly IVolumeProvider _volumes;
+    private StorageRowViewModel? _watchedRow;
     private bool _isLoaded;
     private string? _pendingVolumeLabel;
     private double _nameColumnWidth = 220;
@@ -88,14 +89,50 @@ public sealed partial class SpacePage : Page, INotifyPropertyChanged
         // Subscribing in the constructor would leave one live handler per visit to the room, each
         // holding a page the user has already navigated away from.
         Loaded += OnLoadedSubscribe;
-        Unloaded += (_, _) => ViewModel.PropertyChanged -= ViewModel_PropertyChanged;
+        Unloaded += (_, _) =>
+        {
+            ViewModel.PropertyChanged -= ViewModel_PropertyChanged;
+            WatchSelectedRow(null);
+        };
     }
 
     private void OnLoadedSubscribe(object sender, RoutedEventArgs args)
     {
         ViewModel.PropertyChanged -= ViewModel_PropertyChanged;
         ViewModel.PropertyChanged += ViewModel_PropertyChanged;
+        WatchSelectedRow(ViewModel.SelectedRow);
     }
+
+    /// <summary>
+    /// Follows the selected row itself, not just the act of selecting one.
+    /// </summary>
+    /// <remarks>
+    /// A streaming scan keeps the same row object and grows its numbers, so the selection never
+    /// changes while the values behind the inspector do. Watching only
+    /// <see cref="StorageExplorerViewModel.SelectedRow"/> would leave the inspector reading out the
+    /// size the folder had when it was clicked, for the rest of the scan.
+    /// </remarks>
+    private void WatchSelectedRow(StorageRowViewModel? row)
+    {
+        if (ReferenceEquals(_watchedRow, row))
+        {
+            return;
+        }
+
+        if (_watchedRow is not null)
+        {
+            _watchedRow.PropertyChanged -= SelectedRow_PropertyChanged;
+        }
+
+        _watchedRow = row;
+        if (_watchedRow is not null)
+        {
+            _watchedRow.PropertyChanged += SelectedRow_PropertyChanged;
+        }
+    }
+
+    private void SelectedRow_PropertyChanged(object? sender, PropertyChangedEventArgs args) =>
+        UpdateInspector();
 
     public StorageExplorerViewModel ViewModel { get; }
 
@@ -294,15 +331,68 @@ public sealed partial class SpacePage : Page, INotifyPropertyChanged
     {
         switch (args.PropertyName)
         {
+            case nameof(StorageExplorerViewModel.SelectedRow):
+                WatchSelectedRow(ViewModel.SelectedRow);
+                UpdateDerived();
+                break;
+
             case nameof(StorageExplorerViewModel.ScanState):
             case nameof(StorageExplorerViewModel.Progress):
             case nameof(StorageExplorerViewModel.ProgressLabel):
-            case nameof(StorageExplorerViewModel.SelectedRow):
             case nameof(StorageExplorerViewModel.Snapshot):
             case nameof(StorageExplorerViewModel.CurrentScope):
                 UpdateDerived();
                 break;
         }
+    }
+
+    /// <summary>
+    /// Rebuilds the inspector only when one of the facts it prints has actually moved. A scan can
+    /// raise several notifications a second on the selected row, and most of them are for values
+    /// this panel does not show.
+    /// </summary>
+    private void UpdateInspector()
+    {
+        List<InspectorFact> facts = BuildInspectorFacts();
+        if (facts.Count == InspectorFacts.Count &&
+            facts.Zip(InspectorFacts).All(pair =>
+                pair.First.Label == pair.Second.Label && pair.First.Value == pair.Second.Value))
+        {
+            return;
+        }
+
+        InspectorFacts.Clear();
+        foreach (InspectorFact fact in facts)
+        {
+            InspectorFacts.Add(fact);
+        }
+    }
+
+    private List<InspectorFact> BuildInspectorFacts()
+    {
+        if (ViewModel.SelectedRow is not StorageRowViewModel row)
+        {
+            return [];
+        }
+
+        List<InspectorFact> facts =
+        [
+            new InspectorFact("SIZE ON DISK", row.SizeDisplay),
+            new InspectorFact("APPARENT SIZE", row.LogicalDisplay),
+            new InspectorFact(
+                "SHARE OF THIS SCOPE",
+                $"{row.ShareDisplay} of {ViewModel.CurrentScope?.Name ?? "scope"}"),
+            new InspectorFact(
+                row.IsFolder ? "ITEMS INSIDE" : "KIND",
+                row.IsFolder ? row.ItemCountDisplay : "File"),
+        ];
+
+        if (row.ContextDisplay.Length > 0)
+        {
+            facts.Add(new InspectorFact("WHAT PUT IT THERE", row.ContextDisplay));
+        }
+
+        return facts;
     }
 
     private void UpdateDerived()
@@ -314,29 +404,6 @@ public sealed partial class SpacePage : Page, INotifyPropertyChanged
 
         UpdateInspector();
         UpdateStatusBar();
-    }
-
-    private void UpdateInspector()
-    {
-        InspectorFacts.Clear();
-        if (ViewModel.SelectedRow is not StorageRowViewModel row)
-        {
-            return;
-        }
-
-        InspectorFacts.Add(new InspectorFact("SIZE ON DISK", row.SizeDisplay));
-        InspectorFacts.Add(new InspectorFact("APPARENT SIZE", row.LogicalDisplay));
-        InspectorFacts.Add(new InspectorFact(
-            "SHARE OF THIS SCOPE",
-            $"{row.ShareDisplay} of {ViewModel.CurrentScope?.Name ?? "scope"}"));
-        InspectorFacts.Add(new InspectorFact(
-            row.IsFolder ? "ITEMS INSIDE" : "KIND",
-            row.IsFolder ? row.ItemCountDisplay : "File"));
-
-        if (row.ContextDisplay.Length > 0)
-        {
-            InspectorFacts.Add(new InspectorFact("WHAT PUT IT THERE", row.ContextDisplay));
-        }
     }
 
     private void UpdateStatusBar()

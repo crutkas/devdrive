@@ -127,7 +127,7 @@
                                     <DataTemplate x:DataType="storage:StorageTreeItemViewModel">
                                         <TreeViewItem
                                             AutomationProperties.AutomationId="{x:Bind AutomationId}"
-                                            AutomationProperties.Name="{x:Bind AccessibleName}"
+                                            AutomationProperties.Name="{x:Bind AccessibleName, Mode=OneWay}"
                                             IsExpanded="{x:Bind IsExpanded, Mode=TwoWay}"
                                             ItemsSource="{x:Bind Children}">
                                             <Grid ColumnSpacing="8">
@@ -138,11 +138,11 @@
                                                 <TextBlock
                                                     Grid.Column="0"
                                                     Style="{StaticResource SmTreeNodeTextStyle}"
-                                                    Text="{x:Bind Name}" />
+                                                    Text="{x:Bind Name, Mode=OneWay}" />
                                                 <TextBlock
                                                     Grid.Column="1"
                                                     Style="{StaticResource SmTreeValueTextStyle}"
-                                                    Text="{x:Bind SizeDisplay}" />
+                                                    Text="{x:Bind SizeDisplay, Mode=OneWay}" />
                                             </Grid>
                                         </TreeViewItem>
                                     </DataTemplate>
@@ -350,7 +350,7 @@
                                     <Grid
                                         Padding="14,7,14,7"
                                         AutomationProperties.AutomationId="{x:Bind AutomationId}"
-                                        AutomationProperties.Name="{x:Bind AccessibleDescription}"
+                                        AutomationProperties.Name="{x:Bind AccessibleDescription, Mode=OneWay}"
                                         ColumnSpacing="12">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="{Binding NameColumnWidth, ElementName=SpaceRoot}" />
@@ -383,26 +383,26 @@
                                             <TextBlock
                                                 Grid.Column="1"
                                                 Style="{StaticResource SmCellTextStyle}"
-                                                Text="{x:Bind Name}"
+                                                Text="{x:Bind Name, Mode=OneWay}"
                                                 ToolTipService.ToolTip="{x:Bind PhysicalPath}" />
                                         </Grid>
 
                                         <TextBlock
                                             Grid.Column="1"
                                             Style="{StaticResource SmNumericCellTextStyle}"
-                                            Text="{x:Bind SizeDisplay}" />
+                                            Text="{x:Bind SizeDisplay, Mode=OneWay}" />
                                         <TextBlock
                                             Grid.Column="2"
                                             Style="{StaticResource SmNumericCellTextStyle}"
-                                            Text="{x:Bind LogicalDisplay}" />
+                                            Text="{x:Bind LogicalDisplay, Mode=OneWay}" />
                                         <TextBlock
                                             Grid.Column="3"
                                             Style="{StaticResource SmNumericCellTextStyle}"
-                                            Text="{x:Bind ItemCountDisplay}" />
+                                            Text="{x:Bind ItemCountDisplay, Mode=OneWay}" />
                                         <TextBlock
                                             Grid.Column="4"
                                             Style="{StaticResource SmNumericCellTextStyle}"
-                                            Text="{x:Bind ShareDisplay}" />
+                                            Text="{x:Bind ShareDisplay, Mode=OneWay}" />
                                     </Grid>
                                 </DataTemplate>
                             </ListView.ItemTemplate>
@@ -448,6 +448,7 @@
                             AutomationProperties.AutomationId="SpaceTreemap"
                             AutomationProperties.Name="Treemap of the current scope"
                             NodeInvoked="StorageTreemap_NodeInvoked"
+                            Revision="{x:Bind ViewModel.ProjectionRevision, Mode=OneWay}"
                             Rows="{x:Bind ViewModel.VisibleItems}"
                             SelectedRow="{x:Bind ViewModel.SelectedRow, Mode=OneWay}" />
                     </Grid>

@@ -41,59 +41,174 @@ public enum ExplorerScanState
 /// current scope (share of scope, colour identity) so that the table, the treemap,
 /// and the inspector always agree on how an item is described.
 /// </summary>
-public sealed class StorageRowViewModel
+/// <remarks>
+/// Observable rather than immutable, because a streaming scan republishes the same items with
+/// larger numbers ten times a second. Replacing the row objects would force the table to throw
+/// away every container it had built, taking the selection and the scroll position with them; a
+/// row that can adopt a newer node lets the numbers climb in place instead.
+/// </remarks>
+public sealed class StorageRowViewModel : ObservableObject
 {
     /// <summary>Number of distinct colour slots a host may use for rank-based colouring.</summary>
     public const int ColorSlots = 6;
 
+    private StorageNode _node;
+    private double _shareOfScope;
+    private int _sizeRank;
+
     public StorageRowViewModel(StorageNode node, long scopeBytes, int sizeRank)
     {
-        Node = node ?? throw new ArgumentNullException(nameof(node));
-        ShareOfScope = scopeBytes <= 0 ? 0 : (double)node.SizeBytes / scopeBytes;
+        ArgumentNullException.ThrowIfNull(node);
+        _node = node;
+        _shareOfScope = ShareOf(node, scopeBytes);
+        _sizeRank = sizeRank;
         ColorIndex = sizeRank < 0 ? 0 : sizeRank % ColorSlots;
-        SizeRank = sizeRank;
     }
 
-    public StorageNode Node { get; }
+    public StorageNode Node => _node;
 
-    public Guid Id => Node.Id;
+    public Guid Id => _node.Id;
 
-    public string Name => Node.Name;
+    public string Name => _node.Name;
 
-    public string PhysicalPath => Node.PhysicalPath;
+    public string PhysicalPath => _node.PhysicalPath;
 
-    public bool IsFolder => Node.Kind == StorageNodeKind.Folder;
+    public bool IsFolder => _node.Kind == StorageNodeKind.Folder;
 
-    public long SizeBytes => Node.SizeBytes;
+    public long SizeBytes => _node.SizeBytes;
 
-    public string SizeDisplay => Node.SizeDisplay;
+    public string SizeDisplay => _node.SizeDisplay;
 
-    public string LogicalDisplay => Node.LogicalDisplay;
+    public string LogicalDisplay => _node.LogicalDisplay;
 
-    public string ItemCountDisplay => Node.ItemCountDisplay;
+    public string ItemCountDisplay => _node.ItemCountDisplay;
 
-    public string ContextDisplay => Node.ContextDisplay;
+    public string ContextDisplay => _node.ContextDisplay;
 
-    public double ShareOfScope { get; }
+    public double ShareOfScope => _shareOfScope;
 
-    public int SizeRank { get; }
+    public int SizeRank => _sizeRank;
 
-    public string ShareDisplay => ShareOfScope >= 0.001
-        ? ShareOfScope.ToString("P1")
-        : ShareOfScope > 0 ? "<0.1%" : "0%";
+    public string ShareDisplay => !_node.IsMeasured
+        ? "—"
+        : ShareOfScope >= 0.001
+            ? ShareOfScope.ToString("P1")
+            : ShareOfScope > 0 ? "<0.1%" : "0%";
 
+    /// <summary>
+    /// The colour slot that ties this row to its treemap rectangle. Fixed for the life of the row
+    /// on purpose: a rectangle that changes colour while it grows breaks the one thing the colour
+    /// is for, and the swatch beside the row would have to re-tint in lockstep to stay honest.
+    /// Rank is re-read on adopt; the colour derived from the rank the row arrived with is not.
+    /// </summary>
     public int ColorIndex { get; }
 
-    public string AutomationId => $"Row_{Node.Id:N}";
+    public string AutomationId => $"Row_{_node.Id:N}";
 
     public string AccessibleDescription =>
         $"{Name}, {SizeDisplay}, {ShareDisplay} of scope, {ContextDisplay}";
+
+    /// <summary>
+    /// Re-points this row at a newer version of the same item, raising only the properties whose
+    /// values actually moved. A folder whose size has not changed since the last partial raises
+    /// nothing at all, which is what keeps a ten-per-second scan from saturating the UI thread.
+    /// </summary>
+    public void Adopt(StorageNode node, long scopeBytes, int sizeRank)
+    {
+        ArgumentNullException.ThrowIfNull(node);
+        if (node.Id != _node.Id)
+        {
+            throw new ArgumentException(
+                "A row can only adopt a newer version of the item it already describes.",
+                nameof(node));
+        }
+
+        StorageNode previous = _node;
+        double previousShare = _shareOfScope;
+        double share = ShareOf(node, scopeBytes);
+
+        _node = node;
+        _shareOfScope = share;
+        _sizeRank = sizeRank;
+
+        // A scan mints a fresh StorageNode for every node on every partial, so the newer instance is
+        // never the one already held even when it says exactly the same thing. Compare what the row
+        // actually shows, and stay silent when none of it moved — otherwise a folder whose size has
+        // settled still wakes its bindings, and the selected row still rebuilds the inspector, ten
+        // times a second for the rest of the scan.
+        var moved = false;
+
+        // The one that has to come first: a folder walked for the first time goes from "not looked
+        // at" to measured, and an empty one lands on the same zero it was already holding. Compared
+        // on bytes alone it looks unchanged, and every display below it would stay an em dash for
+        // the rest of the scan.
+        if (previous.IsMeasured != node.IsMeasured)
+        {
+            OnPropertyChanged(nameof(SizeDisplay));
+            OnPropertyChanged(nameof(LogicalDisplay));
+            OnPropertyChanged(nameof(ItemCountDisplay));
+            OnPropertyChanged(nameof(ShareDisplay));
+            moved = true;
+        }
+
+        if (previous.Name != node.Name)
+        {
+            OnPropertyChanged(nameof(Name));
+            moved = true;
+        }
+
+        if (previous.SizeBytes != node.SizeBytes)
+        {
+            OnPropertyChanged(nameof(SizeBytes));
+            OnPropertyChanged(nameof(SizeDisplay));
+            moved = true;
+        }
+
+        if (previous.LogicalBytes != node.LogicalBytes)
+        {
+            OnPropertyChanged(nameof(LogicalDisplay));
+            moved = true;
+        }
+
+        if (previous.ItemCount != node.ItemCount)
+        {
+            OnPropertyChanged(nameof(ItemCountDisplay));
+            moved = true;
+        }
+
+        // StorageProviderContext is a record, so this compares what it says rather than which
+        // instance said it. Correlation rebuilds these per snapshot.
+        if (previous.Provider != node.Provider)
+        {
+            OnPropertyChanged(nameof(ContextDisplay));
+            moved = true;
+        }
+
+        if (previousShare != share)
+        {
+            OnPropertyChanged(nameof(ShareOfScope));
+            OnPropertyChanged(nameof(ShareDisplay));
+            moved = true;
+        }
+
+        if (!moved)
+        {
+            return;
+        }
+
+        OnPropertyChanged(nameof(Node));
+        OnPropertyChanged(nameof(AccessibleDescription));
+    }
+
+    private static double ShareOf(StorageNode node, long scopeBytes) =>
+        scopeBytes <= 0 ? 0 : (double)node.SizeBytes / scopeBytes;
 }
 
 public sealed class StorageTreeItemViewModel : ObservableObject
 {
     private readonly Func<StorageNode, IEnumerable<StorageTreeItemViewModel>> _childFactory;
     private readonly ObservableCollection<StorageTreeItemViewModel> _children = [];
+    private StorageNode _node;
     private bool _childrenMaterialized;
     private bool _isExpanded;
 
@@ -101,21 +216,21 @@ public sealed class StorageTreeItemViewModel : ObservableObject
         StorageNode node,
         Func<StorageNode, IEnumerable<StorageTreeItemViewModel>> childFactory)
     {
-        Node = node;
+        _node = node;
         _childFactory = childFactory;
     }
 
-    public StorageNode Node { get; }
+    public StorageNode Node => _node;
 
-    public string Name => Node.Name;
+    public string Name => _node.Name;
 
-    public string SizeDisplay => Node.SizeDisplay;
+    public string SizeDisplay => _node.SizeDisplay;
 
-    public Guid Id => Node.Id;
+    public Guid Id => _node.Id;
 
-    public string AutomationId => $"FolderTreeItem_{Node.Id:N}";
+    public string AutomationId => $"FolderTreeItem_{_node.Id:N}";
 
-    public string AccessibleName => $"{Node.Name}, {Node.SizeDisplay}";
+    public string AccessibleName => $"{_node.Name}, {_node.SizeDisplay}";
 
     /// <summary>
     /// Children are created on first access rather than up front. A real volume holds hundreds of
@@ -129,7 +244,7 @@ public sealed class StorageTreeItemViewModel : ObservableObject
             if (!_childrenMaterialized)
             {
                 _childrenMaterialized = true;
-                foreach (StorageTreeItemViewModel child in _childFactory(Node))
+                foreach (StorageTreeItemViewModel child in _childFactory(_node))
                 {
                     _children.Add(child);
                 }
@@ -146,6 +261,89 @@ public sealed class StorageTreeItemViewModel : ObservableObject
     {
         get => _isExpanded;
         set => SetProperty(ref _isExpanded, value);
+    }
+
+    /// <summary>
+    /// Re-points this item at a newer version of the same folder. The identity, and therefore the
+    /// <c>TreeViewNode</c> the control built for it and whatever the user expanded underneath, is
+    /// left alone; only the size the row displays moves.
+    /// </summary>
+    public void Adopt(StorageNode node)
+    {
+        ArgumentNullException.ThrowIfNull(node);
+        if (node.Id != _node.Id)
+        {
+            throw new ArgumentException(
+                "A tree item can only adopt a newer version of the folder it already describes.",
+                nameof(node));
+        }
+
+        StorageNode previous = _node;
+        if (ReferenceEquals(previous, node))
+        {
+            return;
+        }
+
+        _node = node;
+        if (previous.Name != node.Name)
+        {
+            OnPropertyChanged(nameof(Name));
+            OnPropertyChanged(nameof(AccessibleName));
+        }
+
+        // Same reason as the row: an empty folder walked for the first time keeps its zero, so the
+        // size comparison below cannot see that the em dash is now a real measurement.
+        if (previous.SizeBytes != node.SizeBytes || previous.IsMeasured != node.IsMeasured)
+        {
+            OnPropertyChanged(nameof(SizeDisplay));
+            OnPropertyChanged(nameof(AccessibleName));
+        }
+    }
+
+    /// <summary>
+    /// Brings the already-materialised children into line with <paramref name="desired"/>.
+    /// A branch nobody has opened is left alone: it holds no view models to keep in step, and
+    /// building them to answer a question about rows that are not on screen is exactly the cost
+    /// the lazy <see cref="Children"/> accessor exists to avoid.
+    /// </summary>
+    internal void ReconcileChildren(
+        IReadOnlyList<StorageNode> desired,
+        Func<StorageNode, StorageTreeItemViewModel> create)
+    {
+        if (!_childrenMaterialized)
+        {
+            return;
+        }
+
+        // A re-ranked child has to be removed and re-inserted, because TreeView ignores a move. That
+        // destroys its TreeViewItem, and the container's collapse on teardown writes back through the
+        // two-way IsExpanded binding — so a folder the user opened would close itself the moment
+        // something overtook it. The wanted state lives here, so record it and put it back.
+        var expanded = new HashSet<Guid>();
+        foreach (StorageTreeItemViewModel child in _children)
+        {
+            if (child.IsExpanded)
+            {
+                expanded.Add(child.Id);
+            }
+        }
+
+        CollectionReconciler.Reconcile(
+            _children,
+            desired,
+            item => item.Id,
+            node => node.Id,
+            create,
+            static (item, node) => item.Adopt(node),
+            ReorderStrategy.Reinsert);
+
+        foreach (StorageTreeItemViewModel child in _children)
+        {
+            if (!child.IsExpanded && expanded.Contains(child.Id))
+            {
+                child.IsExpanded = true;
+            }
+        }
     }
 }
 
@@ -166,6 +364,7 @@ public sealed class StorageExplorerViewModel : ObservableObject
     private string? _errorMessage;
     private string _scenarioId = "baseline";
     private int _refreshOrdinal;
+    private int _projectionRevision;
     private bool _isEmpty = true;
 
     public StorageExplorerViewModel(IStorageSnapshotSource source)
@@ -186,6 +385,21 @@ public sealed class StorageExplorerViewModel : ObservableObject
     public ObservableCollection<StorageTreeItemViewModel> TreeRoots { get; } = [];
 
     public BulkObservableCollection<StorageRowViewModel> VisibleItems { get; } = [];
+
+    /// <summary>
+    /// Bumped once every time the projection is brought up to date, whether or not any row moved.
+    /// </summary>
+    /// <remarks>
+    /// A view that redraws itself wholesale from the projection — the treemap — cannot key off
+    /// collection changes any more. Reconciliation emits several targeted notifications per tick
+    /// where the old clear-and-refill emitted exactly one reset, and it emits none at all when only
+    /// the numbers moved. One counter per update is the signal that survives both.
+    /// </remarks>
+    public int ProjectionRevision
+    {
+        get => _projectionRevision;
+        private set => SetProperty(ref _projectionRevision, value);
+    }
 
     public ObservableCollection<StorageNode> Breadcrumbs { get; } = [];
 
@@ -435,9 +649,12 @@ public sealed class StorageExplorerViewModel : ObservableObject
         _refreshOrdinal = 0;
 
         // A scenario switch is a clean slate: never carry scope or selection across
-        // two unrelated mock drives.
+        // two unrelated mock drives. The tree is dropped outright rather than reconciled,
+        // because two scenarios that happen to name their root the same way are still two
+        // different drives and nothing in the old tree describes the new one.
         CurrentScope = null;
         SelectedRow = null;
+        TreeRoots.Clear();
         _searchText = string.Empty;
         OnPropertyChanged(nameof(SearchText));
         _mode = ExplorerMode.Folders;
@@ -616,14 +833,32 @@ public sealed class StorageExplorerViewModel : ObservableObject
     /// ids from paths — with freshly minted ids nothing here would match and every update would
     /// throw the user back to the root.
     /// </summary>
+    /// <remarks>
+    /// The tree and the table are edited in place rather than rebuilt. Rebuilding is what a partial
+    /// used to do, and at ten partials a second it meant the <c>TreeView</c> dropped every node,
+    /// collapsed, and was re-expanded from a remembered set on every tick — the room visibly
+    /// reconstructing itself while the user was trying to read it.
+    /// </remarks>
     private void AdoptSnapshot(StorageSnapshot snapshot)
     {
         Guid? previousScopeId = CurrentScope?.Id;
         Guid? previousSelectionId = SelectedRow?.Id;
-        HashSet<Guid> expanded = CollectExpandedIds();
+
+        // Only a genuinely different root forces a rebuild. Within one scan the root is stable, so
+        // every partial takes the reconcile path and the expanded set is carried by the items
+        // themselves rather than collected and replayed.
+        bool reuseTree = TreeRoots.Count == 1 && TreeRoots[0].Id == snapshot.Root.Id;
+        HashSet<Guid> expanded = reuseTree ? [] : CollectExpandedIds();
 
         Snapshot = snapshot;
-        BuildTree();
+        if (reuseTree)
+        {
+            ReconcileTreeItem(TreeRoots[0], snapshot.Root);
+        }
+        else
+        {
+            BuildTree();
+        }
 
         CurrentScope = previousScopeId is Guid scopeId &&
             snapshot.Find(scopeId) is { Kind: StorageNodeKind.Folder } scope
@@ -633,10 +868,23 @@ public sealed class StorageExplorerViewModel : ObservableObject
         RebuildBreadcrumbs();
         RebuildProjection();
 
-        SelectedRow = previousSelectionId is Guid selectionId &&
-            VisibleItems.FirstOrDefault(row => row.Id == selectionId) is { } restored
-                ? restored
-                : CreateRow(CurrentScope, CurrentScope.SizeBytes, -1);
+        if (previousSelectionId is Guid selectionId &&
+            VisibleItems.FirstOrDefault(row => row.Id == selectionId) is { } restored)
+        {
+            // Reconciliation kept the surviving row objects, so this is usually the row that is
+            // already selected and the assignment is a no-op.
+            SelectedRow = restored;
+        }
+        else if (SelectedRow is { } scopeRow && scopeRow.Id == CurrentScope.Id)
+        {
+            // The scope's own row is synthetic — it is not in the table, so nothing above restored
+            // it. Minting a fresh one each tick would rebind the whole inspector ten times a second.
+            scopeRow.Adopt(CurrentScope, CurrentScope.SizeBytes, -1);
+        }
+        else
+        {
+            SelectedRow = CreateRow(CurrentScope, CurrentScope.SizeBytes, -1);
+        }
 
         expanded.UnionWith(snapshot.AncestorsAndSelf(CurrentScope.Id).Select(node => node.Id));
         foreach (StorageTreeItemViewModel root in TreeRoots)
@@ -691,15 +939,51 @@ public sealed class StorageExplorerViewModel : ObservableObject
             return;
         }
 
-        TreeRoots.Add(BuildTreeItem(Snapshot, Snapshot.Root));
+        TreeRoots.Add(BuildTreeItem(Snapshot.Root));
     }
 
-    private StorageTreeItemViewModel BuildTreeItem(StorageSnapshot snapshot, StorageNode node) =>
-        new(node, parent => snapshot.ChildrenOf(parent.Id)
-            .Where(child => child.Kind == StorageNodeKind.Folder)
-            .OrderByDescending(child => child.SizeBytes)
-            .ThenBy(child => child.Name, StringComparer.OrdinalIgnoreCase)
-            .Select(child => BuildTreeItem(snapshot, child)));
+    /// <summary>
+    /// The child factory reads <see cref="Snapshot"/> when it runs rather than capturing the
+    /// snapshot the item was built from. Capturing is what used to make an item permanently
+    /// bound to one generation of the scan, and therefore made a full rebuild the only way to
+    /// show newer numbers.
+    /// </summary>
+    private StorageTreeItemViewModel BuildTreeItem(StorageNode node) =>
+        new(node, parent => ChildFoldersOf(parent.Id).Select(BuildTreeItem));
+
+    /// <summary>
+    /// Sibling order is size descending, and sizes climb throughout a scan, so folders genuinely
+    /// re-rank as it runs. Reconciliation expresses that as a move of the row that changed rather
+    /// than a rebuild of the ones that did not.
+    /// </summary>
+    private IEnumerable<StorageNode> ChildFoldersOf(Guid parentId) =>
+        Snapshot is null
+            ? []
+            : Snapshot.ChildrenOf(parentId)
+                .Where(child => child.Kind == StorageNodeKind.Folder)
+                .OrderByDescending(child => child.SizeBytes)
+                .ThenBy(child => child.Name, StringComparer.OrdinalIgnoreCase);
+
+    private void ReconcileTreeItem(StorageTreeItemViewModel item, StorageNode node)
+    {
+        item.Adopt(node);
+
+        // An unopened branch holds no view models, so there is nothing to bring up to date and
+        // touching it would materialise the subtree the lazy accessor exists to avoid building.
+        if (!item.HasMaterialisedChildren || Snapshot is null)
+        {
+            return;
+        }
+
+        item.ReconcileChildren([.. ChildFoldersOf(node.Id)], BuildTreeItem);
+        foreach (StorageTreeItemViewModel child in item.Children)
+        {
+            if (Snapshot.Find(child.Id) is { } fresh)
+            {
+                ReconcileTreeItem(child, fresh);
+            }
+        }
+    }
 
     private void RebuildBreadcrumbs()
     {
@@ -719,8 +1003,13 @@ public sealed class StorageExplorerViewModel : ObservableObject
     {
         if (Snapshot is null || CurrentScope is null)
         {
-            VisibleItems.ReplaceAll([]);
+            if (VisibleItems.Count > 0)
+            {
+                VisibleItems.ReplaceAll([]);
+            }
+
             IsEmpty = true;
+            ProjectionRevision++;
             OnPropertyChanged(nameof(ItemCountSummary));
             return;
         }
@@ -748,10 +1037,20 @@ public sealed class StorageExplorerViewModel : ObservableObject
             .ToDictionary(pair => pair.Id, pair => pair.rank);
 
         long scopeBytes = CurrentScope.SizeBytes;
-        VisibleItems.ReplaceAll(ApplySort(matches)
-            .Select(node => CreateRow(node, scopeBytes, sizeRanks[node.Id])));
+        StorageNode[] ordered = [.. ApplySort(matches)];
+
+        // Edited rather than replaced, for the reason AdoptSnapshot explains: a reset drops every
+        // container the list has built, and with it the selection and the scroll position.
+        CollectionReconciler.Reconcile(
+            VisibleItems,
+            ordered,
+            row => row.Id,
+            node => node.Id,
+            node => CreateRow(node, scopeBytes, sizeRanks[node.Id]),
+            (row, node) => row.Adopt(node, scopeBytes, sizeRanks[node.Id]));
 
         IsEmpty = VisibleItems.Count == 0;
+        ProjectionRevision++;
         OnPropertyChanged(nameof(ItemCountSummary));
     }
 

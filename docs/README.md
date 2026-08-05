@@ -17,7 +17,7 @@ truth; every claim below is grounded in a named file you can open and verify.
 | [SpeedTest.md](SpeedTest.md) | **The performance tests** — what each test measures, why, the methodology, and how missing tools are flagged. |
 | [Testing.md](Testing.md) | **Test-machine setup and self-hosting** — build lanes, tool/cache population, safe UI automation, and disposable-VM storage workflows. |
 | [KnownIssues.md](KnownIssues.md) | **Current readiness blockers** — severity, evidence, and the next action for each confirmed issue. |
-| [StorageAnalyzerPrototype.md](StorageAnalyzerPrototype.md) | **The storage analyzer prototype** — the mock-data-only WinUI prototype, which parts merge back into the manager, the scenario catalogue, and the live-source swap. |
+| [StorageLibrary.md](StorageLibrary.md) | **The storage library** — the UI-agnostic models, the live and mock snapshot sources, what a streaming partial means, and the live-source swap. |
 
 ## The through‑line (how this is built)
 

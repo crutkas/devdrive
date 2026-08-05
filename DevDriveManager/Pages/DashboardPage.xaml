@@ -176,6 +176,7 @@
                             <ListView
                                 AutomationProperties.AutomationId="SignalsList"
                                 AutomationProperties.Name="What this machine needs"
+                                ContainerContentChanging="Signals_ContainerContentChanging"
                                 ItemsSource="{x:Bind Signals}"
                                 KeyDown="Signals_KeyDown"
                                 SelectedItem="{x:Bind SelectedSignal, Mode=TwoWay}"
@@ -192,7 +193,6 @@
                                     <DataTemplate x:DataType="vm:AttentionSignalViewModel">
                                         <Grid
                                             Padding="14,8,14,8"
-                                            AutomationProperties.AutomationId="{x:Bind AutomationId}"
                                             AutomationProperties.Name="{x:Bind AutomationName}"
                                             ColumnSpacing="12">
                                             <Grid.ColumnDefinitions>
