@@ -523,29 +523,49 @@ public sealed partial class PackageCachesPage : Page, INotifyPropertyChanged
         Raise(nameof(InspectorEffect));
     }
 
+    private bool _pickerOpen;
+
     /// <summary>
     /// Lets the user pick a folder for a tool whose cache wasn't auto-detected, and writes the chosen path
     /// back onto the row's <see cref="PackageCacheRowViewModel.MapPath"/>. No mutation happens here — that
     /// is still gated behind the row's preview→confirm flow.
     /// </summary>
+    /// <remarks>
+    /// Guarded like every other picker and dialog in the app: a second picker opened over a live one
+    /// throws, and this is an <c>async void</c> handler, so that throw would take the process with it.
+    /// One Browse button exists per undetected row, which makes a stray double-click likely.
+    /// </remarks>
     private async void BrowseForMapPath_Click(object sender, RoutedEventArgs e)
     {
-        if ((sender as FrameworkElement)?.DataContext is not PackageCacheRowViewModel row)
+        if (_pickerOpen || (sender as FrameworkElement)?.DataContext is not PackageCacheRowViewModel row)
         {
             return;
         }
 
-        var picker = new Windows.Storage.Pickers.FolderPicker
-        {
-            SuggestedStartLocation = Windows.Storage.Pickers.PickerLocationId.ComputerFolder,
-        };
-        picker.FileTypeFilter.Add("*");
-        WinRT.Interop.InitializeWithWindow.Initialize(picker, App.WindowHandle);
+        _pickerOpen = true;
 
-        Windows.Storage.StorageFolder? folder = await picker.PickSingleFolderAsync();
-        if (folder is not null)
+        try
         {
-            row.MapPath = folder.Path;
+            var picker = new Windows.Storage.Pickers.FolderPicker
+            {
+                SuggestedStartLocation = Windows.Storage.Pickers.PickerLocationId.ComputerFolder,
+            };
+            picker.FileTypeFilter.Add("*");
+            WinRT.Interop.InitializeWithWindow.Initialize(picker, App.WindowHandle);
+
+            Windows.Storage.StorageFolder? folder = await picker.PickSingleFolderAsync();
+            if (folder is not null)
+            {
+                row.MapPath = folder.Path;
+            }
+        }
+        catch (Exception exception)
+        {
+            System.Diagnostics.Debug.WriteLine($"[caches] folder picker failed: {exception}");
+        }
+        finally
+        {
+            _pickerOpen = false;
         }
     }
 
@@ -624,6 +644,26 @@ public sealed partial class PackageCachesPage : Page, INotifyPropertyChanged
         if (Application.Current.Resources.TryGetValue("DefaultContentDialogStyle", out object? style) && style is Style dialogStyle)
         {
             dialog.Style = dialogStyle;
+        }
+    }
+
+    /// <summary>
+    /// Forwards each row's AutomationId onto the generated <c>ListViewItem</c>.
+    /// </summary>
+    /// <remarks>
+    /// The id used to live on the template's layout-only root Grid, which surfaces as a UIA Group
+    /// with no SelectionItem pattern -- reachable, but not selectable by that id. A screen reader
+    /// (and any automation on a desktop where injected input is refused) selects through
+    /// SelectionItem, so the id has to be on the container. <c>AutomationProperties.Name</c> stays
+    /// on the template root, where it describes the row's contents.
+    /// </remarks>
+    private void Caches_ContainerContentChanging(
+        ListViewBase sender,
+        ContainerContentChangingEventArgs args)
+    {
+        if (args.ItemContainer is not null && args.Item is PackageCacheRowViewModel row)
+        {
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(args.ItemContainer, row.RowAutomationId);
         }
     }
 }

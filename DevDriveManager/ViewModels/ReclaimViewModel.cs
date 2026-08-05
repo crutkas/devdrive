@@ -178,6 +178,7 @@ public sealed partial class ReclaimViewModel : ObservableObject
     private readonly ReclaimEngine _engine;
     private readonly Func<ReclaimScanContext> _contextFactory;
     private readonly IVolumeProvider _volumeProvider;
+    private IReadOnlyList<StorageVolume>? _cachedVolumes;
     private CancellationTokenSource? _scanCts;
 
     /// <summary>
@@ -431,6 +432,11 @@ public sealed partial class ReclaimViewModel : ObservableObject
         }
 
         FoundBytes = result.TotalBytes;
+
+        // A scan walks the disk and can take minutes, during which free space genuinely moves.
+        // This is the one moment in the room's life where re-reading the volumes earns its cost.
+        InvalidateVolumes();
+
         SelectSafe();
     }
 
@@ -527,30 +533,43 @@ public sealed partial class ReclaimViewModel : ObservableObject
     }
 
     /// <summary>
-    /// Rebuilds the context strip and the per-volume impact rows. Volumes are re-enumerated each time
-    /// rather than cached because a reclaim run changes free space, and a strip showing pre-scan free
-    /// space beside post-scan findings would be quietly self-contradictory. The impact rows are built
-    /// here, from the same enumeration, so the after-picture bars can never disagree with the strip
-    /// above them about how big a volume is.
+    /// Rebuilds the context strip and the per-volume impact rows from a cached enumeration.
     /// </summary>
+    /// <remarks>
+    /// The enumeration itself is a <c>CreateFile</c> plus a <c>DeviceIoControl</c> per volume, and
+    /// this runs on the UI thread from <see cref="RecomputeTotals"/> — that is, once per checkbox
+    /// tick. Ticking a box cannot change how much free space a volume has, so re-reading the
+    /// machine there was blocking the interaction to learn nothing. Free space only moves when a
+    /// scan or a reclaim run does something, which is what <see cref="InvalidateVolumes"/> is for.
+    /// <para>
+    /// The impact rows are still built from the same enumeration as the strip, so the after-picture
+    /// bars can never disagree with the strip above them about how big a volume is.
+    /// </para>
+    /// </remarks>
     private void RefreshVolumeStrip(IReadOnlyDictionary<string, long>? reclaimableByVolume = null)
     {
-        IReadOnlyList<StorageVolume> volumes;
-        try
+        IReadOnlyList<StorageVolume>? volumes = _cachedVolumes;
+
+        if (volumes is null)
         {
-            volumes = _volumeProvider.GetFixedVolumes();
-        }
-        catch (IOException)
-        {
-            // A volume disappearing mid-session is a real event, not a bug. The room is still usable
-            // without its strip, so this degrades rather than taking the page down.
-            RebuildImpacts(reclaimableByVolume, []);
-            return;
-        }
-        catch (UnauthorizedAccessException)
-        {
-            RebuildImpacts(reclaimableByVolume, []);
-            return;
+            try
+            {
+                volumes = _volumeProvider.GetFixedVolumes();
+            }
+            catch (IOException)
+            {
+                // A volume disappearing mid-session is a real event, not a bug. The room is still usable
+                // without its strip, so this degrades rather than taking the page down.
+                RebuildImpacts(reclaimableByVolume, []);
+                return;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                RebuildImpacts(reclaimableByVolume, []);
+                return;
+            }
+
+            _cachedVolumes = volumes;
         }
 
         string? systemRoot = Path.GetPathRoot(Environment.SystemDirectory);
@@ -563,6 +582,12 @@ public sealed partial class ReclaimViewModel : ObservableObject
 
         RebuildImpacts(reclaimableByVolume, volumes);
     }
+
+    /// <summary>
+    /// Drops the cached volume enumeration so the next strip rebuild re-reads the machine. Call
+    /// after anything that can actually move free space — a completed scan, or a reclaim run.
+    /// </summary>
+    private void InvalidateVolumes() => _cachedVolumes = null;
 
     /// <summary>
     /// A volume the enumeration could not describe is dropped rather than drawn with invented

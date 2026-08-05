@@ -227,6 +227,24 @@ public sealed partial class ShellPage : Page
         }
     }
 
+    /// <summary>
+    /// A page constructor that throws would otherwise either take the process down or leave an
+    /// empty content pane with the rail still highlighting the room, which reads as "this room is
+    /// blank" rather than "this room failed to open".
+    /// </summary>
+    private void OnNavigationFailed(object sender, Microsoft.UI.Xaml.Navigation.NavigationFailedEventArgs e)
+    {
+        e.Handled = true;
+        System.Diagnostics.Debug.WriteLine($"[navigation] {e.SourcePageType}: {e.Exception}");
+
+        ContentFrame.Content = new TextBlock
+        {
+            Text = "This section could not be opened. Try another room, or restart the app.",
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(32),
+        };
+    }
+
     /// <summary>"Create Dev Drive" raised from a page (e.g. the Dashboard empty state): select the nav item.</summary>
     private void OnNavigateToCreateRequested() => SelectNavItem("create");
 
@@ -304,10 +322,18 @@ public sealed partial class ShellPage : Page
                     "PerformanceModeGuidanceDialog");
             }
         }
-        finally
+            catch (Exception exception)
         {
-            _isDialogOpen = false;
-        }
+                // ShowAsync throws if the XamlRoot has gone (page detached) or if another ContentDialog
+                // is already up — "only one ContentDialog can be open at a time". The _isDialogOpen flag
+                // is local to this handler, so it cannot see a dialog a room opened. In an async void
+                // that throw is a process kill, which is a violent end for declining a nudge.
+                System.Diagnostics.Debug.WriteLine($"[perf-mode dialog] {exception}");
+            }
+            finally
+            {
+                _isDialogOpen = false;
+            }
     }
 
     /// <summary>

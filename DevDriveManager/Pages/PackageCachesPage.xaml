@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8" ?>
+<?xml version="1.0" encoding="utf-8" ?>
 <Page
     x:Class="DevDriveManager.Pages.PackageCachesPage"
     x:Name="CachesRoot"
@@ -11,10 +11,6 @@
     xmlns:storage="using:DevDriveStorage"
     xmlns:vm="using:DevDriveManager.ViewModels"
     mc:Ignorable="d">
-
-    <Page.Resources>
-        <controls:VolumeAccentRoleToBrushConverter x:Key="VolumeAccent" />
-    </Page.Resources>
 
     <Grid>
         <Grid.RowDefinitions>
@@ -56,7 +52,7 @@
                 <ItemsControl.ItemTemplate>
                     <DataTemplate x:DataType="storage:VolumeStripEntry">
                         <controls:VolumeCard
-                            AccentBrush="{x:Bind AccentRole, Converter={StaticResource VolumeAccent}}"
+                            AccentRole="{x:Bind AccentRole}"
                             IsSystemVolume="{x:Bind IsSystemVolume}"
                             ReclaimableBytes="{x:Bind ReclaimableBytes}"
                             Volume="{x:Bind Volume}" />
@@ -283,6 +279,7 @@
                         Grid.Row="3"
                         AutomationProperties.AutomationId="PackageCachesScrollViewer"
                         AutomationProperties.Name="Package caches in the selected group"
+                        ContainerContentChanging="Caches_ContainerContentChanging"
                         ItemsSource="{x:Bind VisibleCaches}"
                         SelectedItem="{x:Bind SelectedCache, Mode=TwoWay}"
                         SelectionMode="Single">
@@ -296,7 +293,6 @@
                         <ListView.ItemTemplate>
                             <DataTemplate x:DataType="vm:PackageCacheRowViewModel">
                                 <StackPanel
-                                    AutomationProperties.AutomationId="{x:Bind RowAutomationId}"
                                     AutomationProperties.Name="{x:Bind AutomationName, Mode=OneWay}"
                                     Opacity="{x:Bind RowOpacity}">
                                     <!--

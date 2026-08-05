@@ -619,7 +619,15 @@ public partial class CreateDevDriveViewModel : ObservableObject
         if (IsResize)
         {
             UsedBarLabel = $"Used \u00B7 {usedSize}";
-            SpaceAvailableLabel = "Shrinkable space available";
+
+            // This number is free space, and free space is not shrinkable space. A shrink is bounded
+            // by Get-PartitionSupportedSize, which unmovable page file, hibernation, snapshots and
+            // metadata scattered up the volume can hold far below the free figure — 240 GB free and
+            // 60 GB shrinkable is an ordinary system disk. Calling it "shrinkable" stated a number
+            // we had not measured as if we had. ResizeGuard measures the real limit while elevated
+            // and refuses anything larger, so the plan is safe; the label just has to stop claiming
+            // the check has already happened.
+            SpaceAvailableLabel = "Free space \u00B7 shrink limit checked before any change";
             PrimaryActionText = "Create";
         }
         else

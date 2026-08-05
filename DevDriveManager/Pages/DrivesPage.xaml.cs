@@ -548,4 +548,24 @@ public sealed partial class DrivesPage : Page, INotifyPropertyChanged
     }
 
     private void Raise(string property) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(property));
+
+    /// <summary>
+    /// Forwards each row's AutomationId onto the generated <c>ListViewItem</c>.
+    /// </summary>
+    /// <remarks>
+    /// The id used to live on the template's layout-only root Grid, which surfaces as a UIA Group
+    /// with no SelectionItem pattern -- reachable, but not selectable by that id. A screen reader
+    /// (and any automation on a desktop where injected input is refused) selects through
+    /// SelectionItem, so the id has to be on the container. <c>AutomationProperties.Name</c> stays
+    /// on the template root, where it describes the row's contents.
+    /// </remarks>
+    private void Volumes_ContainerContentChanging(
+        ListViewBase sender,
+        ContainerContentChangingEventArgs args)
+    {
+        if (args.ItemContainer is not null && args.Item is VolumeRowViewModel row)
+        {
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(args.ItemContainer, row.AutomationId);
+        }
+    }
 }

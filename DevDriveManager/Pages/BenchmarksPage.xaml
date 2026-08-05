@@ -13,10 +13,6 @@
     xmlns:vm="using:DevDriveManager.ViewModels"
     mc:Ignorable="d">
 
-    <Page.Resources>
-        <controls:VolumeAccentRoleToBrushConverter x:Key="VolumeAccent" />
-    </Page.Resources>
-
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -53,7 +49,7 @@
                 <ItemsControl.ItemTemplate>
                     <DataTemplate x:DataType="storage:VolumeStripEntry">
                         <controls:VolumeCard
-                            AccentBrush="{x:Bind AccentRole, Converter={StaticResource VolumeAccent}}"
+                            AccentRole="{x:Bind AccentRole}"
                             IsSystemVolume="{x:Bind IsSystemVolume}"
                             ReclaimableBytes="{x:Bind ReclaimableBytes}"
                             Volume="{x:Bind Volume}" />
@@ -283,6 +279,7 @@
                             <ListView
                                 AutomationProperties.AutomationId="WorkloadsList"
                                 AutomationProperties.Name="Measurable build workloads"
+                                ContainerContentChanging="Workloads_ContainerContentChanging"
                                 ItemsSource="{x:Bind Workloads, Mode=OneWay}"
                                 SelectedItem="{x:Bind SelectedWorkload, Mode=TwoWay}"
                                 SelectionMode="Single"
@@ -298,7 +295,6 @@
                                     <DataTemplate x:DataType="vm:BenchWorkloadViewModel">
                                         <Grid
                                             Padding="14,8,14,8"
-                                            AutomationProperties.AutomationId="{x:Bind RowAutomationId}"
                                             AutomationProperties.Name="{x:Bind RowAccessibleName}"
                                             ColumnSpacing="12">
                                             <Grid.ColumnDefinitions>

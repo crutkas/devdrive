@@ -79,7 +79,12 @@ public sealed class JsonFreeSpaceHistoryStore : IFreeSpaceHistoryStore
             IReadOnlyList<FreeSpaceSample> existing = LoadCore();
             IReadOnlyList<FreeSpaceSample> updated = FreeSpaceHistory.Append(existing, sample);
 
-            if (!ReferenceEquals(existing, updated) && updated.Count != existing.Count)
+            // Compare contents, not counts. Append always returns a fresh list, so the reference
+            // check never fired, and the count check missed the one case that matters: once a
+            // volume is at its per-volume cap, adding a sample rotates the oldest out and the count
+            // lands back where it started. The save was skipped, and the history on disk quietly
+            // stopped advancing — a trend line frozen at an old reading the user reads as current.
+            if (!updated.SequenceEqual(existing))
             {
                 Save(updated);
             }

@@ -106,7 +106,8 @@
             <Frame
                 x:Name="ContentFrame"
                 Grid.Row="1"
-                AutomationProperties.AutomationId="ShellContentFrame" />
+                AutomationProperties.AutomationId="ShellContentFrame"
+                NavigationFailed="OnNavigationFailed" />
         </Grid>
     </Grid>
 </Page>

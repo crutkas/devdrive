@@ -73,15 +73,22 @@ public sealed partial class VolumeCard : UserControl
     public static readonly DependencyProperty ReclaimableBytesProperty = DependencyProperty.Register(
         nameof(ReclaimableBytes), typeof(long), typeof(VolumeCard), new PropertyMetadata(0L, OnAnyChanged));
 
-    /// <summary>Colour of the in-use band, so two volumes are told apart at a glance.</summary>
-    public Brush? AccentBrush
+    /// <summary>
+    /// Which colour family the in-use band uses, so two volumes are told apart at a glance.
+    /// Passed through to <see cref="CapacityBar"/> as a role rather than a resolved brush, so it
+    /// survives a theme change.
+    /// </summary>
+    public VolumeAccentRole AccentRole
     {
-        get => (Brush?)GetValue(AccentBrushProperty);
-        set => SetValue(AccentBrushProperty, value);
+        get => (VolumeAccentRole)GetValue(AccentRoleProperty);
+        set => SetValue(AccentRoleProperty, value);
     }
 
-    public static readonly DependencyProperty AccentBrushProperty = DependencyProperty.Register(
-        nameof(AccentBrush), typeof(Brush), typeof(VolumeCard), new PropertyMetadata(null, OnAnyChanged));
+    public static readonly DependencyProperty AccentRoleProperty = DependencyProperty.Register(
+        nameof(AccentRole),
+        typeof(VolumeAccentRole),
+        typeof(VolumeCard),
+        new PropertyMetadata(VolumeAccentRole.Other, OnAnyChanged));
 
     public bool IsSelected
     {
@@ -124,7 +131,7 @@ public sealed partial class VolumeCard : UserControl
         string free = ByteSize.Format(volume.FreeBytes <= 0 ? 0UL : (ulong)volume.FreeBytes);
         PartFree.Text = $"{free} free";
 
-        PartBar.UsedBrush = AccentBrush;
+        PartBar.AccentRole = AccentRole;
         PartBar.Capacity = VolumeCapacity.ForVolume(volume, ReclaimableBytes);
 
         VisualStateManager.GoToState(PartButton, IsSelected ? "Selected" : "Unselected", false);

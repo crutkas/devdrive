@@ -49,6 +49,10 @@
     <!--  The filter row VM is what the trust VM projects the elevated probe's output into, so it comes
           along for compilation and the projection is assertable here rather than only on screen.  -->
     <Compile Include="..\DevDriveManager\ViewModels\FilterRowViewModel.cs" Link="SuiteViewModels\FilterRowViewModel.cs" />
+    <!--  The volumes-table row VM turns a VolumeInfo into the pills and numbers a person reads, which
+          makes it where "we could not read this" either survives or gets flattened into a confident
+          wrong answer. Pure string formatting over DevDriveCore types, so it tests headlessly.  -->
+    <Compile Include="..\DevDriveManager\ViewModels\VolumeRowViewModel.cs" Link="SuiteViewModels\VolumeRowViewModel.cs" />
   </ItemGroup>
 
   <!--

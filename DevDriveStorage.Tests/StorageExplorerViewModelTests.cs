@@ -313,6 +313,123 @@ public sealed class StorageExplorerViewModelTests
         Assert.AreEqual(scopeId, viewModel.CurrentScope?.Id, "a streamed update must not reset the scope");
     }
 
+    [TestMethod]
+    public async Task AScanThatWasSupersededDoesNotStampItsEndingOnItsReplacement()
+    {
+        // Refresh cancels the scan in flight and immediately starts another. The cancelled scan's
+        // continuation then resumes — after the replacement has already set itself Scanning — and
+        // used to write "Scan cancelled" straight over it. The label is the small half of the bug:
+        // ApplyProgress drops every partial once ScanState is no longer Scanning, so the live scan
+        // went silent and the room sat on a half-drawn tree until it finally finished.
+        //
+        // The gates matter. If the first scan parks on its own cancellation token, Cancel() runs
+        // its continuation inline on the calling thread — before the replacement has assigned
+        // itself — and the overlap this test exists to create never happens. Parking on something
+        // the token does not touch is what lets the two scans genuinely interleave, the way a UI
+        // SynchronizationContext makes them interleave in the app.
+        var source = new GatedSource(StorageTestBuilder.Snapshot());
+        var viewModel = new StorageExplorerViewModel(source);
+
+        Task first = viewModel.LoadScenarioAsync("scanning");
+        await source.Entered(0);
+
+        Task second = viewModel.RefreshAsync();
+        await source.Entered(1);
+
+        Assert.AreEqual(
+            ExplorerScanState.Scanning,
+            viewModel.ScanState,
+            "the replacement has taken over by now");
+
+        source.Release(0);
+        await first;
+
+        Assert.AreEqual(
+            ExplorerScanState.Scanning,
+            viewModel.ScanState,
+            "the superseded scan just ended, but the replacement is still running — the room " +
+            "must not be told the scan was cancelled");
+
+        source.Release(1);
+        await second;
+
+        Assert.AreEqual(ExplorerScanState.Completed, viewModel.ScanState);
+    }
+
+    [TestMethod]
+    public async Task AnUnexpectedFailureEndsTheScanInsteadOfSpinningForever()
+    {
+        // Only three exception types were handled. A scan walks denied directories, reparse loops
+        // and ReFS quirks for minutes, so something else getting out is a when, not an if — and
+        // when it did, ScanState stayed Scanning: ring spinning, Refresh and Retry disabled, and
+        // Cancel doing nothing. Restarting the app was the only way back.
+        var viewModel = new StorageExplorerViewModel(
+            new ThrowingSource(new InvalidOperationException("something nobody predicted")));
+
+        await viewModel.LoadScenarioAsync("test");
+
+        Assert.AreEqual(ExplorerScanState.Failed, viewModel.ScanState);
+        Assert.IsFalse(viewModel.IsScanning, "a dead scan must not keep the room disabled");
+        StringAssert.Contains(viewModel.ErrorMessage, "something nobody predicted");
+    }
+
+    private sealed class ThrowingSource(Exception exception) : IStorageSnapshotSource
+    {
+        public Task<StorageSnapshot> GetSnapshotAsync(
+            StorageSnapshotRequest request,
+            IProgress<StorageScanProgress>? progress,
+            CancellationToken cancellationToken) => throw exception;
+    }
+
+    /// <summary>
+    /// Parks each scan on a gate the caller opens by hand, so two scans can be held open at once
+    /// and released in a chosen order. The gate is deliberately independent of the cancellation
+    /// token: cancellation is observed only after the gate opens, which is what puts a superseded
+    /// scan's ending after its replacement's beginning.
+    /// </summary>
+    private sealed class GatedSource(StorageSnapshot snapshot) : IStorageSnapshotSource
+    {
+        private readonly List<(TaskCompletionSource Entered, TaskCompletionSource Release)> _gates = [];
+
+        public Task Entered(int index) => Gate(index).Entered.Task;
+
+        public void Release(int index) => Gate(index).Release.TrySetResult();
+
+        private (TaskCompletionSource Entered, TaskCompletionSource Release) Gate(int index)
+        {
+            lock (_gates)
+            {
+                while (_gates.Count <= index)
+                {
+                    _gates.Add((
+                        new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously),
+                        new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)));
+                }
+
+                return _gates[index];
+            }
+        }
+
+        public async Task<StorageSnapshot> GetSnapshotAsync(
+            StorageSnapshotRequest request,
+            IProgress<StorageScanProgress>? progress,
+            CancellationToken cancellationToken)
+        {
+            int index;
+            lock (_gates)
+            {
+                index = _gates.Count(g => g.Entered.Task.IsCompleted);
+            }
+
+            (TaskCompletionSource entered, TaskCompletionSource release) = Gate(index);
+            entered.TrySetResult();
+            await release.Task;
+
+            cancellationToken.ThrowIfCancellationRequested();
+            return snapshot;
+        }
+    }
+
     /// <summary>Reports one partial snapshot, then completes with the final one.</summary>
     private sealed class StreamingSource(StorageSnapshot partial, StorageSnapshot final)
         : IStorageSnapshotSource

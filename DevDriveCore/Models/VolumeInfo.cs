@@ -26,8 +26,29 @@ public sealed record VolumeInfo
     /// <summary>Free space in bytes.</summary>
     public ulong FreeBytes { get; init; }
 
+    /// <summary>
+    /// False when WMI returned no size for this volume. Distinguishes a volume nobody could
+    /// measure from one that genuinely holds nothing, which otherwise both read "0 B free of 0 B".
+    /// </summary>
+    public bool IsSizeKnown { get; init; } = true;
+
     /// <summary>True when PERSISTENT_VOLUME_STATE_DEV_VOLUME (0x2000) is set. The must-have signal.</summary>
     public bool IsDevDrive { get; init; }
+
+    /// <summary>
+    /// False when the Dev Drive flags could not be read at all — a BitLocker-locked volume, one
+    /// that is not ready, or a locked-down machine that denies the handle.
+    /// </summary>
+    /// <remarks>
+    /// The FSCTL returns no flags in those cases, which decoded to "not a Dev Drive" and rendered
+    /// a flat <c>No</c>. That states the opposite of the truth about a real, trusted Dev Drive
+    /// that simply happened to be locked, and it is the same mistake as printing 0 bytes for a
+    /// folder nobody has measured: a failure to read is not a reading of false.
+    ///
+    /// Defaults to <see langword="true"/> so every construction site that knows what it is
+    /// building — tests, fakes, scenarios — is unaffected; only the live probe clears it.
+    /// </remarks>
+    public bool IsDevDriveStateKnown { get; init; } = true;
 
     /// <summary>
     /// True when PERSISTENT_VOLUME_STATE_TRUSTED_VOLUME (0x4000) is set. Readable unelevated

@@ -78,6 +78,53 @@ public partial class App : Application
     public App()
     {
         InitializeComponent();
+
+        // Without these, any exception escaping an async void handler takes the process down with
+        // no dialog, no log and nothing to diagnose from. On a desktop that manages someone's disk,
+        // vanishing mid-operation is the worst way to fail: the user cannot tell whether the thing
+        // they just confirmed happened, half-happened, or never started.
+        UnhandledException += OnUnhandledException;
+        TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
+    }
+
+    private async void OnUnhandledException(
+        object sender, Microsoft.UI.Xaml.UnhandledExceptionEventArgs e)
+    {
+        // Marking it handled keeps the window alive so the message can actually be read. The
+        // alternative is a process that disappears while the dialog is still being constructed.
+        e.Handled = true;
+
+        Exception? exception = e.Exception;
+        System.Diagnostics.Debug.WriteLine($"[unhandled] {exception}");
+
+        try
+        {
+            if (Window?.Content?.XamlRoot is not Microsoft.UI.Xaml.XamlRoot root)
+            {
+                return;
+            }
+
+            var dialog = new Microsoft.UI.Xaml.Controls.ContentDialog
+            {
+                XamlRoot = root,
+                Title = "Something went wrong",
+                Content = "The app hit an unexpected error. Nothing on your drives was changed by " +
+                    "this failure.\n\n" + (exception?.Message ?? e.Message),
+                CloseButtonText = "Close",
+            };
+
+            await dialog.ShowAsync();
+        }
+        catch (Exception)
+        {
+            // A dialog that cannot open must not become the next unhandled exception.
+        }
+    }
+
+    private static void OnUnobservedTaskException(object? sender, UnobservedTaskExceptionEventArgs e)
+    {
+        System.Diagnostics.Debug.WriteLine($"[unobserved] {e.Exception}");
+        e.SetObserved();
     }
 
     /// <summary>

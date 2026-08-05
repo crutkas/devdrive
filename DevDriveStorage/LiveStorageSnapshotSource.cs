@@ -36,6 +36,15 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
     /// </summary>
     public int LastFastPathFallbackCount { get; private set; }
 
+    /// <summary>
+    /// Forces every directory down the managed enumeration path, as if the native fast path had
+    /// been rejected. This exists because that fallback is the <em>ReFS</em> path — the one a Dev
+    /// Drive actually takes — and it cannot otherwise be reached from a test running on NTFS. A
+    /// bug that only shows up on the volume this tool is built for is the worst kind to ship, and
+    /// this seam is the only way a test can see it.
+    /// </summary>
+    public bool ForceManagedEnumeration { get; init; }
+
     public LiveStorageSnapshotSource(
         int maxChildrenPerFolder = DefaultMaxChildrenPerFolder,
         TimeSpan? progressInterval = null)
@@ -92,7 +101,7 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
         }
 
         long? referenceTotalBytes = TryGetVolumeUsedBytes(fullRoot);
-        var context = new ScanContext(progress, referenceTotalBytes, _progressInterval);
+        var context = new ScanContext(progress, referenceTotalBytes, _progressInterval, ForceManagedEnumeration);
 
         var root = new ScanEntry(null, fullRoot, DescribeRootName(fullRoot), StorageNodeKind.Folder);
         var order = new List<ScanEntry> { root };
@@ -205,7 +214,8 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
         // Fast path: one syscall for the whole directory yields each child's on-disk
         // AllocationSize (cluster slack included) alongside its apparent length, replacing
         // both the managed enumeration and a per-file GetCompressedFileSizeW call.
-        if (NativeDirectoryEnumerator.TryEnumerate(directory.Path, out List<NativeDirEntry> nativeEntries))
+        if (!context.ForceManagedEnumeration &&
+            NativeDirectoryEnumerator.TryEnumerate(directory.Path, out List<NativeDirEntry> nativeEntries))
         {
             EnumerateFromNative(directory, nativeEntries, order, stack, context, cancellationToken);
             return;
@@ -328,6 +338,7 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
                 SelfAllocated = allocated,
                 SelfLogical = apparent,
                 IsLeaf = true,
+                IsMeasured = true,
                 IsReparsePoint = isReparse,
                 SelfModifiedAtUtc = SafeModified(info),
             };
@@ -671,7 +682,8 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
     private sealed class ScanContext(
         IProgress<StorageScanProgress>? progress,
         long? referenceTotalBytes,
-        TimeSpan interval)
+        TimeSpan interval,
+        bool forceManagedEnumeration = false)
     {
         private readonly Stopwatch _stopwatch = Stopwatch.StartNew();
         private TimeSpan _lastReport = TimeSpan.FromSeconds(-1);
@@ -679,6 +691,9 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
         private int _fileCount;
         private TimeSpan _nextPartial = TimeSpan.Zero;
         private string _lastDirectory = string.Empty;
+
+        /// <summary>Test seam; see <see cref="LiveStorageSnapshotSource.ForceManagedEnumeration"/>.</summary>
+        public bool ForceManagedEnumeration { get; } = forceManagedEnumeration;
 
         public List<string> DeniedPaths { get; } = [];
 

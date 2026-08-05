@@ -15,6 +15,15 @@ public sealed class OverlapTests
         new(category, path, Path.GetFileName(path.TrimEnd('\\')), size, risk,
             "reason", "recovery hint");
 
+    /// <summary>
+    /// Shaped exactly like <c>RecycleBinReclaimProvider</c>'s output: the path is the volume root,
+    /// because a Recycle Bin is not a folder you can point at. That is what makes it dangerous to
+    /// containment arithmetic, so the tests have to use the real shape rather than a tidier one.
+    /// </summary>
+    private static ReclaimCandidate Bin(string volumeRoot, long size) =>
+        new("recycle-bin", volumeRoot, $"Recycle Bin on {volumeRoot.TrimEnd('\\')}", size,
+            ReclaimRisk.Safe, "reason", "recovery hint", supportsRecycleBin: false);
+
     [TestMethod]
     public void NestedCandidateIsNotCountedTwice()
     {
@@ -107,6 +116,50 @@ public sealed class OverlapTests
         Assert.AreEqual(@"C:\src\repo", map[@"C:\src\repo\obj"],
             "A row contributing nothing to the total has to be able to say why.");
         Assert.IsFalse(map.ContainsKey(@"C:\src\repo"));
+    }
+
+    [TestMethod]
+    public void TheRecycleBinDoesNotSwallowTheVolumeItSitsOn()
+    {
+        // The Recycle Bin's Path is the volume root, because there is no single folder to point at.
+        // That makes it the shortest path in the set, so it sorted first and — since every path on
+        // the drive starts with "C:\" — every other candidate on that volume was ruled a nested
+        // duplicate of it. The headline number collapsed to the size of the bin. This is the exact
+        // under-count the resolver exists to prevent, produced by the resolver itself.
+        ReclaimCandidate bin = Bin(@"C:\", 2_000_000_000);
+        ReclaimCandidate build = Candidate(@"C:\src\repo\obj", 400_000_000_000, "build-outputs");
+
+        long total = ReclaimOverlapResolver.ReclaimableBytes([bin, build]);
+
+        Assert.AreEqual(402_000_000_000, total,
+            "Emptying the bin and deleting an obj folder free different bytes. A volume root is " +
+            "not a subtree anything can be nested inside.");
+    }
+
+    [TestMethod]
+    public void ARowIsNotToldItIsAlreadyIncludedInTheRecycleBin()
+    {
+        ReclaimCandidate bin = Bin(@"C:\", 2_000);
+        ReclaimCandidate build = Candidate(@"C:\src\repo\obj", 400);
+
+        IReadOnlyDictionary<string, string> map =
+            ReclaimOverlapResolver.ContainerByPath([bin, build]);
+
+        Assert.IsFalse(map.ContainsKey(@"C:\src\repo\obj"),
+            @"Telling a build-output row it is 'already included in C:\' is both wrong and " +
+            "unexplainable to the person reading it.");
+    }
+
+    [TestMethod]
+    public void NestingStillCollapsesOnAVolumeThatAlsoHasABin()
+    {
+        // Fixing the bin must not switch containment off for the rest of the volume.
+        ReclaimCandidate bin = Bin(@"C:\", 1_000);
+        ReclaimCandidate worktree = Candidate(@"C:\src\repo", 500);
+        ReclaimCandidate obj = Candidate(@"C:\src\repo\obj", 300, "build-outputs");
+
+        Assert.AreEqual(1_500, ReclaimOverlapResolver.ReclaimableBytes([bin, worktree, obj]),
+            "Bin plus worktree; the obj inside the worktree is still counted once.");
     }
 
     [TestMethod]

@@ -15,6 +15,13 @@ public sealed record StorageVolumeRecord
     /// <summary><c>Size</c> in bytes.</summary>
     public ulong SizeBytes { get; init; }
 
+    /// <summary>
+    /// False when WMI had no <c>Size</c> to give — a transient provider failure, or a volume it
+    /// cannot size. Zero is a legitimate answer to a different question, so the two must not
+    /// arrive looking the same. Defaults true; only the WMI reader clears it.
+    /// </summary>
+    public bool IsSizeKnown { get; init; } = true;
+
     /// <summary><c>SizeRemaining</c> in bytes.</summary>
     public ulong FreeBytes { get; init; }
 

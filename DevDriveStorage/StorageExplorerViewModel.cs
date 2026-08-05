@@ -125,6 +125,7 @@ public sealed class StorageRowViewModel : ObservableObject
 
         StorageNode previous = _node;
         double previousShare = _shareOfScope;
+        int previousRank = _sizeRank;
         double share = ShareOf(node, scopeBytes);
 
         _node = node;
@@ -188,6 +189,16 @@ public sealed class StorageRowViewModel : ObservableObject
         {
             OnPropertyChanged(nameof(ShareOfScope));
             OnPropertyChanged(nameof(ShareDisplay));
+            moved = true;
+        }
+
+        // Rank is deliberately live, unlike ColorIndex above: a row that climbs from 9th to 2nd
+        // during a scan is the whole point of re-sorting. Nothing binds it yet, so assigning the
+        // field without raising it was silent — and would have stayed silent right up until
+        // someone added a rank column and could not work out why it never moved.
+        if (previousRank != sizeRank)
+        {
+            OnPropertyChanged(nameof(SizeRank));
             moved = true;
         }
 
@@ -798,12 +809,27 @@ public sealed class StorageExplorerViewModel : ObservableObject
         });
 
         Guid? previousScopeId = CurrentScope?.Id;
+
+        // The partial path already refuses to write for a superseded scan; the terminal path did
+        // not. A scan that is cancelled to make way for a newer one resumes its continuation after
+        // the replacement has already set ScanState = Scanning, and wrote "Scan cancelled" over it.
+        // That is worse than a wrong label: ApplyProgress drops every partial once ScanState is no
+        // longer Scanning, so the live scan goes silent and the room freezes on a half-drawn tree
+        // until the new scan finally finishes — minutes later on a cold volume.
+        bool StillCurrent() => ReferenceEquals(_scanCancellation, scan);
+
         try
         {
             StorageSnapshot snapshot = await _source.GetSnapshotAsync(
                 new StorageSnapshotRequest(_scenarioId, previousScopeId, _refreshOrdinal),
                 progress,
                 token);
+
+            if (!StillCurrent())
+            {
+                return;
+            }
+
             AdoptSnapshot(snapshot);
 
             Progress = 1;
@@ -814,13 +840,39 @@ public sealed class StorageExplorerViewModel : ObservableObject
         }
         catch (OperationCanceledException)
         {
+            if (!StillCurrent())
+            {
+                return;
+            }
+
             ProgressLabel = "Scan cancelled";
             ScanState = ExplorerScanState.Cancelled;
         }
         catch (Exception exception) when (
             exception is StorageSnapshotSourceException or StorageSnapshotValidationException)
         {
+            if (!StillCurrent())
+            {
+                return;
+            }
+
             ErrorMessage = exception.Message;
+            ProgressLabel = "Scan failed";
+            ScanState = ExplorerScanState.Failed;
+        }
+        catch (Exception exception)
+        {
+            // A scan walks hostile input — denied directories, reparse loops, ReFS quirks — for
+            // minutes at a time, so an unanticipated exception is a when, not an if. Without this
+            // arm ScanState stays Scanning forever: the ring spins, Refresh and Retry stay
+            // disabled, Cancel does nothing, and only restarting the app recovers. A visible
+            // failure the user can retry is strictly better than a room that is quietly dead.
+            if (!StillCurrent())
+            {
+                return;
+            }
+
+            ErrorMessage = $"The scan stopped unexpectedly: {exception.Message}";
             ProgressLabel = "Scan failed";
             ScanState = ExplorerScanState.Failed;
         }

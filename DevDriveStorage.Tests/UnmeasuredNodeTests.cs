@@ -162,4 +162,56 @@ public sealed class UnmeasuredNodeTests
             first.Nodes.Where(node => !node.IsMeasured).All(node => node.SizeDisplay == "—"),
             "and every one of them must say so rather than claim zero");
     }
+
+    [TestMethod]
+    public async Task EveryFileIsMeasuredOnTheReFsFallbackPath()
+    {
+        // The managed enumeration is the ReFS path — a Dev Drive with 64-bit file ids drops to it
+        // for every directory. It is also unreachable from a test on NTFS without a seam, which is
+        // how it shipped building leaves that claimed to be unmeasured: every file on the volume
+        // this tool exists for would have rendered a permanent em dash instead of a size.
+        _fixture.File("src/app.dll", 8192);
+        _fixture.File("src/nested/data.bin", 4096);
+        _fixture.File("top.txt", 1024);
+
+        var source = new LiveStorageSnapshotSource { ForceManagedEnumeration = true };
+        StorageSnapshot snapshot = await source.GetSnapshotAsync(
+            new StorageSnapshotRequest(_fixture.Root), progress: null, CancellationToken.None);
+
+        Assert.IsGreaterThan(
+            0,
+            source.LastFastPathFallbackCount,
+            "the seam must actually put the scan on the fallback, or this test proves nothing");
+
+        StorageNode[] files = [.. snapshot.Nodes.Where(node => node.Kind == StorageNodeKind.File)];
+        Assert.IsNotEmpty(files);
+        Assert.IsTrue(
+            files.All(file => file.IsMeasured),
+            "a file was read off the disk to get here — its size is known");
+        Assert.IsFalse(
+            files.Any(file => file.SizeDisplay == "—"),
+            "so no file may render as unmeasured");
+    }
+
+    [TestMethod]
+    public async Task TheTwoEnumerationPathsAgreeOnWhatWasMeasured()
+    {
+        _fixture.File("a/one.bin", 4096);
+        _fixture.File("a/b/two.bin", 8192);
+        _fixture.Dir("a/empty");
+
+        StorageSnapshot native = await new LiveStorageSnapshotSource().GetSnapshotAsync(
+            new StorageSnapshotRequest(_fixture.Root), progress: null, CancellationToken.None);
+        StorageSnapshot managed = await new LiveStorageSnapshotSource { ForceManagedEnumeration = true }
+            .GetSnapshotAsync(new StorageSnapshotRequest(_fixture.Root), progress: null, CancellationToken.None);
+
+        string[] Unmeasured(StorageSnapshot s) =>
+            [.. s.Nodes.Where(n => !n.IsMeasured).Select(n => n.Name).Order()];
+
+        CollectionAssert.AreEqual(
+            Unmeasured(native),
+            Unmeasured(managed),
+            "the fallback is a performance difference, not a correctness one — both paths must " +
+            "report the same set of things as measured.");
+    }
 }

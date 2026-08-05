@@ -66,7 +66,7 @@ public sealed class DevDriveService : IDevDriveService
                 continue;
             }
 
-            (bool isDevDrive, bool isTrusted) = DetectDevDrive(volume.DriveLetter);
+            (bool isDevDrive, bool isTrusted, bool stateKnown) = DetectDevDrive(volume.DriveLetter);
             (bool isVhd, string? vhdPath) = DetectVhd(volume.DriveLetter, partitionByLetter, diskByNumber);
 
             result.Add(new VolumeInfo
@@ -78,6 +78,8 @@ public sealed class DevDriveService : IDevDriveService
                 FreeBytes = volume.FreeBytes,
                 IsDevDrive = isDevDrive,
                 IsTrusted = isTrusted,
+                IsDevDriveStateKnown = stateKnown,
+                IsSizeKnown = volume.IsSizeKnown,
                 IsVhd = isVhd,
                 VhdFilePath = vhdPath,
             });
@@ -138,15 +140,19 @@ public sealed class DevDriveService : IDevDriveService
         return (isDev, isTrusted);
     }
 
-    private (bool IsDevDrive, bool IsTrusted) DetectDevDrive(char? driveLetter)
+    private (bool IsDevDrive, bool IsTrusted, bool IsKnown) DetectDevDrive(char? driveLetter)
     {
         if (driveLetter is not char letter)
         {
-            return (false, false);
+            // A letterless volume cannot be a Dev Drive, and that is a fact rather than a failure
+            // to look — this one really is knowable.
+            return (false, false, true);
         }
 
         uint? flags = _native.QueryPersistentVolumeState($"{letter}:\\");
-        return DecodeFlags(flags);
+        (bool isDevDrive, bool isTrusted) = DecodeFlags(flags);
+
+        return (isDevDrive, isTrusted, flags is not null);
     }
 
     private (bool IsVhd, string? VhdFilePath) DetectVhd(

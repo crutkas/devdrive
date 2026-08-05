@@ -40,14 +40,18 @@ public sealed partial class MainWindow : Window
         int height = Math.Min((int)(900 * scale), (int)(work.Height * 0.94));
         AppWindow.Resize(new SizeInt32(width, height));
 
+        // Preferences must load before anything reads them, and the first read happens during the
+        // Navigate below: constructing ShellPage touches App.SharedCreate, whose constructor seeds
+        // the create method from PreferResizeOverVhdx. Initialising afterwards meant that seed
+        // always saw the default, so "prefer resize" silently never survived a restart even though
+        // Settings showed it set.
+        DevDriveManager.Services.ThemeService.Initialize();
+        DevDriveManager.Services.PreferencesService.Initialize();
+
         // Navigate the root frame to the navigation shell on startup.
         RootFrame.Navigate(typeof(ShellPage));
 
         // Apply the persisted theme override (System / Light / Dark) to the live content root.
-        DevDriveManager.Services.ThemeService.Initialize();
         RootFrame.RequestedTheme = DevDriveManager.Services.ThemeService.Mode;
-
-        // Load the rest of the preferences before any room reads them.
-        DevDriveManager.Services.PreferencesService.Initialize();
     }
 }

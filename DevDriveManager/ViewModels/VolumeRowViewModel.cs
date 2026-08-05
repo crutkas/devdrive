@@ -26,19 +26,30 @@ public sealed class VolumeRowViewModel
         Header = volume.DriveLetter is char letter ? $"{letter}:  {label}" : label;
 
         string fileSystem = string.IsNullOrWhiteSpace(volume.FileSystemType) ? "Unknown" : volume.FileSystemType;
-        string size = ByteSizeFormatter.Format(volume.SizeBytes);
-        string free = ByteSizeFormatter.Format(volume.FreeBytes);
-        Description = $"{fileSystem}  ·  {free} free of {size}";
+        string size = volume.IsSizeKnown ? ByteSizeFormatter.Format(volume.SizeBytes) : "—";
+        string free = volume.IsSizeKnown ? ByteSizeFormatter.Format(volume.FreeBytes) : "—";
+        Description = volume.IsSizeKnown
+            ? $"{fileSystem}  ·  {free} free of {size}"
+            : $"{fileSystem}  ·  size unavailable";
 
         FileSystemType = fileSystem;
 
         CapacityText = size;
         FreeText = free;
-        DevDrivePillText = volume.IsDevDrive ? (volume.IsTrusted ? "Trusted" : "Untrusted") : "No";
+
+        // "No" is a claim. When the volume could not be opened at all — BitLocker-locked, not
+        // ready, handle denied — we have not learned that it is not a Dev Drive, we have learned
+        // nothing, and a real trusted Dev Drive would sit there flatly labelled No.
+        DevDrivePillText = !volume.IsDevDriveStateKnown
+            ? "Unknown"
+            : volume.IsDevDrive ? (volume.IsTrusted ? "Trusted" : "Untrusted") : "No";
 
         // A Dev Drive we could not confirm the trust of is not the good state and not the neutral one
-        // — it is the case worth looking at, which is what the warn pill is for.
-        DevDrivePillKind = !volume.IsDevDrive ? "mute" : volume.IsTrusted ? "dev" : "system";
+        // — it is the case worth looking at, which is what the warn pill is for. Same for one we
+        // could not read at all.
+        DevDrivePillKind = !volume.IsDevDriveStateKnown
+            ? "system"
+            : !volume.IsDevDrive ? "mute" : volume.IsTrusted ? "dev" : "system";
 
         NotesText = BuildNotes(volume);
 

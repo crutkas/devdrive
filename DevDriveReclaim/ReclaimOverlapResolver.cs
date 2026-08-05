@@ -34,7 +34,7 @@ public static class ReclaimOverlapResolver
 
         foreach (ReclaimCandidate candidate in ordered)
         {
-            if (!roots.Any(root => Contains(root.Path, candidate.Path)))
+            if (!roots.Any(root => CanContain(root.Path) && Contains(root.Path, candidate.Path)))
             {
                 roots.Add(candidate);
             }
@@ -73,7 +73,7 @@ public static class ReclaimOverlapResolver
         foreach (ReclaimCandidate candidate in ordered)
         {
             ReclaimCandidate? container = ordered
-                .FirstOrDefault(other => Contains(other.Path, candidate.Path));
+                .FirstOrDefault(other => CanContain(other.Path) && Contains(other.Path, candidate.Path));
 
             if (container is not null)
             {
@@ -83,6 +83,31 @@ public static class ReclaimOverlapResolver
 
         return map;
     }
+
+    /// <summary>
+    /// True when a candidate at <paramref name="path"/> is allowed to absorb others.
+    /// </summary>
+    /// <remarks>
+    /// A volume root is never a container. The Recycle Bin has no single folder to point at, so its
+    /// candidate carries the volume root as its path — which made it the shortest path in the set,
+    /// sorted it first, and let it swallow every other candidate on the drive, because every path on
+    /// C: does start with <c>C:\</c>. The headline number then collapsed to the size of the bin.
+    ///
+    /// The rule is not a special case for the bin. Nothing this tool deletes is ever a whole volume,
+    /// so any candidate whose path is a root is a stand-in for something that is not a subtree at
+    /// all, and containment arithmetic does not apply to it. It still counts its own bytes — it is
+    /// simply never anyone else's parent.
+    /// </remarks>
+    private static bool CanContain(string path)
+    {
+        string? root = Path.GetPathRoot(path);
+
+        return string.IsNullOrEmpty(root)
+            || !string.Equals(WithSeparator(path), WithSeparator(root), StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string WithSeparator(string path) =>
+        path.TrimEnd('\\', '/') + Path.DirectorySeparatorChar;
 
     /// <summary>
     /// True when <paramref name="childPath"/> sits strictly beneath <paramref name="parentPath"/>.

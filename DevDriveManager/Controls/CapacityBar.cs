@@ -29,6 +29,12 @@ public sealed partial class CapacityBar : Control
     {
         DefaultStyleKey = typeof(CapacityBar);
         IsTabStop = false;
+
+        // Every band is an imperatively created Rectangle with a resolved Fill, so nothing on this
+        // bar re-resolves on its own. Without this the bar keeps its old-theme colours through a
+        // light/dark or high-contrast switch -- and high contrast is precisely the case where a
+        // stale palette stops being cosmetic.
+        ActualThemeChanged += (_, _) => Rebuild();
     }
 
     /// <summary>The bands to draw.</summary>
@@ -45,17 +51,27 @@ public sealed partial class CapacityBar : Control
         new PropertyMetadata(default(VolumeCapacityResult), OnCapacityChanged));
 
     /// <summary>
-    /// Colour for the in-use band. Set per volume so C: and G: are told apart at a glance, which is
-    /// the whole reason the strip shows two bars rather than one number.
+    /// Which colour family the in-use band uses. Set per volume so C: and G: are told apart at a
+    /// glance, which is the whole reason the strip shows two bars rather than one number.
     /// </summary>
-    public Brush? UsedBrush
+    /// <remarks>
+    /// This is deliberately the <i>role</i>, not a <see cref="Brush"/>. A brush handed in from
+    /// outside is resolved once against whichever theme was live at the time and can never
+    /// re-resolve, so the bar kept its old-theme colours across a light/dark or high-contrast
+    /// switch. The role is theme-independent; this control turns it into a colour, and re-runs that
+    /// translation on <see cref="FrameworkElement.ActualThemeChanged"/>.
+    /// </remarks>
+    public VolumeAccentRole AccentRole
     {
-        get => (Brush?)GetValue(UsedBrushProperty);
-        set => SetValue(UsedBrushProperty, value);
+        get => (VolumeAccentRole)GetValue(AccentRoleProperty);
+        set => SetValue(AccentRoleProperty, value);
     }
 
-    public static readonly DependencyProperty UsedBrushProperty = DependencyProperty.Register(
-        nameof(UsedBrush), typeof(Brush), typeof(CapacityBar), new PropertyMetadata(null, OnCapacityChanged));
+    public static readonly DependencyProperty AccentRoleProperty = DependencyProperty.Register(
+        nameof(AccentRole),
+        typeof(VolumeAccentRole),
+        typeof(CapacityBar),
+        new PropertyMetadata(VolumeAccentRole.Other, OnCapacityChanged));
 
     protected override void OnApplyTemplate()
     {
@@ -115,7 +131,12 @@ public sealed partial class CapacityBar : Control
         CapacitySegmentKind.Safe => Resolve("SmGoodBrush"),
         CapacitySegmentKind.Check => Resolve("SmWarnBrush"),
         CapacitySegmentKind.Careful => Resolve("SmBadBrush"),
-        _ => UsedBrush ?? Resolve("SmCategory0Brush"),
+        _ => Resolve(AccentRole switch
+        {
+            VolumeAccentRole.DevDrive => "SmCategory2Brush",
+            VolumeAccentRole.System => "SmCategory0Brush",
+            _ => "SmCategory5Brush",
+        }),
     };
 
     /// <summary>

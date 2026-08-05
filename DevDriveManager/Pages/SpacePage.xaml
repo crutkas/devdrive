@@ -27,10 +27,6 @@
         the room's primary control.
     -->
 
-    <Page.Resources>
-        <controls:VolumeAccentRoleToBrushConverter x:Key="VolumeAccent" />
-    </Page.Resources>
-
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -57,7 +53,7 @@
             <ItemsControl.ItemTemplate>
                 <DataTemplate x:DataType="storage:VolumeStripEntry">
                     <controls:VolumeCard
-                        AccentBrush="{x:Bind AccentRole, Converter={StaticResource VolumeAccent}}"
+                        AccentRole="{x:Bind AccentRole}"
                         IsSystemVolume="{x:Bind IsSystemVolume}"
                         Selected="VolumeCard_Selected"
                         Volume="{x:Bind Volume}" />
@@ -334,6 +330,7 @@
                             MaxHeight="268"
                             AutomationProperties.AutomationId="SpaceItemsList"
                             AutomationProperties.Name="Items in the current scope"
+                            ContainerContentChanging="Items_ContainerContentChanging"
                             DoubleTapped="ItemsList_DoubleTapped"
                             ItemsSource="{x:Bind ViewModel.VisibleItems}"
                             SelectedItem="{x:Bind ViewModel.SelectedRow, Mode=TwoWay}"
@@ -349,7 +346,6 @@
                                 <DataTemplate x:DataType="storage:StorageRowViewModel">
                                     <Grid
                                         Padding="14,7,14,7"
-                                        AutomationProperties.AutomationId="{x:Bind AutomationId}"
                                         AutomationProperties.Name="{x:Bind AccessibleDescription, Mode=OneWay}"
                                         ColumnSpacing="12">
                                         <Grid.ColumnDefinitions>

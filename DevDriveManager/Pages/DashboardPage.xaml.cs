@@ -65,6 +65,7 @@ public sealed partial class DashboardPage : Page, INotifyPropertyChanged
     private FreeSpaceTrend _trend = FreeSpaceTrend.Empty("—");
     private AttentionSignalViewModel? _selectedSignal;
     private bool _refreshQueued;
+    private bool _volumesDirty = true;
     private double _cardWidth;
     private double _signalColumnWidth = 360;
 
@@ -271,7 +272,7 @@ public sealed partial class DashboardPage : Page, INotifyPropertyChanged
     private void OnPreferencesChanged(object? sender, EventArgs e) => RequestRefresh();
 
     private void OnVolumesChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e) =>
-        RequestRefresh();
+        RequestRefresh(volumesChanged: true);
 
     private void OnSourceChanged(object? sender, System.EventArgs e) => RequestRefresh();
 
@@ -303,8 +304,10 @@ public sealed partial class DashboardPage : Page, INotifyPropertyChanged
     /// single load moves all of them, so without this the room rebuilds — and re-enumerates every
     /// volume — once per source per load.
     /// </summary>
-    private void RequestRefresh()
+    private void RequestRefresh(bool volumesChanged = false)
     {
+        _volumesDirty |= volumesChanged;
+
         if (_refreshQueued)
         {
             return;
@@ -320,8 +323,17 @@ public sealed partial class DashboardPage : Page, INotifyPropertyChanged
 
     private void Refresh()
     {
-        RefreshVolumeStrip();
-        RecordFreeSpace();
+        // Both of these read the machine: the strip is a CreateFile plus a DeviceIoControl per
+        // volume, and RecordFreeSpace reads and rewrites a JSON file. Neither can produce a
+        // different answer unless the volume set actually moved, and Refresh runs on every tick of
+        // a streaming scan, so they are gated rather than coalesced.
+        if (_volumesDirty)
+        {
+            _volumesDirty = false;
+            RefreshVolumeStrip();
+            RecordFreeSpace();
+        }
+
         RebuildSignals();
         RebuildInspector();
         UpdateStatusBar();

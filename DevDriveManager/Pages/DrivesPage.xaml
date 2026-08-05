@@ -12,10 +12,6 @@
     xmlns:vm="using:DevDriveManager.ViewModels"
     mc:Ignorable="d">
 
-    <Page.Resources>
-        <controls:VolumeAccentRoleToBrushConverter x:Key="VolumeAccent" />
-    </Page.Resources>
-
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -56,7 +52,7 @@
                 <ItemsControl.ItemTemplate>
                     <DataTemplate x:DataType="storage:VolumeStripEntry">
                         <controls:VolumeCard
-                            AccentBrush="{x:Bind AccentRole, Converter={StaticResource VolumeAccent}}"
+                            AccentRole="{x:Bind AccentRole}"
                             IsSystemVolume="{x:Bind IsSystemVolume}"
                             ReclaimableBytes="{x:Bind ReclaimableBytes}"
                             Volume="{x:Bind Volume}" />
@@ -263,6 +259,7 @@
                             MaxHeight="300"
                             AutomationProperties.AutomationId="VolumesList"
                             AutomationProperties.Name="Fixed volumes on this PC"
+                            ContainerContentChanging="Volumes_ContainerContentChanging"
                             ItemsSource="{x:Bind ViewModel.Volumes}"
                             SelectedItem="{x:Bind SelectedVolume, Mode=TwoWay}"
                             SelectionMode="Single"
@@ -284,7 +281,6 @@
                                     -->
                                     <Grid
                                         Padding="14,8,14,8"
-                                        AutomationProperties.AutomationId="{x:Bind AutomationId}"
                                         AutomationProperties.Name="{x:Bind AutomationName}"
                                         ColumnSpacing="12">
                                         <Grid.ColumnDefinitions>

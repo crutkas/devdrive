@@ -221,6 +221,66 @@ public sealed class FreeSpaceHistoryTests
     }
 
     [TestMethod]
+    public void Store_KeepsPersistingOnceAVolumeIsAtItsCap()
+    {
+        // The save was gated on the sample count changing. At the cap, appending rotates the
+        // oldest out, so the count lands back where it started and the write was skipped — the
+        // file quietly froze while the in-memory list carried on. The trend line then showed an
+        // old reading as if it were current, which is worse than showing no trend at all.
+        string path = Path.Combine(Path.GetTempPath(), $"ddm-history-{Guid.NewGuid():N}.json");
+        try
+        {
+            JsonFreeSpaceHistoryStore store = new(path);
+            for (var i = 0; i < FreeSpaceHistory.MaxSamplesPerVolume; i++)
+            {
+                store.Append(Sample(i, 400 - i));
+            }
+
+            Assert.HasCount(FreeSpaceHistory.MaxSamplesPerVolume, new JsonFreeSpaceHistoryStore(path).Load());
+
+            const long DistinctFreeGb = 12;
+            store.Append(Sample(FreeSpaceHistory.MaxSamplesPerVolume, DistinctFreeGb));
+
+            IReadOnlyList<FreeSpaceSample> reloaded = new JsonFreeSpaceHistoryStore(path).Load();
+
+            Assert.HasCount(FreeSpaceHistory.MaxSamplesPerVolume, reloaded);
+            Assert.AreEqual(
+                DistinctFreeGb * 1024 * 1024 * 1024,
+                reloaded.OrderBy(s => s.TakenAtUtc).Last().FreeBytes,
+                "the newest reading has to survive a restart, or the history is stale on disk");
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [TestMethod]
+    public void Store_DoesNotRewriteTheFileForAReadingItRejected()
+    {
+        // The counterpart: the rate limiter still has to suppress the write, or every poll
+        // rewrites the file for nothing.
+        string path = Path.Combine(Path.GetTempPath(), $"ddm-history-{Guid.NewGuid():N}.json");
+        try
+        {
+            JsonFreeSpaceHistoryStore store = new(path);
+            store.Append(Sample(0, 400));
+
+            DateTime written = File.GetLastWriteTimeUtc(path);
+            Thread.Sleep(20);
+
+            // Well inside the 30-minute minimum interval, so this reading is dropped.
+            store.Append(Sample(0.1, 399));
+
+            Assert.AreEqual(written, File.GetLastWriteTimeUtc(path), "a rejected reading must not touch the file");
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [TestMethod]
     public void Store_ReadsAMissingFileAsEmpty()
     {
         string path = Path.Combine(Path.GetTempPath(), $"ddm-history-{Guid.NewGuid():N}.json");

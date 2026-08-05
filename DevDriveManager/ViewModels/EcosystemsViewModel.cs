@@ -111,6 +111,7 @@ public partial class EcosystemsViewModel : ObservableObject
         foreach (EcosystemCardViewModel existing in Cards)
         {
             existing.PropertyChanged -= OnCardPropertyChanged;
+            existing.Dispose();
         }
 
         Cards.Clear();
