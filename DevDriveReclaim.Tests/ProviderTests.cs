@@ -93,7 +93,11 @@ public sealed class ProviderTests
             Context(fixture), null, CancellationToken.None);
 
         Assert.HasCount(2, found, "three copies means two are offered and one survives");
-        Assert.IsTrue(found.All(c => c.Detail!.Contains("keeping", StringComparison.OrdinalIgnoreCase)));
+
+        // The surviving copy is named in the way back, not in the sub-line: every offered row shares
+        // that one sentence, whereas the sub-line has to say which copy this row is.
+        Assert.IsTrue(found.All(c => c.RecoveryHint.Contains("Copy it back from", StringComparison.Ordinal)));
+        Assert.IsTrue(found.All(c => c.Reason.Contains("One copy is being kept", StringComparison.Ordinal)));
     }
 
     [TestMethod]
@@ -278,6 +282,118 @@ public sealed class ProviderTests
         // separator boundary would let app2's repo vouch for app and hide a real leftover.
         Assert.HasCount(1, orphans);
         Assert.AreEqual("app", orphans[0].Name);
+    }
+
+    [TestMethod]
+    public void FilesThatMatchOnlyAtTheStartAreNotCalledIdentical()
+    {
+        using var fixture = new ReclaimFixture();
+
+        // 5 MB, identical everywhere except the final byte. The old 1 MB-prefix hash never read far
+        // enough to tell these apart and offered one of them for deletion while the row claimed
+        // "byte-for-byte identical" — the exact shape of a data-loss bug in a delete tool.
+        byte[] original = new byte[5 * 1024 * 1024];
+        Random.Shared.NextBytes(original);
+        byte[] diverges = [.. original];
+        diverges[^1] ^= 0xFF;
+
+        fixture.FileWithContent(@"x\one.bin", original);
+        fixture.FileWithContent(@"y\two.bin", diverges);
+
+        var provider = new DuplicateFileReclaimProvider();
+        IReadOnlyList<ReclaimCandidate> found = provider
+            .ScanAsync(Context(fixture), null, CancellationToken.None).GetAwaiter().GetResult();
+
+        Assert.IsEmpty(found,
+            "Same size and same opening megabyte is a shortlist, not a match.");
+    }
+
+    [TestMethod]
+    public void TrulyIdenticalFilesAreStillFound()
+    {
+        using var fixture = new ReclaimFixture();
+
+        byte[] payload = new byte[5 * 1024 * 1024];
+        Random.Shared.NextBytes(payload);
+        fixture.FileWithContent(@"x\one.bin", payload);
+        fixture.FileWithContent(@"y\two.bin", payload);
+
+        var provider = new DuplicateFileReclaimProvider();
+        IReadOnlyList<ReclaimCandidate> found = provider
+            .ScanAsync(Context(fixture), null, CancellationToken.None).GetAwaiter().GetResult();
+
+        // One row: one copy is kept, the other offered. The guard above must not have been bought
+        // by making the provider find nothing at all.
+        Assert.HasCount(1, found);
+        Assert.AreEqual(ReclaimRisk.Check, found[0].Risk);
+        Assert.Contains("in full", found[0].Reason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [TestMethod]
+    public void FilesBelowTheScansOwnFloorAreNeverHashed()
+    {
+        using var fixture = new ReclaimFixture();
+
+        byte[] payload = new byte[5 * 1024 * 1024];
+        Random.Shared.NextBytes(payload);
+        fixture.FileWithContent(@"x\one.bin", payload);
+        fixture.FileWithContent(@"y\two.bin", payload);
+
+        // ReclaimEngine drops everything under this floor before rendering, so reading these files
+        // could only ever produce output nobody sees.
+        var context = new ReclaimScanContext(
+            [@"C:\"], [fixture.Root], minimumCandidateBytes: 32L * 1024 * 1024);
+
+        IReadOnlyList<ReclaimCandidate> found = new DuplicateFileReclaimProvider()
+            .ScanAsync(context, null, CancellationToken.None).GetAwaiter().GetResult();
+
+        Assert.IsEmpty(found);
+    }
+
+    [TestMethod]
+    public void CopiesOfOneFileAreToldApartByFolder()
+    {
+        using var fixture = new ReclaimFixture();
+
+        byte[] payload = new byte[5 * 1024 * 1024];
+        Random.Shared.NextBytes(payload);
+        fixture.FileWithContent(@"keep\shared.pdb", payload);
+        fixture.FileWithContent(@"alpha\out\shared.pdb", payload);
+        fixture.FileWithContent(@"beta\out\shared.pdb", payload);
+
+        var provider = new DuplicateFileReclaimProvider();
+        IReadOnlyList<ReclaimCandidate> found = provider
+            .ScanAsync(Context(fixture), null, CancellationToken.None).GetAwaiter().GetResult();
+
+        // Every copy shares a file name, and the table shows the full path only as a tooltip. Rows a
+        // reader cannot tell apart are rows a reader cannot safely tick.
+        Assert.HasCount(2, found);
+        Assert.AreNotEqual(found[0].Detail, found[1].Detail,
+            "Two offered copies rendered the same sub-line.");
+        Assert.IsTrue(found.Any(c => c.Detail!.Contains(@"alpha\out", StringComparison.OrdinalIgnoreCase)));
+        Assert.IsTrue(found.Any(c => c.Detail!.Contains(@"beta\out", StringComparison.OrdinalIgnoreCase)));
+    }
+
+    [TestMethod]
+    public void CopiesSharingAFolderLayoutStillReadDifferently()
+    {
+        using var fixture = new ReclaimFixture();
+
+        byte[] payload = new byte[5 * 1024 * 1024];
+        Random.Shared.NextBytes(payload);
+        fixture.FileWithContent(@"keep\shared.pdb", payload);
+
+        // The same build layout in two repositories: a three-segment tail is identical for both.
+        fixture.FileWithContent(@"alpha\x64\Debug\Symbols\shared.pdb", payload);
+        fixture.FileWithContent(@"beta\x64\Debug\Symbols\shared.pdb", payload);
+
+        var provider = new DuplicateFileReclaimProvider();
+        IReadOnlyList<ReclaimCandidate> found = provider
+            .ScanAsync(Context(fixture), null, CancellationToken.None).GetAwaiter().GetResult();
+
+        Assert.HasCount(2, found);
+        Assert.AreNotEqual(found[0].Detail, found[1].Detail,
+            "The tail widens until the copies differ, or two rows say the same thing.");
     }
 
     private static ReclaimScanContext Context(ReclaimFixture fixture) =>
