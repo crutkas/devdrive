@@ -139,6 +139,52 @@ public sealed class ReclaimSafetyTests
         Assert.IsEmpty(found);
     }
 
+    [TestMethod]
+    public void AnOrphanedWorktreeFolderIsCarefulBecauseNothingCanBeChecked()
+    {
+        using var fixture = new ReclaimFixture();
+        fixture.Worktree(@"lot\wt-a", @"C:\repo\.git\worktrees\a");
+        fixture.Worktree(@"lot\wt-b", @"C:\repo\.git\worktrees\b");
+        fixture.File(@"lot\leftover\build.bin", 90L * 1024 * 1024);
+
+        var provider = new WorktreeReclaimProvider(new StubWorktreeInspector(
+            new WorktreeState("main", false, 0, false, 0, IsMerged: true)));
+
+        IReadOnlyList<ReclaimCandidate> found = provider
+            .ScanAsync(Context(fixture), null, CancellationToken.None).GetAwaiter().GetResult();
+
+        ReclaimCandidate orphan = found.Single(c => c.DisplayName == "leftover");
+
+        // The stub grades every real worktree Safe. The orphan must not inherit that: it was never
+        // inspected, because there is no .git to inspect.
+        Assert.AreEqual(ReclaimRisk.Careful, orphan.Risk);
+        Assert.Contains("no .git", orphan.Reason, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("beside 2 worktrees", orphan.Detail ?? string.Empty,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    [TestMethod]
+    public void AnEmptyLeftoverFolderIsClutterNotReclaimableSpace()
+    {
+        using var fixture = new ReclaimFixture();
+        fixture.Worktree(@"lot\wt-a", @"C:\repo\.git\worktrees\a");
+        fixture.Worktree(@"lot\wt-b", @"C:\repo\.git\worktrees\b");
+        fixture.Dir(@"lot\empty-leftover");
+
+        var provider = new WorktreeReclaimProvider(new StubWorktreeInspector(
+            new WorktreeState("main", false, 0, false, 0, IsMerged: true)));
+
+        var context = new ReclaimScanContext(
+            [@"C:\"], [fixture.Root], minimumCandidateBytes: 64L * 1024 * 1024);
+
+        IReadOnlyList<ReclaimCandidate> found = provider
+            .ScanAsync(context, null, CancellationToken.None).GetAwaiter().GetResult();
+
+        // Most orphans are empty directories git left behind. They return no space, and a room
+        // about reclaiming space listing eleven 0-byte rows is a chore, not a decision.
+        Assert.IsEmpty(found.Where(c => c.DisplayName == "empty-leftover"));
+    }
+
     private static ReclaimScanContext Context(ReclaimFixture fixture) =>
         new([@"C:\"], [fixture.Root], minimumCandidateBytes: 1);
 

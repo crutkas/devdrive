@@ -71,8 +71,65 @@ public sealed class WorktreeReclaimProvider(IWorktreeInspector? inspector = null
                     detail: detail));
             }
 
+            AddOrphans(context, candidates, progress, cancellationToken);
+
             return candidates;
         }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Adds folders that sit among worktrees but have lost their <c>.git</c>.
+    /// </summary>
+    /// <remarks>
+    /// These belong in this category rather than one of their own: they are worktree folders, the
+    /// user recognises them as such, and a rail entry that usually holds a single row would be
+    /// clutter charging rent. What differs is the risk and the remedy, and those the row states.
+    /// <para>
+    /// The category's own <see cref="ReclaimScanContext.MinimumCandidateBytes"/> floor does useful
+    /// work here for free. Most orphans are empty directories left by <c>git worktree remove</c> —
+    /// eleven of the twelve found on the machine this was written against were 0 bytes. They are
+    /// clutter, not space, and a room about reclaiming space should not list them.
+    /// </para>
+    /// </remarks>
+    private static void AddOrphans(
+        ReclaimScanContext context,
+        List<ReclaimCandidate> candidates,
+        IProgress<ReclaimScanProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        IReadOnlyList<OrphanedWorktree> orphans = RepositoryWalker.FindOrphanedWorktrees(
+            context.Repositories(cancellationToken), cancellationToken);
+
+        foreach (OrphanedWorktree orphan in orphans)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            progress?.Report(new ReclaimScanProgress(
+                ReclaimCategory.Id, $"Checking {orphan.Name}", candidates.Count));
+
+            DirectoryMeasurement measurement =
+                DirectoryMeasurer.Measure(orphan.Path, cancellationToken);
+
+            if (measurement.AllocatedBytes < context.MinimumCandidateBytes)
+            {
+                continue;
+            }
+
+            candidates.Add(new ReclaimCandidate(
+                ReclaimCategory.Id,
+                orphan.Path,
+                orphan.Name,
+                measurement.AllocatedBytes,
+                ReclaimRisk.Careful,
+                "This sits among worktrees but has no .git, so git knows nothing about it. " +
+                    "Nothing here can be checked — not a branch, not a remote, not whether " +
+                    "anything is uncommitted.",
+                "Nothing. With no .git there is no branch to re-create it from, so anything " +
+                    "here that matters must be copied out before the folder goes.",
+                lastUsedUtc: measurement.NewestWriteUtc,
+                itemCount: measurement.FileCount,
+                detail: $"no .git · beside {orphan.SiblingWorktreeCount:N0} worktree" +
+                    $"{(orphan.SiblingWorktreeCount == 1 ? string.Empty : "s")}"));
+        }
     }
 
     /// <summary>

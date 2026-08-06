@@ -196,6 +196,90 @@ public sealed class ProviderTests
             "A shared list must not be castable back to the mutable one the walker built.");
     }
 
+    [TestMethod]
+    public void AFolderAmongWorktreesWithNoGitIsAnOrphan()
+    {
+        using var fixture = new ReclaimFixture();
+        fixture.Worktree(@"lot\wt-a", @"C:\repo\.git\worktrees\a");
+        fixture.Worktree(@"lot\wt-b", @"C:\repo\.git\worktrees\b");
+        fixture.Dir(@"lot\leftover");
+
+        IReadOnlyList<OrphanedWorktree> orphans = RepositoryWalker.FindOrphanedWorktrees(
+            RepositoryWalker.Discover([fixture.Root], CancellationToken.None));
+
+        Assert.HasCount(1, orphans);
+        Assert.AreEqual("leftover", orphans[0].Name);
+        Assert.AreEqual(2, orphans[0].SiblingWorktreeCount);
+    }
+
+    [TestMethod]
+    public void AGeneralSourceRootDoesNotIndictEveryFolderInIt()
+    {
+        using var fixture = new ReclaimFixture();
+        fixture.Worktree(@"src\one-worktree", @"C:\repo\.git\worktrees\a");
+        fixture.Repo(@"src\clone-a");
+        fixture.Repo(@"src\clone-b");
+        fixture.Dir(@"src\notes");
+        fixture.Dir(@"src\scratch");
+
+        IReadOnlyList<OrphanedWorktree> orphans = RepositoryWalker.FindOrphanedWorktrees(
+            RepositoryWalker.Discover([fixture.Root], CancellationToken.None));
+
+        Assert.IsEmpty(orphans,
+            "One worktree beside ordinary clones is a source root, not a parking lot. Calling " +
+            "every plain folder there a leftover is how a reclaim tool loses trust.");
+    }
+
+    [TestMethod]
+    public void WorktreesMustBeTheMajorityBeforeSiblingsAreSuspect()
+    {
+        using var fixture = new ReclaimFixture();
+        fixture.Worktree(@"lot\wt-a", @"C:\repo\.git\worktrees\a");
+        fixture.Worktree(@"lot\wt-b", @"C:\repo\.git\worktrees\b");
+        fixture.Repo(@"lot\clone-a");
+        fixture.Repo(@"lot\clone-b");
+        fixture.Repo(@"lot\clone-c");
+        fixture.Dir(@"lot\plain");
+
+        IReadOnlyList<OrphanedWorktree> orphans = RepositoryWalker.FindOrphanedWorktrees(
+            RepositoryWalker.Discover([fixture.Root], CancellationToken.None));
+
+        Assert.IsEmpty(orphans, "Two worktrees among three clones is not a parking lot.");
+    }
+
+    [TestMethod]
+    public void AFolderWithRepositoriesUnderneathIsNeverAnOrphan()
+    {
+        using var fixture = new ReclaimFixture();
+        fixture.Worktree(@"lot\wt-a", @"C:\repo\.git\worktrees\a");
+        fixture.Worktree(@"lot\wt-b", @"C:\repo\.git\worktrees\b");
+        fixture.Repo(@"lot\container\inner");
+
+        IReadOnlyList<OrphanedWorktree> orphans = RepositoryWalker.FindOrphanedWorktrees(
+            RepositoryWalker.Discover([fixture.Root], CancellationToken.None));
+
+        Assert.IsEmpty(orphans,
+            "Deleting a folder that holds live repositories is the one mistake this must not make.");
+    }
+
+    [TestMethod]
+    public void ASiblingIsNotMistakenForAnAncestorByNamePrefix()
+    {
+        using var fixture = new ReclaimFixture();
+        fixture.Worktree(@"lot\wt-a", @"C:\repo\.git\worktrees\a");
+        fixture.Worktree(@"lot\wt-b", @"C:\repo\.git\worktrees\b");
+        fixture.Dir(@"lot\app");
+        fixture.Repo(@"lot\app2\inner");
+
+        IReadOnlyList<OrphanedWorktree> orphans = RepositoryWalker.FindOrphanedWorktrees(
+            RepositoryWalker.Discover([fixture.Root], CancellationToken.None));
+
+        // "app2\inner" starts with "app" as raw text but is not inside it. Comparing without a
+        // separator boundary would let app2's repo vouch for app and hide a real leftover.
+        Assert.HasCount(1, orphans);
+        Assert.AreEqual("app", orphans[0].Name);
+    }
+
     private static ReclaimScanContext Context(ReclaimFixture fixture) =>
         new([@"C:\"], [fixture.Root], minimumCandidateBytes: 1);
 

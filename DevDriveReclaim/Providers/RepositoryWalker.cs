@@ -4,6 +4,16 @@ namespace DevDriveReclaim.Providers;
 public sealed record DiscoveredRepository(string Path, string Name, bool IsWorktree);
 
 /// <summary>
+/// A folder sitting among worktrees that no longer has a <c>.git</c>, and so is invisible to a
+/// walk that keys on one.
+/// </summary>
+/// <param name="SiblingWorktreeCount">
+/// How many real worktrees share its parent. This is the evidence for the claim, and the row says
+/// it out loud rather than asserting "this is a leftover" and asking to be believed.
+/// </param>
+public sealed record OrphanedWorktree(string Path, string Name, int SiblingWorktreeCount);
+
+/// <summary>
 /// Finds git repositories under the configured source roots.
 /// </summary>
 /// <remarks>
@@ -86,6 +96,107 @@ public static class RepositoryWalker
         }
 
         return found;
+    }
+
+    /// <summary>
+    /// Finds folders that sit among worktrees but carry no <c>.git</c>.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="Discover"/> keys on <c>.git</c>, so a worktree folder whose <c>.git</c> is gone —
+    /// deleted by hand, or left behind when the parent repo dropped the registration — is invisible
+    /// to the provider whose entire job is finding reclaimable worktrees. On the machine this was
+    /// written against that blind spot hid the single largest reclaimable item on the drive: 35 GB
+    /// of build output in a folder with no <c>.git</c> at all.
+    /// <para>
+    /// Detection is positional, because the folder itself carries no evidence: a worktree parking
+    /// lot is a directory whose git-bearing children are overwhelmingly worktrees, and a childless
+    /// sibling in one of those is a leftover. The bar is deliberately high — at least two worktrees
+    /// and a strict majority — because a general source root that happens to contain one worktree
+    /// would otherwise indict every ordinary project folder beside it. On this machine that guard is
+    /// what separates the two real parking lots (9 of 9 and 20 of 20 git-bearing children being
+    /// worktrees) from a source root where the figure was 1 of 11.
+    /// </para>
+    /// <para>
+    /// This consumes an already-completed walk rather than doing its own, so orphan detection costs
+    /// one directory listing per parking lot and no second traversal.
+    /// </para>
+    /// </remarks>
+    public static IReadOnlyList<OrphanedWorktree> FindOrphanedWorktrees(
+        IReadOnlyList<DiscoveredRepository> discovered,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(discovered);
+
+        var orphans = new List<OrphanedWorktree>();
+
+        IEnumerable<IGrouping<string, DiscoveredRepository>> byParent = discovered
+            .Select(r => (Repo: r, Parent: SafeParent(r.Path)))
+            .Where(x => x.Parent is not null)
+            .GroupBy(x => x.Parent!, x => x.Repo, StringComparer.OrdinalIgnoreCase);
+
+        foreach (IGrouping<string, DiscoveredRepository> lot in byParent)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            int worktrees = lot.Count(r => r.IsWorktree);
+            if (worktrees < 2 || worktrees * 2 <= lot.Count())
+            {
+                continue;
+            }
+
+            foreach (string child in SafeSubdirectories(lot.Key))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                string gitPath = Path.Combine(child, ".git");
+                if (Directory.Exists(gitPath) || File.Exists(gitPath))
+                {
+                    continue;
+                }
+
+                // A folder with repos underneath it is a container, not a leftover. Deleting it
+                // would take live repositories with it, which is the one mistake this must not make.
+                if (discovered.Any(r => IsAtOrUnder(r.Path, child)))
+                {
+                    continue;
+                }
+
+                orphans.Add(new OrphanedWorktree(child, Path.GetFileName(child), worktrees));
+            }
+        }
+
+        return orphans;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="candidate"/> is <paramref name="ancestor"/> or sits beneath it.
+    /// Compares on a separator boundary so <c>C:\work\app2</c> is not read as being inside
+    /// <c>C:\work\app</c>.
+    /// </summary>
+    private static bool IsAtOrUnder(string candidate, string ancestor)
+    {
+        if (candidate.Equals(ancestor, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        string prefix = ancestor.EndsWith(Path.DirectorySeparatorChar)
+            ? ancestor
+            : ancestor + Path.DirectorySeparatorChar;
+
+        return candidate.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? SafeParent(string path)
+    {
+        try
+        {
+            return Path.GetDirectoryName(path);
+        }
+        catch (Exception exception) when (exception is ArgumentException or PathTooLongException)
+        {
+            return null;
+        }
     }
 
     /// <summary>
