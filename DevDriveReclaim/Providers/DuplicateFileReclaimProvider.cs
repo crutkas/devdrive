@@ -68,7 +68,8 @@ public sealed class DuplicateFileReclaimProvider : IReclaimProvider
             progress?.Report(new ReclaimScanProgress(ReclaimCategory.Id, "Indexing large files", 0));
 
             // Pass 1 — index by exact size. Cheap, and files of different lengths cannot be equal.
-            Dictionary<long, List<string>> bySize = IndexLargeFiles(context, cancellationToken);
+            Dictionary<long, List<string>> bySize = IndexLargeFiles(
+                context, out Dictionary<string, long> allocatedByPath, cancellationToken);
 
             List<KeyValuePair<long, List<string>>> groups =
                 [.. bySize.Where(kv => kv.Value.Count > 1)];
@@ -145,7 +146,11 @@ public sealed class DuplicateFileReclaimProvider : IReclaimProvider
                         ReclaimCategory.Id,
                         duplicate,
                         Path.GetFileName(duplicate),
-                        size,
+                        // What the bars promise back is what this copy occupies, not how long it
+                        // is. The two differ by cluster slack on any file, and by far more on a
+                        // sparse or block-cloned one -- which is the normal shape of a large file
+                        // on the ReFS volume this product exists to manage.
+                        allocatedByPath.TryGetValue(duplicate, out long allocated) ? allocated : size,
                         ReclaimRisk.Check,
                         "This file is byte-for-byte identical to another copy on disk, confirmed " +
                             "by reading both in full rather than by name. One copy is being kept.",
@@ -167,9 +172,16 @@ public sealed class DuplicateFileReclaimProvider : IReclaimProvider
     }
 
     private static Dictionary<long, List<string>> IndexLargeFiles(
-        ReclaimScanContext context, CancellationToken cancellationToken)
+        ReclaimScanContext context,
+        out Dictionary<string, long> allocatedByPath,
+        CancellationToken cancellationToken)
     {
         var bySize = new Dictionary<long, List<string>>();
+
+        // Recorded on the way past because the walk already has it: allocated size arrives in the
+        // same directory entry as the length, so remembering it costs a dictionary write rather
+        // than a second look at the file.
+        allocatedByPath = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
 
         // ReclaimEngine discards every candidate under MinimumCandidateBytes before a row is
         // rendered, so a file below that floor cannot become output no matter what it hashes to.
@@ -188,8 +200,8 @@ public sealed class DuplicateFileReclaimProvider : IReclaimProvider
                 }
 
                 // Keyed on apparent length, because two files of different logical size cannot be
-                // equal. The reclaimed number reported later is the allocated size — that is what
-                // actually comes back when the file goes away.
+                // equal. Grouping on allocated size instead would shortlist files a cluster apart
+                // and spend a full hash proving what their lengths already said.
                 if (!bySize.TryGetValue(entry.ApparentBytes, out List<string>? list))
                 {
                     list = [];
@@ -197,6 +209,7 @@ public sealed class DuplicateFileReclaimProvider : IReclaimProvider
                 }
 
                 list.Add(fullPath);
+                allocatedByPath[fullPath] = entry.AllocatedBytes;
             }
         }
 

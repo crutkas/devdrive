@@ -396,6 +396,49 @@ public sealed class ProviderTests
             "The tail widens until the copies differ, or two rows say the same thing.");
     }
 
+    [TestMethod]
+    public void ADuplicateReportsWhatItCostsOnDiskNotItsLength()
+    {
+        using var fixture = new ReclaimFixture();
+
+        // One byte past a cluster boundary, so the file's length and its allocated size cannot
+        // land on the same number whatever cluster size the volume happens to use.
+        byte[] payload = new byte[(5 * 1024 * 1024) + 1];
+        Random.Shared.NextBytes(payload);
+        fixture.FileWithContent(@"x\one.bin", payload);
+        fixture.FileWithContent(@"y\two.bin", payload);
+
+        IReadOnlyList<ReclaimCandidate> found = new DuplicateFileReclaimProvider()
+            .ScanAsync(Context(fixture), null, CancellationToken.None).GetAwaiter().GetResult();
+
+        Assert.HasCount(1, found);
+
+        // The bars promise allocated bytes back, and every other provider reports allocated.
+        // A duplicate reporting its length instead makes the headline total a mix of two units.
+        Assert.IsGreaterThan(
+            payload.Length,
+            found[0].SizeBytes,
+            "A duplicate reported its apparent length rather than what it occupies on disk.");
+    }
+
+    [TestMethod]
+    public void DuplicatesAreStillGroupedByLengthRatherThanByWhatTheyOccupy()
+    {
+        using var fixture = new ReclaimFixture();
+
+        // Two files one byte apart occupy the same number of clusters, so grouping on allocated
+        // size would shortlist them together -- and then hash two files that cannot be equal.
+        byte[] payload = new byte[(5 * 1024 * 1024) + 1];
+        Random.Shared.NextBytes(payload);
+        fixture.FileWithContent(@"x\one.bin", payload);
+        fixture.FileWithContent(@"y\two.bin", payload[..^1]);
+
+        IReadOnlyList<ReclaimCandidate> found = new DuplicateFileReclaimProvider()
+            .ScanAsync(Context(fixture), null, CancellationToken.None).GetAwaiter().GetResult();
+
+        Assert.IsEmpty(found, "Two files of different lengths are never the same file.");
+    }
+
     private static ReclaimScanContext Context(ReclaimFixture fixture) =>
         new([@"C:\"], [fixture.Root], minimumCandidateBytes: 1);
 
