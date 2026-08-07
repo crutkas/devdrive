@@ -301,10 +301,4 @@ public sealed class VhdProvisionerTests
     {
         Assert.AreEqual(@"vhd:C:\DevDrives\dev.vhdx", VhdProvisioner.ReversibilityId(VhdPath));
     }
-
-    [TestMethod]
-    public void CreateDefault_ReturnsInstance()
-    {
-        Assert.IsNotNull(VhdProvisioner.CreateDefault());
-    }
 }

@@ -67,13 +67,49 @@ function Get-Value([string]$id) {
     return [string]$json.text
 }
 
-# Presence test built on the tool's own resolver. `winapp ui inspect <id>` silently falls back to a
-# whole-tree dump when the id is absent, so substring-matching its output is not a presence check.
+# Presence PREDICATE built on the tool's own resolver. `winapp ui inspect <id>` silently falls back to
+# a whole-tree dump when the id is absent, so substring-matching its output is not a presence check.
+#
+# This deliberately swallows the exit code, because callers ask it questions whose answer is legitimately
+# "no" ("is there a chart *or* an empty state?"). That makes it a predicate, never an assertion — its
+# return value is the only signal it produces. Use Assert-Present when absence should fail the test.
 function Test-Present([string]$id, [int]$timeoutMs = 1500) {
     winapp ui wait-for $id -a $AppPid -t $timeoutMs 2>&1 | Out-Null
     $found = ($LASTEXITCODE -eq 0)
     $global:LASTEXITCODE = 0     # a legitimate "absent" must not fail the enclosing Test-UI
     return $found
+}
+
+# Presence ASSERTION over a set of ids: throws naming the first one missing.
+#
+# This exists because passing an array to Test-Present's [string]$id silently space-joined it into one
+# nonsense id ("CreateFormHead AfterCreateHead ..."), which of course was never found — and since
+# Test-Present resets $LASTEXITCODE and its result was discarded, four tests passed while asserting
+# nothing at all. A predicate whose answer is thrown away is not a test.
+function Assert-Present([string[]]$ids, [int]$timeoutMs = 3000) {
+    foreach ($id in $ids) {
+        if (-not (Test-Present $id $timeoutMs)) { throw "'$id' is not present." }
+    }
+}
+
+# Every AutomationId on screen matching a pattern, polled until at least one appears.
+#
+# Which ecosystems are installed, and which volume each cache sits on, are properties of THIS
+# workstation. Naming one ("Cargo", "npm", "uv") turns "the developer installed something" into a red
+# test — this suite has already lost a day to exactly that. Discover the set, then assert the RULE that
+# governs it, which holds on any machine.
+#
+# --interactive, NOT --json: at the root, --json reports slugified selectors (btn-movecache-9f2c) and
+# never the raw AutomationId, so a --json grep for an id matches nothing whether the row is there or not.
+function Find-Ids([string]$pattern, [int]$timeoutMs = 4000) {
+    $deadline = (Get-Date).AddMilliseconds($timeoutMs)
+    while ($true) {
+        $tree = winapp ui inspect -a $AppPid --interactive 2>$null | Out-String
+        $global:LASTEXITCODE = 0
+        $hits = @([regex]::Matches($tree, $pattern) | ForEach-Object { $_.Value } | Sort-Object -Unique)
+        if ($hits.Count -gt 0 -or (Get-Date) -ge $deadline) { return $hits }
+        Start-Sleep -Milliseconds 200
+    }
 }
 
 # Every semantic slug under a subtree. `inspect --json` returns a NESTED tree whose nodes carry
@@ -141,6 +177,7 @@ Test-UI "Nav: Reclaim present"              { winapp ui wait-for "NavReclaim"   
 Test-UI "Nav: Package caches present"       { winapp ui wait-for "NavPackageCaches" -a $AppPid -t 4000 }
 Test-UI "Nav: Benchmarks present"           { winapp ui wait-for "NavBenchmarks"    -a $AppPid -t 4000 }
 Test-UI "Nav: Drives present"               { winapp ui wait-for "NavDrives"        -a $AppPid -t 4000 }
+Test-UI "Nav: Space present"                { winapp ui wait-for "NavSpace"         -a $AppPid -t 4000 }
 Test-UI "Nav: Create Dev Drive present"     { winapp ui wait-for "NavCreate"        -a $AppPid -t 4000 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -225,18 +262,61 @@ Test-UI "Reclaim: does not scan on entry" {
 winapp ui screenshot -a $AppPid -o "screenshots\01b-reclaim.png" 2>$null | Out-Null
 
 # ─────────────────────────────────────────────────────────────────────────────
+#  (2c) Space — the folder explorer. Like Reclaim it does not scan on entry (a cold full-volume scan
+#       is minutes of I/O), so these assert the room's furniture and, crucially, the unmeasured
+#       contract: a folder nobody has measured must read "—", never "0 bytes". That distinction is
+#       the whole reason the unmeasured plumbing exists, and until now no UI test covered this room
+#       at all — it appeared in the suite only as a page the accessibility audit walked past.
+# ─────────────────────────────────────────────────────────────────────────────
+Test-UI "Navigate to Space"                  { Goto "NavSpace" "SpaceItemsList" }
+Test-UI "Space: volume strip"                { winapp ui wait-for "SpaceVolumeStrip"     -a $AppPid -t 3000 }
+Test-UI "Space: folder tree"                 { winapp ui wait-for "SpaceFolderTree"      -a $AppPid -t 3000 }
+Test-UI "Space: treemap"                     { winapp ui wait-for "SpaceTreemap"         -a $AppPid -t 3000 }
+Test-UI "Space: breadcrumb"                  { winapp ui wait-for "SpaceBreadcrumb"      -a $AppPid -t 3000 }
+Test-UI "Space: inspector title"             { winapp ui wait-for "SpaceInspectorTitle"  -a $AppPid -t 3000 }
+Test-UI "Space: status bar"                  { winapp ui wait-for "SpaceStatusBar"       -a $AppPid -t 3000 }
+Test-UI "Space: rescan is offered, not running" {
+    Assert-Present @("SpaceRescanButton", "SpaceViewMode", "SpaceModeFolders", "SpaceModeLargestFiles")
+}
+# The unmeasured contract, asserted where a user would actually read it. An unscanned root reports its
+# size as an em dash; "0 bytes" would be a claim we measured it and found nothing there.
+Test-UI "Space: an unmeasured size reads as a dash, not zero" {
+    $detail = Get-Name "SpaceCoverageDetail"
+    if ($detail -match '\b0 bytes\b') { throw "unmeasured coverage reported '0 bytes' instead of '—': '$detail'" }
+}
+winapp ui screenshot -a $AppPid -o "screenshots\01c-space.png" 2>$null | Out-Null
+
+# ─────────────────────────────────────────────────────────────────────────────
 #  (3) Package caches — two tabs over one table: Detected, then Not installed.
 # ─────────────────────────────────────────────────────────────────────────────
 Test-UI "Navigate to Package caches"         { Goto "NavPackageCaches" "PackageCachesScrollViewer" }
-# The Detected tab is where the room opens. (This PC: NuGet/pip/Cargo/vcpkg on C:, npm already on G:;
-# Poetry/Gradle/Bun/... are undetected and live on the other tab.)
+# The Detected tab is where the room opens. Which ecosystems are installed, and which volume each cache
+# sits on, are facts about THIS PC — so both assertions below discover the set and check the rule.
+# They used to name Cargo and npm, which is the same scar that took MapPathInput_uv red (see below).
 Test-UI "Caches: tab strip present"          { winapp ui wait-for "CacheTab_Detected" -a $AppPid -t 3000 }
-Test-UI "Caches: Needs-action row present (Cargo)" { winapp ui wait-for "MoveCache_Cargo" -a $AppPid -t 4000 }
-# npm's representative is the CARD, not a button: "Move back" is gated on CanMoveBack, which only
-# becomes true after *this app* performs a move in the current session. A cache that was already on
-# the Dev Drive at launch renders the "Already on Dev Drive" checkmark instead, so MoveBack_npm can
-# never exist on a fresh app. The card's name ("npm, On G:") proves the grouping more directly anyway.
-Test-UI "Caches: On-Dev-Drive row present (npm)"   { winapp ui wait-for "PackageCacheCard_npm" -a $AppPid -t 4000 }
+Test-UI "Caches: every detected cache names the volume it is on" {
+    $cards = Find-Ids 'PackageCacheCard_[A-Za-z0-9]+'
+    if ($cards.Count -eq 0) { throw "No detected cache cards rendered" }
+    foreach ($c in $cards) {
+        if ((Get-Name $c) -notmatch ',\s*On [A-Za-z]:$') { throw "$c does not name the volume it is on" }
+    }
+}
+# The grouping rule stated AS a rule: CanMove = hasDevDrive && detected && !onDevDrive, so a cache
+# already on the Dev Drive must offer no move and every cache elsewhere must offer one. The Dev Drive
+# letter is read off the head chip rather than hard-coded, so this holds on any machine — and it is a
+# far stronger claim than the two "row present" checks it replaces, which only proved a row existed.
+Test-UI "Caches: only caches off the Dev Drive offer a move" {
+    if ((Get-Name "CachesStatus") -notmatch 'already on ([A-Za-z]):') { throw "Head chip does not name the Dev Drive" }
+    $dev   = $Matches[1]
+    $moves = @(Find-Ids 'MoveCache_[A-Za-z0-9]+' 1500 | ForEach-Object { $_ -replace '^MoveCache_', '' })
+    foreach ($card in (Find-Ids 'PackageCacheCard_[A-Za-z0-9]+')) {
+        $eco    = $card -replace '^PackageCacheCard_', ''
+        $onDev  = (Get-Name $card) -match ",\s*On $dev`:"
+        $offers = $moves -contains $eco
+        if ($onDev -and $offers)          { throw "$eco is already on ${dev}: yet still offers a move" }
+        if (-not $onDev -and -not $offers) { throw "$eco is not on ${dev}: yet offers no move" }
+    }
+}
 # Undetected tools are on their own tab now, so reaching one means switching first. That makes this a
 # stronger assertion than it used to be: it proves the tab actually filters, not just that a row exists.
 # `invoke` rather than `click` — click simulates a mouse and silently no-ops on a locked workstation.
@@ -263,11 +343,11 @@ Test-UI "Caches: Not-installed tab switches" {
 Test-UI "Caches: Not-installed tab excludes detected rows" {
     $found = winapp ui inspect -a $AppPid --interactive 2>$null | Out-String
     if ($found -notmatch 'MapPathInput_') { throw "Not installed tab is not rendered; the exclusion check would be vacuous" }
-    if ($found -match 'MoveCache_Cargo') { throw "Cargo is still visible on the Not installed tab" }
+    if ($found -match 'MoveCache_')       { throw "A detected cache's move action is still visible on the Not installed tab" }
 }
 Test-UI "Caches: back to Detected" {
     winapp ui invoke "CacheTab_Detected" -a $AppPid
-    winapp ui wait-for "MoveCache_Cargo" -a $AppPid -t 4000
+    if ((Find-Ids 'PackageCacheCard_[A-Za-z0-9]+').Count -eq 0) { throw "Detected tab did not come back" }
 }
 Test-UI "Caches: Move all present"           { winapp ui wait-for "MoveAllButton"     -a $AppPid -t 3000 }
 Test-UI "Caches: 'Learn what this does' link"{ winapp ui wait-for "LearnWhatThisDoes" -a $AppPid -t 3000 }
@@ -386,11 +466,11 @@ winapp ui screenshot -a $AppPid -o "screenshots\04-drives.png" 2>$null | Out-Nul
 # ─────────────────────────────────────────────────────────────────────────────
 Test-UI "Navigate to Create Dev Drive"       { Goto "NavCreate" "CreateFormHead" }
 Test-UI "Create: room grammar is present" {
-    Test-Present @("CreateVolumeStrip", "CreateFormHead", "AfterCreateHead", "CreateStatusBar")
+    Assert-Present @("CreateVolumeStrip", "CreateFormHead", "AfterCreateHead", "CreateStatusBar")
 }
 Test-UI "Create: guardrails note present"    { winapp ui wait-for "GuardrailsInfoBar" -a $AppPid -t 3000 }
 Test-UI "Create: size row carries a slider and its ceiling" {
-    Test-Present @("SizeSlider", "SizeNumberBox", "SizeMaximumTick")
+    Assert-Present @("SizeSlider", "SizeNumberBox", "SizeMaximumTick")
     if ((Get-Name "SizeMaximumTick") -notmatch '^[0-9,]+ GB \u2014 ') { throw "Maximum tick does not name its ceiling." }
 }
 Test-UI "Create: format is stated, not chosen" {
@@ -400,7 +480,7 @@ Test-UI "Create: the reclaim tie-in is present" { winapp ui wait-for "ReclaimTie
 winapp ui screenshot -a $AppPid -o "screenshots\05-create.png" 2>$null | Out-Null
 
 Test-UI "Create: method is two options, resize is the default" {
-    Test-Present @("MethodResizeOption", "MethodVhdxOption")
+    Assert-Present @("MethodResizeOption", "MethodVhdxOption")
     winapp ui invoke "MethodResizeOption" -a $AppPid 2>$null | Out-Null
     winapp ui wait-for "MethodResizeOption" -a $AppPid -p IsSelected --value "True" -t 3000
 }
@@ -438,7 +518,7 @@ Test-UI "Create: resize completes without another confirmation" {
     winapp ui wait-for "PrimaryButton" -a $AppPid --gone -t 3000
 }
 Test-UI "Create: the done card offers the two next rooms" {
-    Test-Present @("CompletionTitle", "MovePackageCachesButton", "RunSpeedTestButton")
+    Assert-Present @("CompletionTitle", "MovePackageCachesButton", "RunSpeedTestButton")
 }
 winapp ui screenshot -a $AppPid -o "screenshots\08-create-complete.png" 2>$null | Out-Null
 
@@ -474,8 +554,16 @@ foreach ($pref in @("WatchCachesToggle", "LowFreeCombo", "RollupCombo",
 # Round-trip one combo of each kind. The threshold reaches AttentionSignalBuilder and the method
 # reaches the Create room, so proving the control moves is proving the preference moves.
 Select-Combo "LowFreeCombo" "LowFree25"
-Test-UI "Preference: low-free threshold -> 25%" {
+# Traced THROUGH to the status bar, not just back off the ComboBox. A control that reflects its own
+# click proves only that the click landed; the status bar reading "Warns below 25% free" is what proves
+# the preference reached a consumer. (This assertion used to sit in its own test named
+# "status bar reports the threshold" which never looked at the threshold — it checked only that the bar
+# exposed *some* facts, and so would have passed with the number wrong or the wiring cut.)
+Test-UI "Preference: low-free threshold -> 25%, and the status bar follows" {
     winapp ui wait-for "LowFreeCombo" -a $AppPid --value "25%" -t 3000
+    $facts = (winapp ui inspect "SettingsStatusBar" -a $AppPid --json --depth 20 2>$null | Out-String)
+    $global:LASTEXITCODE = 0
+    if ($facts -notmatch 'Warns below 25% free') { throw "status bar did not follow the threshold to 25%" }
 }
 Select-Combo "LowFreeCombo" "LowFree15"
 Test-UI "Preference: low-free threshold restored" {
@@ -498,13 +586,6 @@ Test-UI "Preference: creation method -> VHDX" {
 Select-Combo "CreationMethodCombo" "MethodResize"
 Test-UI "Preference: creation method restored" {
     winapp ui wait-for "CreationMethodCombo" -a $AppPid --value "Resize a volume" -t 3000
-}
-
-# A preference that changes the status bar proves the change reached something, not just the control.
-Test-UI "Preference: status bar reports the threshold" {
-    $facts = (Get-Selectors "SettingsStatusBar") -join " "
-    if (-not $facts) { throw "Settings status bar exposed no facts" }
-    winapp ui wait-for "SettingsStatusBar" -a $AppPid -t 3000
 }
 
 # Theme override: Dark, then Light, then back to System default. Assert the ComboBox reflects each.

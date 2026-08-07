@@ -97,11 +97,21 @@ public sealed class ReclaimSafetyTests
     [TestMethod]
     public void AnUninspectableWorktreeDefaultsToCareful()
     {
-        // Being unable to check is a reason for caution, never permission.
-        WorktreeState unknown = WorktreeState.Unknown;
-        Assert.IsTrue(unknown.HasUncommittedChanges);
-        Assert.IsTrue(unknown.HasUnpushedCommits);
-        Assert.IsFalse(unknown.IsMerged);
+        using var fixture = new ReclaimFixture();
+        fixture.Worktree("opaque", @"C:\repo\.git");
+        fixture.File(@"opaque\big.bin", 8L * 1024 * 1024);
+
+        // Being unable to check is a reason for caution, never permission. This runs the sentinel
+        // through the PROVIDER, like its two neighbours above: the previous version asserted the three
+        // field values of WorktreeState.Unknown's own constructor and never called Grade at all, so it
+        // proved nothing about its own name and was already covered by UnknownStateGradesCareful.
+        var provider = new WorktreeReclaimProvider(new StubWorktreeInspector(WorktreeState.Unknown));
+
+        IReadOnlyList<ReclaimCandidate> found = provider
+            .ScanAsync(Context(fixture), null, CancellationToken.None).GetAwaiter().GetResult();
+
+        Assert.HasCount(1, found);
+        Assert.AreEqual(ReclaimRisk.Careful, found[0].Risk);
     }
 
     [TestMethod]

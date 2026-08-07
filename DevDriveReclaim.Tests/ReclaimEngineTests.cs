@@ -111,16 +111,42 @@ public sealed class ReclaimEngineTests
     public void NestedSourceRootsAreCollapsedSoBytesAreNotCountedTwice()
     {
         using var fixture = new ReclaimFixture();
-        string outer = fixture.Dir("outer");
-        fixture.Dir("outer", "inner");
+        string lot = fixture.Dir("lot");
+        string outer = fixture.Dir("lot", "source");
+        string inner = fixture.Dir("lot", "source", "src");
 
-        IReadOnlyList<string> roots = ReclaimRegistry.DiscoverSourceRoots([]);
+        // DiscoverSourceRoots probes a fixed set of conventional folder names under every volume root
+        // it is given, so feeding it BOTH "lot" and "lot\source" makes it generate a genuinely nested
+        // pair: "lot" yields "lot\source", and "lot\source" yields "lot\source\src". That is the only
+        // way to drive the collapsing branch, which is why the previous version of this test — which
+        // asserted that a hand-built context "stores what it is given verbatim", the opposite of its
+        // own name, plus IsNotNull on a list that is never null — could not fail and never once
+        // executed the rule it was named after.
+        IReadOnlyList<string> roots = ReclaimRegistry.DiscoverSourceRoots([lot, outer]);
 
-        // The discovery helper only returns conventional locations, so assert the collapsing rule
-        // directly on a context built from a deliberately nested pair.
-        var context = new ReclaimScanContext([@"C:\"], [outer, Path.Combine(outer, "inner")]);
-        Assert.HasCount(2, context.SourceRoots, "the context stores what it is given verbatim");
-        Assert.IsNotNull(roots);
+        Assert.IsTrue(
+            roots.Contains(outer, StringComparer.OrdinalIgnoreCase),
+            $"the outermost source root should survive; got [{string.Join(", ", roots)}]");
+        Assert.IsFalse(
+            roots.Contains(inner, StringComparer.OrdinalIgnoreCase),
+            "a source root nested inside another would count the same bytes twice");
+
+        // And the rule in general, which also covers whatever conventional folders happen to exist on
+        // the machine running this: nothing that survives may sit inside anything else that survived.
+        foreach (string a in roots)
+        {
+            foreach (string b in roots)
+            {
+                if (string.Equals(a, b, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                Assert.IsFalse(
+                    a.StartsWith(b.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase),
+                    $"'{a}' is nested inside '{b}', so the headline byte total would double-count it.");
+            }
+        }
     }
 
     private static ReclaimScanContext Context() =>
