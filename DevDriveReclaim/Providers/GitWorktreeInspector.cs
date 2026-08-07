@@ -12,7 +12,8 @@ public sealed record WorktreeState(
     int UnpushedCommitCount,
     bool IsMerged,
     bool HasUpstream = true,
-    IReadOnlyList<string>? LocalOnlyIgnoredFiles = null)
+    IReadOnlyList<string>? LocalOnlyIgnoredFiles = null,
+    bool IsDetached = false)
 {
     /// <summary>
     /// Gitignored paths that cannot be regenerated — a <c>.env</c>, a signing certificate, a
@@ -34,6 +35,20 @@ public sealed record WorktreeState(
 public interface IWorktreeInspector
 {
     WorktreeState Inspect(string worktreePath, CancellationToken cancellationToken);
+
+    /// <summary>How many stashes the repository holds, or 0 when it cannot be told.</summary>
+    /// <remarks>
+    /// Separate from <see cref="Inspect"/> because only the dormant-project path can use it, and it
+    /// costs a git invocation per repository. Deleting a <b>worktree</b> folder cannot lose a stash:
+    /// <c>refs/stash</c> and the object database are shared with the parent repository, so the stash
+    /// is still there afterwards. Deleting a whole clone destroys both.
+    /// <para>
+    /// Defaulting to 0 is safe rather than optimistic: the only caller reaches this after three git
+    /// commands have already succeeded, so a repository this cannot be answered for has already
+    /// been graded Careful by <see cref="WorktreeState.Unknown"/>.
+    /// </para>
+    /// </remarks>
+    int StashCount(string repositoryPath, CancellationToken cancellationToken) => 0;
 }
 
 /// <summary>
@@ -63,6 +78,17 @@ public sealed class GitWorktreeInspector : IWorktreeInspector
         try
         {
             string? branch = Run(worktreePath, "rev-parse --abbrev-ref HEAD", cancellationToken)?.Trim();
+
+            // git reports a detached HEAD as the literal string "HEAD". That is not a branch name,
+            // and the difference decides whether deleting the folder loses anything: a worktree on a
+            // branch has its commits held by a ref shared with the parent repository, whereas a
+            // detached one is reachable only through this worktree's own HEAD, which goes away with
+            // it. Blanked so the messages fall back to the folder name rather than printing "HEAD".
+            bool detached = string.Equals(branch, "HEAD", StringComparison.Ordinal);
+            if (detached)
+            {
+                branch = null;
+            }
 
             // --ignored is the only way to see content git is deliberately silent about. It uses
             // the traditional (collapsing) form, so a fully-ignored directory costs one line rather
@@ -105,12 +131,28 @@ public sealed class GitWorktreeInspector : IWorktreeInspector
                 UnpushedCommitCount: unpushed.Length,
                 IsMerged: merged,
                 HasUpstream: hasUpstream,
-                LocalOnlyIgnoredFiles: localOnly);
+                LocalOnlyIgnoredFiles: localOnly,
+                IsDetached: detached);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             return WorktreeState.Unknown;
         }
+    }
+
+    /// <inheritdoc />
+    public int StashCount(string repositoryPath, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(repositoryPath) || !Directory.Exists(repositoryPath))
+        {
+            return 0;
+        }
+
+        string? list = Run(repositoryPath, "stash list", cancellationToken);
+
+        return list is null
+            ? 0
+            : list.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Length;
     }
 
     private static bool IsMergedIntoDefault(

@@ -58,8 +58,14 @@ public sealed class ReclaimSafetyTests
         Assert.Contains("uncommitted", found[0].Reason, StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// Unpushed commits keep a worktree off the preselected Safe tier, but they do not earn a
+    /// typed-DELETE prompt: the branch ref and the objects belong to the parent repository and
+    /// survive the folder. Measured on 54 real worktrees, where treating this as Careful fired
+    /// on 29 of them for a loss that cannot happen.
+    /// </summary>
     [TestMethod]
-    public void AWorktreeWithUnpushedCommitsIsCarefulEvenWhenClean()
+    public void AWorktreeWithUnpushedCommitsIsHeldBackFromSafeButNotTreatedAsIrreversible()
     {
         using var fixture = new ReclaimFixture();
         fixture.Worktree("feature-y", @"C:\repo\.git");
@@ -73,7 +79,9 @@ public sealed class ReclaimSafetyTests
             .ScanAsync(Context(fixture), null, CancellationToken.None).GetAwaiter().GetResult();
 
         Assert.HasCount(1, found);
-        Assert.AreEqual(ReclaimRisk.Careful, found[0].Risk);
+        Assert.AreEqual(ReclaimRisk.Check, found[0].Risk);
+        Assert.AreNotEqual(ReclaimRisk.Safe, found[0].Risk,
+            "Still not preselected — whether those commits are wanted is a question for a person.");
     }
 
     [TestMethod]

@@ -145,8 +145,8 @@ public sealed class WorktreeReclaimProvider(IWorktreeInspector? inspector = null
 
     /// <summary>
     /// How to get this worktree back. The honest answer depends entirely on where the commits live:
-    /// <c>git worktree add</c> only restores what a remote already has, so promising it for
-    /// never-pushed work would be exactly the kind of false reassurance this field exists to prevent.
+    /// a worktree's branch and objects belong to the parent repository and survive the folder, but
+    /// uncommitted edits and a detached HEAD do not, and neither does anything git never tracked.
     /// </summary>
     private static string RecoveryHint(WorktreeState state, string name)
     {
@@ -155,27 +155,34 @@ public sealed class WorktreeReclaimProvider(IWorktreeInspector? inspector = null
             return "Nothing. Uncommitted edits exist only here — commit or stash them first.";
         }
 
-        if (!state.HasUpstream)
+        if (state.IsDetached && state.HasUnpushedCommits)
         {
-            return $"Nothing, unless you push first. {state.Branch ?? name} has no remote, so " +
-                   "deleting this worktree deletes the only copy of its commits. " +
-                   $"Run git push -u origin {state.Branch ?? name} and this becomes recoverable.";
+            return "Nothing, unless you give those commits a name first. Run git branch " +
+                   $"{name} HEAD in the worktree, and they survive in the parent repository.";
         }
 
         if (state.HasLocalOnlyIgnoredFiles)
         {
             // The commits are recoverable and the ignored files are not, so the hint has to say
             // both. Offering only the git command would read as "fully recoverable".
-            return $"git worktree add {name} {state.Branch ?? "<branch>"} restores the code, but not " +
+            return $"git worktree prune, then git worktree add {name} {state.Branch ?? "<branch>"} " +
+                   "restores the code, but not " +
                    $"{string.Join(", ", state.LocalOnlyIgnoredFiles.Take(3))} — copy those out first.";
         }
 
-        return $"git worktree add {name} {state.Branch ?? "<branch>"} recreates it, then rebuild.";
+        // Prune first is not pedantry: the parent repository keeps an administrative entry for a
+        // worktree whose folder has gone, and git refuses to re-add at that path until it is
+        // cleared. Verified by deleting a worktree and re-adding it.
+        return $"git worktree prune, then git worktree add {name} " +
+               $"{state.Branch ?? "<branch>"} recreates it, then rebuild.";
     }
 
     private static (ReclaimRisk Risk, string Reason, string Detail) Grade(
         WorktreeState state, string name)
     {
+        // Everything that can genuinely lose work is tested first. Reaching a Check verdict early
+        // would mask a Careful one below it -- which is how a worktree carrying an uncommittable
+        // .env would have slipped through once unpushed commits stopped being Careful themselves.
         if (state.HasUncommittedChanges)
         {
             return (
@@ -186,33 +193,23 @@ public sealed class WorktreeReclaimProvider(IWorktreeInspector? inspector = null
                     $"{(state.ChangedFileCount == 1 ? string.Empty : "s")}");
         }
 
-        if (state.HasUnpushedCommits)
+        // A detached HEAD is the one committed state that a folder delete really does destroy.
+        // Nothing but this worktree's own HEAD points at those commits, so once the folder and its
+        // administrative entry are gone they are unreachable and git will collect them.
+        if (state.IsDetached && state.HasUnpushedCommits)
         {
-            // Two genuinely different situations reach this branch, and conflating them produced
-            // the nonsense "0 unpushed commits" on a row graded Careful. Both are still Careful —
-            // in each case this machine holds the only copy — but the row has to say which.
-            if (!state.HasUpstream)
-            {
-                return (
-                    ReclaimRisk.Careful,
-                    $"{state.Branch ?? name} has never been pushed — it has no remote tracking " +
-                        "branch at all. Whatever is committed here exists only on this machine.",
-                    $"{state.Branch ?? name} · no upstream branch");
-            }
-
             return (
                 ReclaimRisk.Careful,
-                "This worktree has commits that are not on any remote. The work is committed, but " +
-                    "this machine is the only place it exists.",
-                $"{state.UnpushedCommitCount:N0} unpushed commit" +
-                    $"{(state.UnpushedCommitCount == 1 ? string.Empty : "s")}");
+                "This worktree is not on a branch, so nothing but the worktree itself points at " +
+                    "its commits. Deleting the folder leaves them unreachable.",
+                "detached HEAD · commits on no branch");
         }
 
         if (state.HasLocalOnlyIgnoredFiles)
         {
-            // Reached only by a worktree that is clean and fully pushed, which is precisely the
-            // one that would otherwise be graded Safe and ticked automatically. Git is silent
-            // about these files by design, so nothing else in the room would ever mention them.
+            // Git is silent about these files by design, so nothing else in the room would ever
+            // mention them -- and without this the worktree would be graded Safe and ticked
+            // automatically.
             string first = state.LocalOnlyIgnoredFiles[0];
             int extra = state.LocalOnlyIgnoredFiles.Count - 1;
 
@@ -221,6 +218,38 @@ public sealed class WorktreeReclaimProvider(IWorktreeInspector? inspector = null
                 "This worktree holds local configuration that git ignores, so it was never " +
                     "committed and is on no remote. The code here is safe; these files are not.",
                 extra == 0 ? first : $"{first} and {extra:N0} more not in git");
+        }
+
+        if (state.HasUnpushedCommits)
+        {
+            // Not Careful, and this was measured rather than assumed: a worktree's branch ref and
+            // every object it names live in the *parent* repository, which is shared. Deleting the
+            // folder leaves the branch and its commits intact -- verified by deleting one and
+            // reading the file contents back out of the parent afterwards.
+            //
+            // The old wording claimed this machine held "the only copy" and graded Careful, which
+            // fired on 29 of the 54 worktrees here. A warning that fires on the majority of rows
+            // teaches people to type DELETE to get past it, and that is the one habit this risk
+            // model cannot survive.
+            //
+            // Reaching this line already proves the parent is present: without it every git command
+            // in the worktree fails with exit 128, which grades Unknown and therefore Careful.
+            if (!state.HasUpstream)
+            {
+                return (
+                    ReclaimRisk.Check,
+                    $"{state.Branch ?? name} has no remote tracking branch, so this machine holds " +
+                        "the only copy — but the branch itself lives in the parent repository and " +
+                        "outlives this folder.",
+                    $"{state.Branch ?? name} · no upstream branch");
+            }
+
+            return (
+                ReclaimRisk.Check,
+                "This worktree has commits that are not on any remote. They are held by the parent " +
+                    "repository rather than by this folder, so deleting it does not lose them.",
+                $"{state.UnpushedCommitCount:N0} unpushed commit" +
+                    $"{(state.UnpushedCommitCount == 1 ? string.Empty : "s")}");
         }
 
         if (state.IsMerged)

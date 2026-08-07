@@ -360,4 +360,102 @@ public sealed class GitWorktreeInspectorTests
             "a worktree we could not read must fall back to the Careful-grading sentinel");
         Assert.IsFalse(state.IsMerged);
     }
+
+    /// <summary>
+    /// A worktree checked out at a bare commit reports the literal string <c>HEAD</c> as its
+    /// branch. That matters because it is the one shape where deleting the folder really does
+    /// destroy work: no ref names those commits, so once the administrative entry is pruned they
+    /// are unreachable and git collects them. Verified directly against real git.
+    /// </summary>
+    [TestMethod]
+    public void ADetachedCheckoutIsRecognisedRatherThanNamedHead()
+    {
+        if (!GitIsAvailable)
+        {
+            Assert.Inconclusive("git is not on PATH");
+        }
+
+        using var fixture = new ReclaimFixture();
+        string repo = MakeRepo(fixture, "detached");
+        Git(repo, "checkout --detach HEAD");
+
+        WorktreeState state = new GitWorktreeInspector().Inspect(repo, CancellationToken.None);
+
+        Assert.IsTrue(state.IsDetached);
+        Assert.AreNotEqual("HEAD", state.Branch,
+            "\"HEAD\" is git's placeholder for having no branch, not the name of one — rendering " +
+            "it as a branch would make a row read as though the commits were safely named.");
+    }
+
+    [TestMethod]
+    public void AnOrdinaryCheckoutIsNotReportedAsDetached()
+    {
+        if (!GitIsAvailable)
+        {
+            Assert.Inconclusive("git is not on PATH");
+        }
+
+        using var fixture = new ReclaimFixture();
+        string repo = MakeRepo(fixture, "attached");
+
+        WorktreeState state = new GitWorktreeInspector().Inspect(repo, CancellationToken.None);
+
+        // The counter-test. Reporting everything detached would make the guard fire everywhere,
+        // which is how a warning stops being read.
+        Assert.IsFalse(state.IsDetached);
+        Assert.AreEqual("main", state.Branch);
+    }
+
+    [TestMethod]
+    public void StashesAreCountedAndAnUnstashedRepositoryReportsNone()
+    {
+        if (!GitIsAvailable)
+        {
+            Assert.Inconclusive("git is not on PATH");
+        }
+
+        using var fixture = new ReclaimFixture();
+        string repo = MakeRepo(fixture, "stashed");
+        var inspector = new GitWorktreeInspector();
+
+        Assert.AreEqual(0, inspector.StashCount(repo, CancellationToken.None));
+
+        System.IO.File.WriteAllText(Path.Combine(repo, "tracked.txt"), "edited once");
+        Git(repo, "stash push -m first");
+        System.IO.File.WriteAllText(Path.Combine(repo, "tracked.txt"), "edited twice");
+        Git(repo, "stash push -m second");
+
+        Assert.AreEqual(2, inspector.StashCount(repo, CancellationToken.None));
+    }
+
+    /// <summary>
+    /// The measurement that redirected this whole rule. <c>refs/stash</c> and the object database
+    /// belong to the parent repository, so a worktree cannot take a stash with it when it goes —
+    /// which is why stash detection lives in the dormant-clone path and not here.
+    /// </summary>
+    [TestMethod]
+    public void AStashSurvivesTheWorktreeThatCreatedIt()
+    {
+        if (!GitIsAvailable)
+        {
+            Assert.Inconclusive("git is not on PATH");
+        }
+
+        using var fixture = new ReclaimFixture();
+        string parent = MakeRepo(fixture, "parent");
+        string worktree = Path.Combine(fixture.Root, "child-worktree");
+
+        Git(parent, $"worktree add \"{worktree}\" -b side");
+        System.IO.File.WriteAllText(Path.Combine(worktree, "tracked.txt"), "work in progress");
+        Git(worktree, "stash push -m from-the-worktree");
+
+        var inspector = new GitWorktreeInspector();
+        Assert.AreEqual(1, inspector.StashCount(parent, CancellationToken.None),
+            "the stash is the repository's, so the parent can already see it");
+
+        Directory.Delete(worktree, recursive: true);
+
+        Assert.AreEqual(1, inspector.StashCount(parent, CancellationToken.None),
+            "deleting the worktree folder must not lose the stash it created");
+    }
 }

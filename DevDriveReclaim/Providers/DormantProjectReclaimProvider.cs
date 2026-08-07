@@ -70,8 +70,17 @@ public sealed class DormantProjectReclaimProvider(IWorktreeInspector? inspector 
                 }
 
                 WorktreeState state = _inspector.Inspect(repository.Path, cancellationToken);
+
+                // Only asked for when it can change the answer. A repo with uncommitted or unpushed
+                // work is already Careful, so the one case a stash decides is the otherwise-clean
+                // repository -- and that is exactly the one whose recovery hint would otherwise
+                // promise a fresh clone brings everything back.
+                int stashes = state is { HasUncommittedChanges: false, HasUnpushedCommits: false }
+                    ? _inspector.StashCount(repository.Path, cancellationToken)
+                    : 0;
+
                 (ReclaimRisk risk, string reason, string recovery, string detail) =
-                    Grade(state, repository, idleDays);
+                    Grade(state, repository, idleDays, stashes);
 
                 candidates.Add(new ReclaimCandidate(
                     ReclaimCategory.Id,
@@ -91,7 +100,7 @@ public sealed class DormantProjectReclaimProvider(IWorktreeInspector? inspector 
     }
 
     private static (ReclaimRisk Risk, string Reason, string Recovery, string Detail) Grade(
-        WorktreeState state, DiscoveredRepository repository, int idleDays)
+        WorktreeState state, DiscoveredRepository repository, int idleDays, int stashCount)
     {
         string age = idleDays >= 365
             ? $"{idleDays / 365} year{(idleDays / 365 == 1 ? string.Empty : "s")}"
@@ -115,6 +124,23 @@ public sealed class DormantProjectReclaimProvider(IWorktreeInspector? inspector 
                     "the only copy of those commits.",
                 "Nothing until you push. Then a fresh clone brings it all back.",
                 $"idle {age} · {state.UnpushedCommitCount:N0} unpushed commits");
+        }
+
+        // A stash never leaves the machine. refs/stash sits outside refs/heads and refs/tags, so no
+        // ordinary push carries it and a fresh clone arrives with none -- verified by pushing a
+        // stashed repository and cloning it back. Deleting a whole clone destroys the object
+        // database that holds it, which is what separates this from a worktree: there the stash
+        // belongs to the parent repository and survives.
+        if (stashCount > 0)
+        {
+            return (
+                ReclaimRisk.Careful,
+                $"Untouched for {age} and fully pushed, but it holds {stashCount:N0} " +
+                    $"stash{(stashCount == 1 ? string.Empty : "es")}. A stash is never pushed " +
+                    "anywhere, so deleting this folder is the end of it.",
+                $"Nothing for the stash{(stashCount == 1 ? string.Empty : "es")}. Run git stash pop " +
+                    "here first, then commit and push what it restores.",
+                $"idle {age} · {stashCount:N0} stash{(stashCount == 1 ? string.Empty : "es")} not on any remote");
         }
 
         return (
