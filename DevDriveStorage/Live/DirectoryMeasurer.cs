@@ -43,6 +43,17 @@ public static class DirectoryMeasurer
             return DirectoryMeasurement.Empty;
         }
 
+        // A junction at the root is refused outright, exactly as one below the root already is.
+        // Everything underneath lives on the other side of the link — frequently on another
+        // volume — so measuring through it attributes someone else's bytes to this folder. Every
+        // caller is a reclaim detector deciding what to offer for deletion and how much space to
+        // promise back, and a redirected package cache is the ordinary way this happens: moving a
+        // cache to the Dev Drive by hand leaves a junction behind on C: pointing at G:.
+        if (IsReparsePoint(path))
+        {
+            return DirectoryMeasurement.Empty;
+        }
+
         long allocated = 0;
         long apparent = 0;
         int files = 0;
@@ -59,12 +70,8 @@ public static class DirectoryMeasurer
 
             if (!NativeDirectoryEnumerator.TryEnumerate(current, out List<NativeDirEntry> entries))
             {
-                if (!TryMeasureManaged(current, ref allocated, ref apparent, ref files,
-                        ref folders, ref newest, stack, depth, maxDepth))
-                {
-                    continue;
-                }
-
+                MeasureManaged(current, ref allocated, ref apparent, ref files,
+                    ref folders, ref newest, stack, depth, maxDepth);
                 continue;
             }
 
@@ -102,7 +109,26 @@ public static class DirectoryMeasurer
         return new DirectoryMeasurement(allocated, apparent, files, folders, newest);
     }
 
-    private static bool TryMeasureManaged(
+    /// <summary>
+    /// Reports whether <paramref name="path"/> is a reparse point. An unreadable path answers
+    /// <see langword="false"/> so the caller still attempts the walk, which degrades gracefully
+    /// to an empty measurement on its own rather than through a second code path.
+    /// </summary>
+    private static bool IsReparsePoint(string path)
+    {
+        try
+        {
+            return (new DirectoryInfo(path).Attributes & FileAttributes.ReparsePoint) != 0;
+        }
+        catch (Exception exception) when (
+            exception is UnauthorizedAccessException or IOException or
+                System.Security.SecurityException or PathTooLongException)
+        {
+            return false;
+        }
+    }
+
+    private static void MeasureManaged(
         string current,
         ref long allocated,
         ref long apparent,
@@ -141,14 +167,13 @@ public static class DirectoryMeasurer
                     }
                 }
             }
-
-            return true;
         }
         catch (Exception exception) when (
             exception is UnauthorizedAccessException or IOException or
                 System.Security.SecurityException or PathTooLongException)
         {
-            return false;
+            // Whatever was counted before the failure is kept: a partial measurement is a far
+            // better answer than none.
         }
     }
 }
