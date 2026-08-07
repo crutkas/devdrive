@@ -31,6 +31,12 @@
 
   <ItemGroup>
     <ProjectReference Include="..\DevDriveCore\DevDriveCore.csproj" />
+    <!--
+      MutationComposition is linked in below and now hands out an IReclaimExecutor, so the reclaim
+      contracts have to resolve here as well. The reference is deliberately to the library and not
+      to the WinUI app: this project asserts UI-agnostic code only.
+    -->
+    <ProjectReference Include="..\DevDriveReclaim\DevDriveReclaim.csproj" />
   </ItemGroup>
 
   <!--
@@ -69,6 +75,18 @@
     <Compile Include="..\DevDriveManager\Services\SafeFakePackageCacheMover.cs" Link="CacheViewModels\SafeFakePackageCacheMover.cs" />
     <Compile Include="..\DevDriveManager\Services\SafeFakeVhdProvisioner.cs" Link="CacheViewModels\SafeFakeVhdProvisioner.cs" />
     <Compile Include="..\DevDriveManager\Services\SafeFakeVolumeResizer.cs" Link="CacheViewModels\SafeFakeVolumeResizer.cs" />
+    <Compile Include="..\DevDriveManager\Services\SafeFakeReclaimExecutor.cs" Link="CacheViewModels\SafeFakeReclaimExecutor.cs" />
+  </ItemGroup>
+
+  <!--
+    The reclaim confirmation is the last screen before data stops existing, and its wording is a
+    safety behaviour rather than copy: whether it says "can be restored" is the difference between an
+    informed delete and a surprise. It carries no XAML dependency precisely so it can be asserted
+    here. The rest of ReclaimViewModel cannot follow it, because StatusEmphasis lives in a control's
+    code-behind and would drag Microsoft.UI.Xaml in with it.
+  -->
+  <ItemGroup>
+    <Compile Include="..\DevDriveManager\ViewModels\ReclaimConfirmation.cs" Link="ReclaimViewModels\ReclaimConfirmation.cs" />
   </ItemGroup>
 
   <!--

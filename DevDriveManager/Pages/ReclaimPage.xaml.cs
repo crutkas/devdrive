@@ -1,7 +1,9 @@
 using System.ComponentModel;
 using DevDriveManager.Controls;
 using DevDriveManager.ViewModels;
+using DevDriveReclaim;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 
 namespace DevDriveManager.Pages;
@@ -47,10 +49,131 @@ public sealed partial class ReclaimPage : Page, INotifyPropertyChanged
         Loaded += (_, _) =>
         {
             ViewModel.PropertyChanged += OnViewModelPropertyChanged;
+            ViewModel.ConfirmationRequested = ConfirmReclaimAsync;
             UpdateStatusBar();
         };
 
-        Unloaded += (_, _) => ViewModel.PropertyChanged -= OnViewModelPropertyChanged;
+        Unloaded += (_, _) =>
+        {
+            ViewModel.PropertyChanged -= OnViewModelPropertyChanged;
+
+            // Released with the page. The ViewModel outlives it, and a hook holding a XamlRoot from
+            // an unloaded page would show the confirmation on a window that is no longer there.
+            if (ViewModel.ConfirmationRequested == ConfirmReclaimAsync)
+            {
+                ViewModel.ConfirmationRequested = null;
+            }
+        };
+    }
+
+    /// <summary>
+    /// The last honest moment before anything is deleted.
+    /// </summary>
+    /// <remarks>
+    /// Three things are stated in a fixed order, because the order is the argument: what is about to
+    /// happen, what of it cannot be undone, and how bad the worst item in the pile is. The amount
+    /// freed is deliberately not the largest text on the screen — this is a confirmation, and a
+    /// confirmation that leads with the reward is a nudge.
+    /// <para>
+    /// A <see cref="ReclaimRisk.Careful"/> item requires typing DELETE. Anything gated behind a
+    /// single click gets the same reflexive click as everything else, and the Careful tier exists
+    /// precisely for the items where that reflex is expensive.
+    /// </para>
+    /// </remarks>
+    private async System.Threading.Tasks.Task<bool> ConfirmReclaimAsync(ReclaimConfirmationRequest request)
+    {
+        if (_dialogOpen || XamlRoot is null)
+        {
+            return false;
+        }
+
+        var body = new StackPanel { Spacing = 12 };
+
+        body.Children.Add(new TextBlock
+        {
+            Text = request.RiskText,
+            TextWrapping = TextWrapping.Wrap,
+            Style = (Style)Application.Current.Resources["BodyStrongTextBlockStyle"],
+        });
+
+        var recovery = new TextBlock
+        {
+            Text = request.RecoveryText,
+            TextWrapping = TextWrapping.Wrap,
+        };
+        AutomationProperties.SetAutomationId(recovery, "ReclaimConfirmRecovery");
+        body.Children.Add(recovery);
+
+        if (request.VolumeSplitText.Length > 0)
+        {
+            body.Children.Add(new TextBlock
+            {
+                Text = "Space comes back: " + request.VolumeSplitText,
+                TextWrapping = TextWrapping.Wrap,
+                Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
+            });
+        }
+
+        TextBox? typed = null;
+        if (request.RequiresTypedConfirmation)
+        {
+            body.Children.Add(new TextBlock
+            {
+                Text = "Type DELETE to confirm.",
+                TextWrapping = TextWrapping.Wrap,
+            });
+
+            typed = new TextBox { PlaceholderText = "DELETE" };
+            AutomationProperties.SetAutomationId(typed, "ReclaimConfirmTypedInput");
+            AutomationProperties.SetName(typed, "Type DELETE to confirm");
+            body.Children.Add(typed);
+        }
+
+        var dialog = new ContentDialog
+        {
+            Title = request.Headline,
+            Content = body,
+            PrimaryButtonText = "Remove",
+            CloseButtonText = "Cancel",
+
+            // Cancel is the default so that Enter, and a dialog that appears under a moving cursor,
+            // both do the harmless thing.
+            DefaultButton = ContentDialogButton.Close,
+            XamlRoot = XamlRoot,
+        };
+
+        ApplyDialogStyle(dialog);
+        AutomationProperties.SetAutomationId(dialog, "ReclaimConfirmDialog");
+
+        if (typed is not null)
+        {
+            dialog.IsPrimaryButtonEnabled = false;
+            typed.TextChanged += (_, _) =>
+                dialog.IsPrimaryButtonEnabled =
+                    string.Equals(typed.Text.Trim(), "DELETE", StringComparison.Ordinal);
+        }
+
+        _dialogOpen = true;
+        try
+        {
+            return await dialog.ShowAsync() == ContentDialogResult.Primary;
+        }
+        finally
+        {
+            _dialogOpen = false;
+        }
+    }
+
+    /// <summary>Guarded because WinUI allows exactly one <see cref="ContentDialog"/> at a time.</summary>
+    private bool _dialogOpen;
+
+    private static void ApplyDialogStyle(ContentDialog dialog)
+    {
+        if (Application.Current.Resources.TryGetValue("DefaultContentDialogStyle", out object? style)
+            && style is Style dialogStyle)
+        {
+            dialog.Style = dialogStyle;
+        }
     }
 
     /// <summary>

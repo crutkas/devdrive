@@ -1,32 +1,13 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using DevDriveCore;
 using DevDriveManager.Controls;
+using DevDriveManager.Services;
 using DevDriveReclaim;
 using DevDriveStorage;
 
 namespace DevDriveManager.ViewModels;
-
-/// <summary>
-/// Byte formatting for reclaim rows.
-/// </summary>
-/// <remarks>
-/// Sizes are <see cref="long"/> throughout the reclaim subsystem while
-/// <see cref="DevDriveCore.ByteSizeFormatter"/> takes <see cref="ulong"/>. Clamping at zero here
-/// keeps that conversion in one place rather than scattering casts through the bindings, where a
-/// stray negative would wrap to an absurd number instead of showing "0 B".
-/// <para>
-/// The formatter is named in full because <c>DevDriveStorage</c> has one too, and the two disagree:
-/// storage counts in powers of 1000, core in powers of 1024. Reclaim totals and the volume bars sit
-/// side by side in this room, so they must come from the same one.
-/// </para>
-/// </remarks>
-internal static class ReclaimFormat
-{
-    public static string Bytes(long value) =>
-        DevDriveCore.ByteSizeFormatter.Format(value <= 0 ? 0UL : (ulong)value);
-}
 
 /// <summary>One selectable candidate row.</summary>
 /// <remarks>
@@ -48,6 +29,15 @@ public sealed partial class ReclaimRowViewModel(ReclaimCandidate candidate) : Ob
     public partial string? AbsorbedBy { get; set; }
 
     public bool IsAbsorbed => AbsorbedBy is not null;
+
+    /// <summary>
+    /// Why this row is still here after a reclaim run that was supposed to remove it. Rows that were
+    /// removed leave the table; a row that stays without saying why is a tool quietly failing.
+    /// </summary>
+    [ObservableProperty]
+    public partial string? FailureText { get; set; }
+
+    public bool HasFailure => FailureText is not null;
 
     public string DisplayName => Candidate.DisplayName;
 
@@ -114,6 +104,8 @@ public sealed partial class ReclaimRowViewModel(ReclaimCandidate candidate) : Ob
     }
 
     partial void OnAbsorbedByChanged(string? value) => OnPropertyChanged(nameof(IsAbsorbed));
+
+    partial void OnFailureTextChanged(string? value) => OnPropertyChanged(nameof(HasFailure));
 }
 
 /// <summary>One category in the rail.</summary>
@@ -178,8 +170,10 @@ public sealed partial class ReclaimViewModel : ObservableObject
     private readonly ReclaimEngine _engine;
     private readonly Func<ReclaimScanContext> _contextFactory;
     private readonly IVolumeProvider _volumeProvider;
+    private readonly IReclaimExecutor _executor;
     private IReadOnlyList<StorageVolume>? _cachedVolumes;
     private CancellationTokenSource? _scanCts;
+    private CancellationTokenSource? _reclaimCts;
 
     /// <summary>
     /// Suppresses the per-row recompute while a bulk selection is in flight. Without it, ticking the
@@ -196,11 +190,13 @@ public sealed partial class ReclaimViewModel : ObservableObject
     public ReclaimViewModel(
         ReclaimEngine engine,
         Func<ReclaimScanContext> contextFactory,
-        IVolumeProvider? volumeProvider = null)
+        IVolumeProvider? volumeProvider = null,
+        IReclaimExecutor? executor = null)
     {
         _engine = engine;
         _contextFactory = contextFactory;
         _volumeProvider = volumeProvider ?? new SystemVolumeProvider();
+        _executor = executor ?? MutationComposition.CreateReclaimExecutor();
 
         foreach (ReclaimCategory category in engine.Categories)
         {
@@ -275,6 +271,28 @@ public sealed partial class ReclaimViewModel : ObservableObject
     public partial string VolumeSplitText { get; set; } = string.Empty;
 
     /// <summary>
+    /// The line under the risk bar. Carries the volume split at rest, run progress while removing,
+    /// and the receipt afterwards — one slot rather than three, because only one of the three is
+    /// ever the thing the user is waiting to read.
+    /// </summary>
+    public string FooterDetailText => IsReclaiming
+        ? ReclaimProgressText
+        : LastRunSummary ?? VolumeSplitText;
+
+    /// <summary>
+    /// The button says what it will do next. "Review &amp; reclaim" while it opens a confirmation,
+    /// "Removing…" while it is working — a button that keeps its resting label during a slow
+    /// operation reads as an unresponsive one.
+    /// </summary>
+    public string ReclaimButtonText => IsReclaiming ? "Removing…" : "Review & reclaim";
+
+    /// <summary>
+    /// Enabled only when there is something to remove and nothing else in flight. Scanning is
+    /// included because the rows a scan is still rewriting are not a selection anyone confirmed.
+    /// </summary>
+    public bool CanReclaim => SelectedRiskMix.HasAny && !IsReclaiming && !IsScanning;
+
+    /// <summary>
     /// How many rows are ticked. Paired with <see cref="SelectedBytesText"/> in the totals card,
     /// where the tier cards' own counts cannot be summed — tiers overlap, the total does not.
     /// </summary>
@@ -298,6 +316,30 @@ public sealed partial class ReclaimViewModel : ObservableObject
 
     public IEnumerable<ReclaimRowViewModel> SelectedRows => AllRows.Where(r => r.IsSelected);
 
+    /// <summary>
+    /// Raises the derived footer/button properties. Every input to them is an
+    /// <c>[ObservableProperty]</c> on this type, so the generated setters are the only place they can
+    /// change, and routing all six through one method is what stops the next one being forgotten.
+    /// </summary>
+    private void RaiseActionState()
+    {
+        OnPropertyChanged(nameof(FooterDetailText));
+        OnPropertyChanged(nameof(ReclaimButtonText));
+        OnPropertyChanged(nameof(CanReclaim));
+    }
+
+    partial void OnIsReclaimingChanged(bool value) => RaiseActionState();
+
+    partial void OnIsScanningChanged(bool value) => RaiseActionState();
+
+    partial void OnReclaimProgressTextChanged(string value) => RaiseActionState();
+
+    partial void OnLastRunSummaryChanged(string? value) => RaiseActionState();
+
+    partial void OnVolumeSplitTextChanged(string value) => RaiseActionState();
+
+    partial void OnSelectedRiskMixChanged(ReclaimRiskMix value) => RaiseActionState();
+
     [RelayCommand]
     private async Task ScanAsync()
     {
@@ -313,6 +355,9 @@ public sealed partial class ReclaimViewModel : ObservableObject
         IsScanning = true;
         ScanError = null;
         StatusText = "Scanning…";
+        LastRunSummary = null;
+        LastRunHadFailures = false;
+        OnPropertyChanged(nameof(HasLastRun));
 
         foreach (ReclaimCategoryViewModel category in Categories)
         {
@@ -366,6 +411,216 @@ public sealed partial class ReclaimViewModel : ObservableObject
 
     [RelayCommand]
     private void CancelScan() => _scanCts?.Cancel();
+
+    /// <summary>
+    /// Asked before anything is deleted. Returns true to proceed.
+    /// </summary>
+    /// <remarks>
+    /// A hook rather than a dialog reference so the ViewModel stays testable, but more importantly
+    /// so the absence of one is a state the code can check. <see cref="ReclaimAsync"/> refuses to run
+    /// when this is null: a build that forgot to wire the confirmation must delete nothing, not
+    /// everything. Fail-closed is the only acceptable default for the one command here that cannot
+    /// be undone.
+    /// </remarks>
+    public Func<ReclaimConfirmationRequest, Task<bool>>? ConfirmationRequested { get; set; }
+
+    /// <summary>True while a reclaim run is in flight. Disables scanning and selection changes.</summary>
+    [ObservableProperty]
+    public partial bool IsReclaiming { get; set; }
+
+    /// <summary>Progress line shown in place of the selection summary while removing.</summary>
+    [ObservableProperty]
+    public partial string ReclaimProgressText { get; set; } = string.Empty;
+
+    /// <summary>
+    /// What the last run actually did, as one sentence. Null until a run finishes, and cleared by
+    /// the next scan — a receipt for a machine state that no longer exists is worse than none.
+    /// </summary>
+    [ObservableProperty]
+    public partial string? LastRunSummary { get; set; }
+
+    /// <summary>True when the last run left something the user asked for undone.</summary>
+    [ObservableProperty]
+    public partial bool LastRunHadFailures { get; set; }
+
+    public bool HasLastRun => LastRunSummary is not null;
+
+    /// <summary>
+    /// Removes the current selection, after confirmation.
+    /// </summary>
+    /// <remarks>
+    /// The selection is snapshotted before the dialog opens and the snapshot is what runs. Reading
+    /// the live collection afterwards would let the set that was confirmed differ from the set that
+    /// is deleted, which is the one place in this app where a race is not a glitch but a data-loss
+    /// bug.
+    /// </remarks>
+    [RelayCommand]
+    private async Task ReclaimAsync()
+    {
+        if (IsReclaiming || IsScanning)
+        {
+            return;
+        }
+
+        List<ReclaimCandidate> selection = [.. SelectedRows.Select(r => r.Candidate)];
+        if (selection.Count == 0)
+        {
+            return;
+        }
+
+        if (ConfirmationRequested is not { } confirm)
+        {
+            // Nothing wired up the confirmation. Say so rather than proceeding: an unconfirmed
+            // delete is the failure this whole path exists to prevent.
+            LastRunSummary = "Nothing was removed — this build has no confirmation step wired up.";
+            LastRunHadFailures = true;
+            OnPropertyChanged(nameof(HasLastRun));
+            return;
+        }
+
+        if (!await confirm(BuildConfirmation(selection)))
+        {
+            return;
+        }
+
+        _reclaimCts?.Dispose();
+        _reclaimCts = new CancellationTokenSource();
+
+        IsReclaiming = true;
+        LastRunSummary = null;
+        OnPropertyChanged(nameof(HasLastRun));
+        ReclaimProgressText = "Starting…";
+        StatusText = "Removing…";
+
+        var progress = new Progress<ReclaimExecutionProgress>(p =>
+            ReclaimProgressText = p.Total <= 1
+                ? $"Removing {p.CurrentItem}…"
+                : $"{p.Completed:N0} of {p.Total:N0} — {ReclaimFormat.Bytes(p.BytesFreedSoFar)} freed");
+
+        try
+        {
+            ReclaimOutcome outcome = await _executor.ExecuteAsync(
+                selection, progress, _reclaimCts.Token);
+
+            ApplyOutcome(outcome);
+        }
+        catch (Exception exception)
+        {
+            LastRunSummary = $"The run stopped: {exception.Message}";
+            LastRunHadFailures = true;
+            StatusText = "The run could not finish.";
+        }
+        finally
+        {
+            IsReclaiming = false;
+            ReclaimProgressText = string.Empty;
+            OnPropertyChanged(nameof(HasLastRun));
+        }
+    }
+
+    [RelayCommand]
+    private void CancelReclaim() => _reclaimCts?.Cancel();
+
+    /// <summary>
+    /// Assembles the facts the confirmation needs: how many, how much, which tier is the worst one
+    /// included, and — the fact that decides whether this is reversible — how much of it the Recycle
+    /// Bin will not be holding afterwards.
+    /// </summary>
+    private ReclaimConfirmationRequest BuildConfirmation(IReadOnlyList<ReclaimCandidate> selection)
+    {
+        IReadOnlyList<ReclaimCandidate> roots = ReclaimOverlapResolver.Roots(selection);
+        List<ReclaimCandidate> permanent = [.. roots.Where(c => !c.SupportsRecycleBin)];
+
+        return new ReclaimConfirmationRequest(
+            ItemCount: roots.Count,
+            Bytes: roots.Sum(c => c.SizeBytes),
+            HighestRisk: roots.Count == 0 ? ReclaimRisk.Safe : roots.Max(c => c.Risk),
+            CarefulCount: roots.Count(c => c.Risk == ReclaimRisk.Careful),
+            PermanentCount: permanent.Count,
+            PermanentBytes: permanent.Sum(c => c.SizeBytes),
+            PermanentNames: [.. permanent.OrderByDescending(c => c.SizeBytes).Take(4).Select(c => c.DisplayName)],
+            VolumeSplitText: VolumeSplitText);
+    }
+
+    /// <summary>
+    /// Folds a finished run back into the room: removed rows leave, failures stay and say why, and
+    /// every total is recomputed from what is left.
+    /// </summary>
+    /// <remarks>
+    /// Rows are removed rather than greyed out because the table's contract is "things you can
+    /// reclaim", and something already reclaimed is not one of those. The volumes are re-read for
+    /// the same reason the scan re-reads them: free space has genuinely just moved, and this is the
+    /// one moment the user is looking for it to.
+    /// </remarks>
+    private void ApplyOutcome(ReclaimOutcome outcome)
+    {
+        var removed = new HashSet<string>(
+            outcome.Items.Where(i => i.Removed).Select(i => i.Candidate.Path),
+            StringComparer.OrdinalIgnoreCase);
+
+        Dictionary<string, string> failures = outcome.Failures
+            .GroupBy(i => i.Candidate.Path, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First().Message, StringComparer.OrdinalIgnoreCase);
+
+        _suspendRecompute = true;
+        try
+        {
+            foreach (ReclaimCategoryViewModel category in Categories)
+            {
+                foreach (ReclaimRowViewModel row in category.Rows.Where(r => removed.Contains(r.Path)).ToList())
+                {
+                    row.PropertyChanged -= OnRowPropertyChanged;
+                    category.Rows.Remove(row);
+                }
+
+                foreach (ReclaimRowViewModel row in category.Rows)
+                {
+                    if (failures.TryGetValue(row.Path, out string? reason))
+                    {
+                        row.FailureText = reason;
+                        row.IsSelected = false;
+                    }
+                }
+
+                category.TotalBytes = category.Rows.Sum(r => r.Candidate.SizeBytes);
+            }
+        }
+        finally
+        {
+            _suspendRecompute = false;
+        }
+
+        FoundBytes = ReclaimOverlapResolver.ReclaimableBytes(AllRows.Select(r => r.Candidate));
+
+        InvalidateVolumes();
+        RecomputeTotals();
+
+        LastRunHadFailures = outcome.FailedCount > 0;
+        LastRunSummary = Summarize(outcome);
+        StatusText = LastRunSummary;
+        OnPropertyChanged(nameof(HasLastRun));
+    }
+
+    private static string Summarize(ReclaimOutcome outcome)
+    {
+        string freed = ReclaimFormat.Bytes(outcome.BytesFreed);
+        string items = outcome.RemovedCount == 1 ? "1 item" : $"{outcome.RemovedCount:N0} items";
+
+        if (outcome.Cancelled)
+        {
+            return $"Stopped after freeing {freed} across {items}. Nothing else was touched.";
+        }
+
+        if (outcome.FailedCount == 0)
+        {
+            return outcome.RemovedCount == 0
+                ? "Nothing was removed."
+                : $"Freed {freed} across {items}.";
+        }
+
+        string failed = outcome.FailedCount == 1 ? "1 item" : $"{outcome.FailedCount:N0} items";
+        return $"Freed {freed} across {items}. {failed} could not be removed and is still listed.";
+    }
 
     /// <summary>Ticks exactly the Safe tier. Never Check, never Careful.</summary>
     [RelayCommand]
@@ -680,10 +935,6 @@ public sealed record ReclaimVolumeImpact(
 /// <summary>
 /// A pile of reclaimable bytes broken down by risk tier, with item counts.
 /// </summary>
-/// <remarks>
-/// Counts travel with the bytes because the two together are what makes a tier actionable: "17.4 GB
-/// careful" is worrying, "17.4 GB careful across 5 items" is a short afternoon.
-/// </remarks>
 public sealed record ReclaimRiskMix(
     long SafeBytes,
     long CheckBytes,

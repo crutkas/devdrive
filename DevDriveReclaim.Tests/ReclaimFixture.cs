@@ -58,6 +58,31 @@ internal sealed class ReclaimFixture : IDisposable
         return path;
     }
 
+    /// <summary>
+    /// Creates a directory junction, the reparse point a developer machine actually has. Junctions
+    /// need no elevation and no Developer Mode, unlike symbolic links, which is why the tests that
+    /// need a reparse point use one.
+    /// </summary>
+    public string Junction(string name, string target)
+    {
+        string path = Path.Combine(Root, name);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+
+        using var process = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = "cmd.exe",
+            Arguments = $"/c mklink /J \"{path}\" \"{target}\"",
+            CreateNoWindow = true,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        })!;
+
+        process.WaitForExit(10_000);
+
+        return path;
+    }
+
     public void Age(string path, TimeSpan age)
     {
         var when = DateTime.UtcNow - age;

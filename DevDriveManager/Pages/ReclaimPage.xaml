@@ -510,8 +510,9 @@
                                         AutomationProperties.Name="Risk composition of the selection"
                                         Capacity="{x:Bind ViewModel.SelectedRiskMix.Bar, Mode=OneWay}" />
                                     <TextBlock
+                                        AutomationProperties.AutomationId="ReclaimFooterDetail"
                                         Style="{StaticResource SmCardSubTextStyle}"
-                                        Text="{x:Bind ViewModel.VolumeSplitText, Mode=OneWay}"
+                                        Text="{x:Bind ViewModel.FooterDetailText, Mode=OneWay}"
                                         TextTrimming="CharacterEllipsis" />
                                 </StackPanel>
 
@@ -519,8 +520,9 @@
                                     Grid.Column="2"
                                     VerticalAlignment="Center"
                                     AutomationProperties.AutomationId="ReclaimReviewButton"
-                                    Content="Review &amp; reclaim"
-                                    IsEnabled="{x:Bind ViewModel.SelectedRiskMix.HasAny, Mode=OneWay}"
+                                    Command="{x:Bind ViewModel.ReclaimCommand}"
+                                    Content="{x:Bind ViewModel.ReclaimButtonText, Mode=OneWay}"
+                                    IsEnabled="{x:Bind ViewModel.CanReclaim, Mode=OneWay}"
                                     Style="{StaticResource SmCompactButtonStyle}" />
                             </Grid>
                         </Border>
