@@ -1204,4 +1204,27 @@
         <Setter Property="VerticalAlignment" Value="Center" />
     </Style>
 
+    <!--
+        Why a delete left a row behind. A Style rather than a Foreground brush set at the call
+        site: a resolved Brush freezes at whichever theme was live when the row was built, and
+        these rows outlive a theme switch. The setter re-resolves; a Brush instance cannot.
+
+        Declared here, at the end, because BasedOn with StaticResource only sees keys defined
+        ABOVE it in the same dictionary, and SmCardSubTextStyle is at line 639.
+    -->
+    <Style
+        x:Key="SmCardSubTextBadStyle"
+        BasedOn="{StaticResource SmCardSubTextStyle}"
+        TargetType="TextBlock">
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Foreground" Value="{ThemeResource SmBadBrush}" />
+    </Style>
+
+    <Style
+        x:Key="SmKeyValueBadTextStyle"
+        BasedOn="{StaticResource SmKeyValueTextStyle}"
+        TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{ThemeResource SmBadBrush}" />
+    </Style>
+
 </ResourceDictionary>

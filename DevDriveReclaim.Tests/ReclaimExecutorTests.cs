@@ -1,4 +1,4 @@
-namespace DevDriveReclaim.Tests;
+﻿namespace DevDriveReclaim.Tests;
 
 /// <summary>
 /// The executor, against real temp trees that really get deleted.
@@ -222,5 +222,42 @@ public sealed class ReclaimExecutorTests
         {
             await Task.Delay(20);
         }
+    }
+    /// <summary>
+    /// A child of a container the guard refused must not be reported as removed. Reporting
+    /// "absorbed" unconditionally converted a refusal into a success, and the ViewModel deletes every
+    /// row it is told was removed — so the row left the table while the folder stayed on disk.
+    /// </summary>
+    [TestMethod]
+    public async Task AChildOfARefusedContainerIsNotReportedAsRemoved()
+    {
+        string windows = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+
+        ReclaimOutcome outcome = await Execute(
+            Candidate(windows), Candidate(Path.Combine(windows, "Temp")));
+
+        Assert.AreEqual(0, outcome.RemovedCount);
+        Assert.AreEqual(2, outcome.FailedCount);
+        Assert.IsTrue(Directory.Exists(windows));
+    }
+
+    /// <summary>
+    /// A cancelled run must not claim the children of containers it never reached.
+    /// </summary>
+    [TestMethod]
+    public async Task ChildrenOfAnUnreachedContainerAreNotReportedAsRemoved()
+    {
+        using ReclaimFixture fixture = new();
+        string outer = fixture.Dir("repo");
+        string inner = fixture.Dir("repo", "bin");
+        using CancellationTokenSource cts = new();
+        await cts.CancelAsync();
+
+        ReclaimOutcome outcome = await new ReclaimExecutor().ExecuteAsync(
+            [Candidate(outer), Candidate(inner)], null, cts.Token);
+
+        Assert.AreEqual(0, outcome.RemovedCount);
+        Assert.IsTrue(outcome.Cancelled);
+        Assert.IsTrue(Directory.Exists(outer), "Nothing should have been touched.");
     }
 }

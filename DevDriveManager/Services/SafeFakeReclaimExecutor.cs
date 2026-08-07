@@ -1,4 +1,4 @@
-using DevDriveReclaim;
+﻿using DevDriveReclaim;
 
 namespace DevDriveManager.Services;
 
@@ -38,13 +38,23 @@ public sealed class SafeFakeReclaimExecutor : IReclaimExecutor
         int completed = 0;
         bool cancelled = false;
 
-        foreach (ReclaimCandidate candidate in roots.OrderByDescending(c => c.Path.Length))
+        // Same ordering as the real one, for the same reason: a bin candidate's path is the volume
+        // root, so depth alone would put it last, after everything else had been recycled into it.
+        IOrderedEnumerable<ReclaimCandidate> ordered = roots
+            .OrderByDescending(c => string.Equals(c.CategoryId, "recycle-bin", StringComparison.OrdinalIgnoreCase))
+            .ThenByDescending(c => c.Path.Length);
+
+        var rootOutcomes = new Dictionary<string, ReclaimItemOutcome>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (ReclaimCandidate candidate in ordered)
         {
             if (cancellationToken.IsCancellationRequested)
             {
                 cancelled = true;
-                outcomes.Add(new ReclaimItemOutcome(
-                    candidate, ReclaimItemStatus.Cancelled, 0, "not reached — the run was stopped"));
+                ReclaimItemOutcome stopped = new(
+                    candidate, ReclaimItemStatus.Cancelled, 0, "not reached — the run was stopped");
+                outcomes.Add(stopped);
+                rootOutcomes[candidate.Path] = stopped;
                 continue;
             }
 
@@ -74,19 +84,33 @@ public sealed class SafeFakeReclaimExecutor : IReclaimExecutor
             }
 
             outcomes.Add(outcome);
+            rootOutcomes[candidate.Path] = outcome;
             completed++;
             progress?.Report(new ReclaimExecutionProgress(
                 completed, roots.Count, candidate.DisplayName, freed));
         }
 
+        // A child inherits its container's fate. Reporting "absorbed" unconditionally would turn a
+        // guard refusal into a reported success and make the ViewModel drop rows for folders that are
+        // still there.
         foreach (ReclaimCandidate candidate in selection.Where(c => !rootPaths.Contains(c.Path)))
         {
             string parent = containers.TryGetValue(candidate.Path, out string? container)
                 ? container
                 : "another selected item";
 
-            outcomes.Add(new ReclaimItemOutcome(
-                candidate, ReclaimItemStatus.Absorbed, 0, $"removed with {parent}"));
+            bool containerRemoved =
+                container is not null &&
+                rootOutcomes.TryGetValue(container, out ReclaimItemOutcome? containerOutcome) &&
+                containerOutcome.Removed;
+
+            outcomes.Add(containerRemoved
+                ? new ReclaimItemOutcome(candidate, ReclaimItemStatus.Absorbed, 0, $"removed with {parent}")
+                : new ReclaimItemOutcome(
+                    candidate,
+                    cancelled ? ReclaimItemStatus.Cancelled : ReclaimItemStatus.Failed,
+                    0,
+                    $"still here — {parent} could not be removed"));
         }
 
         return Task.FromResult(new ReclaimOutcome(outcomes, cancelled));

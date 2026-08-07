@@ -431,6 +431,18 @@
                                                     Style="{StaticResource SmCardSubTextStyle}"
                                                     Text="Already included in the row above it"
                                                     Visibility="{x:Bind IsAbsorbed, Mode=OneWay}" />
+                                                <!--
+                                                    Why the last run left this row behind. The
+                                                    executor knows exactly why; before this line it
+                                                    was computed, stored and rendered nowhere, so
+                                                    the reader got "1 item could not be removed"
+                                                    and no way to find out which or why.
+                                                -->
+                                                <TextBlock
+                                                    Style="{StaticResource SmCardSubTextBadStyle}"
+                                                    Text="{x:Bind FailureText, Mode=OneWay}"
+                                                    ToolTipService.ToolTip="{x:Bind FailureText, Mode=OneWay}"
+                                                    Visibility="{x:Bind HasFailure, Mode=OneWay}" />
                                             </StackPanel>
                                         </Grid>
 
@@ -784,6 +796,25 @@
                     <!--  The same four questions in the same order, ending in cost to get it back.  -->
                     <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
                         <StackPanel Padding="14,12" Spacing="4">
+                            <!--
+                                Ahead of the four standing questions, and only when it applies.
+                                If the last run left this row behind, that is the most important
+                                thing about it right now — more urgent than what it is. The row's
+                                own sub-line trims to the column width; this is where the whole
+                                sentence fits.
+                            -->
+                            <TextBlock
+                                Style="{StaticResource SmSectionLabelTextStyle}"
+                                Text="WHY IT IS STILL HERE"
+                                Visibility="{x:Bind ViewModel.SelectedRow.HasFailure, Mode=OneWay, FallbackValue=Collapsed}" />
+                            <TextBlock
+                                Margin="0,0,0,10"
+                                AutomationProperties.AutomationId="ReclaimInspectorFailure"
+                                Style="{StaticResource SmKeyValueBadTextStyle}"
+                                Text="{x:Bind ViewModel.SelectedRow.FailureText, Mode=OneWay, FallbackValue=''}"
+                                TextWrapping="Wrap"
+                                Visibility="{x:Bind ViewModel.SelectedRow.HasFailure, Mode=OneWay, FallbackValue=Collapsed}" />
+
                             <TextBlock Style="{StaticResource SmSectionLabelTextStyle}" Text="WHAT THIS IS" />
                             <TextBlock
                                 Margin="0,0,0,10"

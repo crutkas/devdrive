@@ -17,8 +17,14 @@ namespace DevDriveReclaim;
 /// <para>
 /// <b>The Recycle Bin is preferred and its limits are not hidden.</b> <c>FOF_ALLOWUNDO</c> silently
 /// degrades to a permanent delete when an item is too large for the bin or the volume has recycling
-/// disabled, so afterwards the path is checked: still there means the shell recycled it, gone means
-/// the shell deleted it. The row says which actually happened rather than which was asked for.
+/// disabled. Recycling <em>moves</em> the item into <c>$Recycle.Bin</c>, so the original path is gone
+/// in both cases and cannot tell them apart; the bin's item count is compared across the operation
+/// instead. The row says which actually happened rather than which was asked for.
+/// </para>
+/// <para>
+/// <b>Recycle Bins are emptied before anything is recycled into them.</b> A bin candidate's path is
+/// the volume root, so ordering by depth alone would empty it last — destroying, permanently and
+/// silently, every item the same run had just moved there under a promise of restorability.
 /// </para>
 /// <para>
 /// <b>The whole batch runs on one STA thread.</b> <c>SHFileOperation</c> is a shell API and is
@@ -76,25 +82,43 @@ public sealed class ReclaimExecutor : IReclaimExecutor
         var rootPaths = new HashSet<string>(roots.Select(r => r.Path), StringComparer.OrdinalIgnoreCase);
 
         var outcomes = new List<ReclaimItemOutcome>(selection.Count);
+        var rootOutcomes = new Dictionary<string, ReclaimItemOutcome>(StringComparer.OrdinalIgnoreCase);
         long freed = 0;
         int completed = 0;
         bool cancelled = false;
 
-        // Deepest first. The shell is perfectly happy either way once nesting is resolved, but a run
-        // that is cancelled halfway has then removed leaves rather than trunks, which is the less
-        // surprising half-finished state to be left in.
-        foreach (ReclaimCandidate candidate in roots.OrderByDescending(c => c.Path.Length))
+        // Recycle Bins FIRST, then deepest-first for everything else.
+        //
+        // The bin's candidate path IS the volume root, so ordering purely by descending length puts
+        // it dead last — after every other item on that volume has been recycled INTO it. Emptying
+        // then destroys, permanently and silently, the very items the confirmation promised were
+        // restorable. Both are Safe-graded and both are ticked by the automatic SelectSafe after
+        // every scan, so that was the default path, not an edge case.
+        //
+        // Emptying first is also what the user asked for: "get rid of what is in the bin" and "put
+        // these in the bin" are two requests, and doing them in that order honours both.
+        //
+        // Deepest-first for the remainder still holds, so a run cancelled halfway has removed leaves
+        // rather than trunks, which is the less surprising half-finished state to be left in.
+        IOrderedEnumerable<ReclaimCandidate> ordered = roots
+            .OrderByDescending(c => IsRecycleBin(c))
+            .ThenByDescending(c => c.Path.Length);
+
+        foreach (ReclaimCandidate candidate in ordered)
         {
             if (cancellationToken.IsCancellationRequested)
             {
                 cancelled = true;
-                outcomes.Add(new ReclaimItemOutcome(
-                    candidate, ReclaimItemStatus.Cancelled, 0, "not reached — the run was stopped"));
+                ReclaimItemOutcome stopped = new(
+                    candidate, ReclaimItemStatus.Cancelled, 0, "not reached — the run was stopped");
+                outcomes.Add(stopped);
+                rootOutcomes[candidate.Path] = stopped;
                 continue;
             }
 
             ReclaimItemOutcome outcome = Remove(candidate);
             outcomes.Add(outcome);
+            rootOutcomes[candidate.Path] = outcome;
 
             if (outcome.Removed)
             {
@@ -106,21 +130,35 @@ public sealed class ReclaimExecutor : IReclaimExecutor
                 completed, roots.Count, candidate.DisplayName, freed));
         }
 
-        // Everything that was not a root went with its container. Reported rather than dropped: the
-        // user ticked it, so the run owes it an answer, and "absorbed" is a different fact from
-        // "deleted" even though both end with the bytes gone.
+        // Everything that was not a root went with its container — IF the container actually went.
+        // Reporting "absorbed" unconditionally would turn a guard refusal into a reported success and
+        // make the ViewModel delete rows for folders still sitting on disk, recoverable only by a
+        // full rescan. A child inherits its container's fate.
         foreach (ReclaimCandidate candidate in selection.Where(c => !rootPaths.Contains(c.Path)))
         {
             string parent = containers.TryGetValue(candidate.Path, out string? container)
                 ? container
                 : "another selected item";
 
-            outcomes.Add(new ReclaimItemOutcome(
-                candidate, ReclaimItemStatus.Absorbed, 0, $"removed with {parent}"));
+            bool containerRemoved =
+                container is not null &&
+                rootOutcomes.TryGetValue(container, out ReclaimItemOutcome? containerOutcome) &&
+                containerOutcome.Removed;
+
+            outcomes.Add(containerRemoved
+                ? new ReclaimItemOutcome(candidate, ReclaimItemStatus.Absorbed, 0, $"removed with {parent}")
+                : new ReclaimItemOutcome(
+                    candidate,
+                    cancelled ? ReclaimItemStatus.Cancelled : ReclaimItemStatus.Failed,
+                    0,
+                    $"still here — {parent} could not be removed"));
         }
 
         return new ReclaimOutcome(outcomes, cancelled);
     }
+
+    private static bool IsRecycleBin(ReclaimCandidate candidate) =>
+        string.Equals(candidate.CategoryId, "recycle-bin", StringComparison.OrdinalIgnoreCase);
 
     private static ReclaimItemOutcome Remove(ReclaimCandidate candidate)
     {
@@ -201,32 +239,65 @@ public sealed class ReclaimExecutor : IReclaimExecutor
             Flags = (ushort)(Silent | NoConfirmation | AllowUndo | NoConfirmMkDir | NoErrorUi),
         };
 
+        long? before = TryCountRecycleBin(path);
+
         int result = SHFileOperationW(ref operation);
+
+        long? after = TryCountRecycleBin(path);
 
         if (result != 0 || operation.AnyOperationsAborted != 0)
         {
-            // 0x71 (DE_SAMEFILE) and friends are shell-specific and not Win32 errors, so the code is
-            // reported raw rather than run through a message lookup that would invent a description.
+            // These are shell codes, not Win32 codes, so they are translated by an explicit closed
+            // mapping rather than FormatMessage — which would describe 0x79 as ERROR_SEM_TIMEOUT.
             return new ReclaimItemOutcome(
                 candidate,
                 ReclaimItemStatus.Failed,
                 0,
                 operation.AnyOperationsAborted != 0
                     ? "the shell stopped partway through"
-                    : $"the shell could not remove it (0x{result:X})");
+                    : ShellFileOperationError.Explain(result));
+        }
+
+        // A sanity check, not the discriminator: "the shell returned success and the thing is still
+        // sitting there" is odd enough to be worth catching, but it says nothing about which kind of
+        // removal happened.
+        if (Directory.Exists(path) || File.Exists(path))
+        {
+            return new ReclaimItemOutcome(
+                candidate, ReclaimItemStatus.Failed, 0, "the shell reported success but it is still there");
         }
 
         // FOF_ALLOWUNDO is a request, not a guarantee: an item too large for the bin, or a volume
-        // with recycling turned off, is deleted outright and reported as success. Which one happened
-        // is only knowable by looking, and the user is owed the truth about whether this is undoable.
-        bool stillThere = Directory.Exists(path) || File.Exists(path);
+        // with recycling turned off, is deleted outright and still reported as success. Combined with
+        // FOF_NOCONFIRMATION and no FOF_WANTNUKEWARNING, the shell auto-answers its own "this is too
+        // big for the Recycle Bin, delete permanently?" prompt with yes.
+        //
+        // The original path is gone in BOTH cases — recycling MOVES the item into $Recycle.Bin — so
+        // "did the path disappear" cannot tell them apart. Counting the bin across the operation can.
+        bool recycled = after is long a && before is long b && a > b;
 
-        return stillThere
+        return recycled
             ? new ReclaimItemOutcome(
-                candidate, ReclaimItemStatus.Failed, 0, "the shell reported success but it is still there")
+                candidate, ReclaimItemStatus.Recycled, candidate.SizeBytes, "moved to the Recycle Bin")
             : new ReclaimItemOutcome(
-                candidate, ReclaimItemStatus.Recycled, candidate.SizeBytes, "moved to the Recycle Bin");
+                candidate,
+                ReclaimItemStatus.Deleted,
+                candidate.SizeBytes,
+                before is null || after is null
+                    ? "removed — could not confirm it reached the Recycle Bin"
+                    : "too large for the Recycle Bin, so it was removed permanently");
     }
+
+    /// <summary>
+    /// How many items the Recycle Bin serving <paramref name="path"/>'s volume currently holds, or
+    /// null when that cannot be determined.
+    /// </summary>
+    /// <remarks>
+    /// Null is treated as "assume permanent" by the caller. Reporting an item as permanently deleted
+    /// when it is really recoverable is a pleasant surprise; the reverse is the failure this whole
+    /// subsystem exists to avoid.
+    /// </remarks>
+    private static long? TryCountRecycleBin(string path) => RecycleBinQuery.TryCountFor(path);
 
     private static ReclaimItemOutcome DeletePermanently(
         ReclaimCandidate candidate, string path, ReclaimTargetKind kind)

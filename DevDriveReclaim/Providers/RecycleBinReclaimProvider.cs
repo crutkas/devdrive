@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 
 namespace DevDriveReclaim.Providers;
 
@@ -65,38 +65,8 @@ public sealed class RecycleBinReclaimProvider : IReclaimProvider
         return Task.FromResult<IReadOnlyList<ReclaimCandidate>>(candidates);
     }
 
-    private static bool TryQuery(string volumeRoot, out long bytes, out long items)
-    {
-        bytes = 0;
-        items = 0;
-
-        try
-        {
-            var info = new ShQueryRbInfo { CbSize = Marshal.SizeOf<ShQueryRbInfo>() };
-            int hr = SHQueryRecycleBinW(volumeRoot, ref info);
-            if (hr != 0)
-            {
-                return false;
-            }
-
-            bytes = info.Size;
-            items = info.NumItems;
-            return true;
-        }
-        catch (Exception exception) when (exception is DllNotFoundException or EntryPointNotFoundException)
-        {
-            return false;
-        }
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct ShQueryRbInfo
-    {
-        public int CbSize;
-        public long Size;
-        public long NumItems;
-    }
-
-    [DllImport("shell32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
-    private static extern int SHQueryRecycleBinW(string pszRootPath, ref ShQueryRbInfo pSHQueryRBInfo);
+    // The interop lives in RecycleBinQuery so this provider and ReclaimExecutor cannot drift apart
+    // about the layout of a struct they both depend on being right.
+    private static bool TryQuery(string volumeRoot, out long bytes, out long items) =>
+        RecycleBinQuery.TryQuery(volumeRoot, out bytes, out items);
 }
