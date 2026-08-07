@@ -162,6 +162,14 @@ public sealed class WorktreeReclaimProvider(IWorktreeInspector? inspector = null
                    $"Run git push -u origin {state.Branch ?? name} and this becomes recoverable.";
         }
 
+        if (state.HasLocalOnlyIgnoredFiles)
+        {
+            // The commits are recoverable and the ignored files are not, so the hint has to say
+            // both. Offering only the git command would read as "fully recoverable".
+            return $"git worktree add {name} {state.Branch ?? "<branch>"} restores the code, but not " +
+                   $"{string.Join(", ", state.LocalOnlyIgnoredFiles.Take(3))} — copy those out first.";
+        }
+
         return $"git worktree add {name} {state.Branch ?? "<branch>"} recreates it, then rebuild.";
     }
 
@@ -198,6 +206,21 @@ public sealed class WorktreeReclaimProvider(IWorktreeInspector? inspector = null
                     "this machine is the only place it exists.",
                 $"{state.UnpushedCommitCount:N0} unpushed commit" +
                     $"{(state.UnpushedCommitCount == 1 ? string.Empty : "s")}");
+        }
+
+        if (state.HasLocalOnlyIgnoredFiles)
+        {
+            // Reached only by a worktree that is clean and fully pushed, which is precisely the
+            // one that would otherwise be graded Safe and ticked automatically. Git is silent
+            // about these files by design, so nothing else in the room would ever mention them.
+            string first = state.LocalOnlyIgnoredFiles[0];
+            int extra = state.LocalOnlyIgnoredFiles.Count - 1;
+
+            return (
+                ReclaimRisk.Careful,
+                "This worktree holds local configuration that git ignores, so it was never " +
+                    "committed and is on no remote. The code here is safe; these files are not.",
+                extra == 0 ? first : $"{first} and {extra:N0} more not in git");
         }
 
         if (state.IsMerged)

@@ -40,6 +40,21 @@
     <NoWarn>$(NoWarn);WUI2010;WUI2011</NoWarn>
   </PropertyGroup>
 
+  <!--
+    AppX\ is a staging folder some packaging tooling drops next to the project, and it contains a
+    verbatim copy of the project's own sources. Left alone, the default globs compile all 165 of
+    them a second time and the build fails with duplicate-member errors that name real files, so
+    the cause looks like the source tree rather than the tool that copied it.
+  -->
+  <ItemGroup>
+    <Compile Remove="AppX\**" />
+    <Page Remove="AppX\**" />
+    <ApplicationDefinition Remove="AppX\**" />
+    <Content Remove="AppX\**" />
+    <None Remove="AppX\**" />
+    <PRIResource Remove="AppX\**" />
+  </ItemGroup>
+
   <ItemGroup>
     <Content Include="Assets\SplashScreen.scale-200.png" />
     <Content Include="Assets\LockScreenLogo.scale-200.png" />

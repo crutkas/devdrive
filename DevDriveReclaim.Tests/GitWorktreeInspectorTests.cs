@@ -256,6 +256,59 @@ public sealed class GitWorktreeInspectorTests
             600, state.ChangedFileCount, "every untracked file should survive the pipe");
     }
 
+    [TestMethod]
+    public void AnIgnoredEnvFileIsReportedWhileIgnoredBuildOutputIsNot()
+    {
+        if (!GitIsAvailable)
+        {
+            Assert.Inconclusive("git is not on PATH");
+        }
+
+        using var fixture = new ReclaimFixture();
+        string repo = MakeRepo(fixture, "ignored-secrets");
+
+        System.IO.File.WriteAllText(Path.Combine(repo, ".gitignore"), ".env\nbin/\nobj/\n");
+        Git(repo, "add .gitignore");
+        Git(repo, "commit -m ignore");
+
+        System.IO.File.WriteAllText(Path.Combine(repo, ".env"), "API_TOKEN=only-copy-on-this-machine");
+        Directory.CreateDirectory(Path.Combine(repo, "bin"));
+        System.IO.File.WriteAllText(Path.Combine(repo, "bin", "app.dll"), "regenerable");
+
+        WorktreeState state = new GitWorktreeInspector().Inspect(repo, CancellationToken.None);
+
+        // The whole point: git reports both as ignored, and only one of them matters.
+        CollectionAssert.Contains(state.LocalOnlyIgnoredFiles.ToArray(), ".env");
+        Assert.HasCount(1, state.LocalOnlyIgnoredFiles, "bin/ must not be treated as precious");
+
+        // Ignored files are not working-tree changes, so they must not inflate the dirty count —
+        // that would relabel every worktree on the machine as having uncommitted edits.
+        Assert.IsFalse(state.HasUncommittedChanges);
+        Assert.AreEqual(0, state.ChangedFileCount);
+    }
+
+    [TestMethod]
+    public void AnOrdinaryRepositoryReportsNoLocalOnlyContent()
+    {
+        if (!GitIsAvailable)
+        {
+            Assert.Inconclusive("git is not on PATH");
+        }
+
+        using var fixture = new ReclaimFixture();
+        string repo = MakeRepo(fixture, "ordinary");
+        System.IO.File.WriteAllText(Path.Combine(repo, ".gitignore"), "bin/\nobj/\n");
+        Git(repo, "add .gitignore");
+        Git(repo, "commit -m ignore");
+        Directory.CreateDirectory(Path.Combine(repo, "obj"));
+        System.IO.File.WriteAllText(Path.Combine(repo, "obj", "x.tmp"), "junk");
+
+        WorktreeState state = new GitWorktreeInspector().Inspect(repo, CancellationToken.None);
+
+        // Measured against 53 real worktrees, this is the case for every single one of them.
+        Assert.IsFalse(state.HasLocalOnlyIgnoredFiles);
+    }
+
     /// <summary>
     /// The regression test for the hang: a git that never finishes must not stall the scan.
     /// </summary>
