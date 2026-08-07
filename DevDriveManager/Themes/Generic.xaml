@@ -20,14 +20,20 @@
             Pill by default, but overridable per instance. Most bars in the app are thin strips where
             a pill is right; the risk-composition bar is 12px tall and a full pill on something that
             thick reads as a capsule badge rather than a measurement.
+
+            The control clamps whatever it is given to half its own height, so this token means "as
+            round as this bar can be" rather than a literal 10px. See CapacityBar.ApplyCornerRadius.
         -->
         <Setter Property="CornerRadius" Value="{StaticResource SmPillCornerRadius}" />
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="controls:CapacityBar">
                     <!--  The track is the free space, so an empty volume reads as empty rather than
-                          as a bar full of a "free" colour.  -->
-                    <Border Background="{ThemeResource SmDividerBrush}" CornerRadius="{TemplateBinding CornerRadius}">
+                          as a bar full of a "free" colour.
+
+                          CornerRadius is applied from code rather than template-bound, because it has
+                          to be clamped against the measured height before it can be honoured.  -->
+                    <Border x:Name="PART_Track" Background="{ThemeResource SmDividerBrush}">
                         <Grid x:Name="PART_Root" />
                     </Border>
                 </ControlTemplate>

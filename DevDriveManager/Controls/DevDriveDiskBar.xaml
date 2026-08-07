@@ -12,34 +12,42 @@
     <UserControl.Resources>
         <ResourceDictionary>
             <ResourceDictionary.ThemeDictionaries>
-                <!--  Segments come from the user's accent palette (theming.md "accent color palette"), so the
-                      whole bar is one cohesive family and tracks the user's chosen accent. Used = darkest
-                      shade, Free = a mid shade with a diagonal hatch as a second cue, Dev Drive = the base
-                      accent. Dark mirrors to the Light shades for contrast; High Contrast swaps to SystemColor*
-                      so it auto-corrects. The hatch stops are ordered so a pad fallback degrades to solid Dark1
-                      (never back to invisible white).  -->
+                <!--  Segments are the app's category hues, not shades of one accent. Three tints of a
+                      single colour (which is what SystemAccentColorLight1/2/3 are) differ only in
+                      lightness, so the bar read as one muted block and the reader had to consult the
+                      legend to find the boundary they came for.
+
+                      The hues are the ones the rest of the app already assigns: the source volume is
+                      painted with the system-volume colour and the new Dev Drive with the Dev Drive
+                      colour, the same pairing the drive strip and every capacity bar use for C: and
+                      G:. So the carve-out is coloured like the thing it is about to become rather
+                      than like a lighter piece of the drive it came from.
+
+                      Free is a desaturated slate, and reads as absence through saturation rather
+                      than through texture. It used to be hatched with a LinearGradientBrush set to
+                      SpreadMethod="Repeat", which is why this bar looked muted: a repeating brush
+                      needs a tile surface, and its presence anywhere in this UserControl composited
+                      everything EXCEPT the element carrying it at ~50% alpha. Measured, not guessed
+                      — a #FF0000 probe rendered #8F1116, and solving the two channels gives
+                      alpha 0.502 over the card background. Both bar segments and all three legend
+                      swatches were affected, in two separate Grids, and moving the brush onto a
+                      nested Rectangle only moved which element escaped. Every other bar in the app
+                      uses solid fills and renders exactly, so Free joins them.
+
+                      High Contrast swaps to SystemColor* so it auto-corrects, and keeps Used and Dev
+                      on different system colours because a bar whose segments match is unreadable.  -->
                 <ResourceDictionary x:Key="Light">
-                    <SolidColorBrush x:Key="DiskBarUsedBrush" Color="{ThemeResource SystemAccentColorDark3}" />
-                    <SolidColorBrush x:Key="DiskBarDevBrush" Color="{ThemeResource SystemAccentColor}" />
-                    <LinearGradientBrush x:Key="DiskBarFreeBrush" EndPoint="6,6" MappingMode="Absolute" SpreadMethod="Repeat" StartPoint="0,0">
-                        <GradientStop Offset="0.0" Color="#40FFFFFF" />
-                        <GradientStop Offset="0.2" Color="#40FFFFFF" />
-                        <GradientStop Offset="0.2" Color="{ThemeResource SystemAccentColorDark1}" />
-                        <GradientStop Offset="1.0" Color="{ThemeResource SystemAccentColorDark1}" />
-                    </LinearGradientBrush>
+                    <StaticResource x:Key="DiskBarUsedBrush" ResourceKey="SmCategory0Brush" />
+                    <StaticResource x:Key="DiskBarDevBrush" ResourceKey="SmCategory2Brush" />
+                    <SolidColorBrush x:Key="DiskBarFreeBrush" Color="#C9D2E2" />
                     <SolidColorBrush x:Key="DiskBarSeamBrush" Color="#59FFFFFF" />
                     <SolidColorBrush x:Key="DiskBarFreeBorderBrush" Color="Transparent" />
                     <Thickness x:Key="DiskBarFreeBorderThickness">0</Thickness>
                 </ResourceDictionary>
                 <ResourceDictionary x:Key="Dark">
-                    <SolidColorBrush x:Key="DiskBarUsedBrush" Color="{ThemeResource SystemAccentColorLight3}" />
-                    <SolidColorBrush x:Key="DiskBarDevBrush" Color="{ThemeResource SystemAccentColorLight2}" />
-                    <LinearGradientBrush x:Key="DiskBarFreeBrush" EndPoint="6,6" MappingMode="Absolute" SpreadMethod="Repeat" StartPoint="0,0">
-                        <GradientStop Offset="0.0" Color="#59000000" />
-                        <GradientStop Offset="0.2" Color="#59000000" />
-                        <GradientStop Offset="0.2" Color="{ThemeResource SystemAccentColorLight1}" />
-                        <GradientStop Offset="1.0" Color="{ThemeResource SystemAccentColorLight1}" />
-                    </LinearGradientBrush>
+                    <StaticResource x:Key="DiskBarUsedBrush" ResourceKey="SmCategory0Brush" />
+                    <StaticResource x:Key="DiskBarDevBrush" ResourceKey="SmCategory2Brush" />
+                    <SolidColorBrush x:Key="DiskBarFreeBrush" Color="#39415A" />
                     <SolidColorBrush x:Key="DiskBarSeamBrush" Color="#59000000" />
                     <SolidColorBrush x:Key="DiskBarFreeBorderBrush" Color="Transparent" />
                     <Thickness x:Key="DiskBarFreeBorderThickness">0</Thickness>

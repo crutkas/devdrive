@@ -229,7 +229,7 @@ winapp ui screenshot -a $AppPid -o "screenshots\01b-reclaim.png" 2>$null | Out-N
 # ─────────────────────────────────────────────────────────────────────────────
 Test-UI "Navigate to Package caches"         { Goto "NavPackageCaches" "PackageCachesScrollViewer" }
 # The Detected tab is where the room opens. (This PC: NuGet/pip/Cargo/vcpkg on C:, npm already on G:;
-# uv/Poetry/Gradle/... are undetected and live on the other tab.)
+# Poetry/Gradle/Bun/... are undetected and live on the other tab.)
 Test-UI "Caches: tab strip present"          { winapp ui wait-for "CacheTab_Detected" -a $AppPid -t 3000 }
 Test-UI "Caches: Needs-action row present (Cargo)" { winapp ui wait-for "MoveCache_Cargo" -a $AppPid -t 4000 }
 # npm's representative is the CARD, not a button: "Move back" is gated on CanMoveBack, which only
@@ -237,16 +237,32 @@ Test-UI "Caches: Needs-action row present (Cargo)" { winapp ui wait-for "MoveCac
 # the Dev Drive at launch renders the "Already on Dev Drive" checkmark instead, so MoveBack_npm can
 # never exist on a fresh app. The card's name ("npm, On G:") proves the grouping more directly anyway.
 Test-UI "Caches: On-Dev-Drive row present (npm)"   { winapp ui wait-for "PackageCacheCard_npm" -a $AppPid -t 4000 }
-# Undetected tools are on their own tab now, so reaching uv means switching first. That makes this a
-# stronger assertion than it used to be: it proves the tab actually filters, not just that uv exists.
+# Undetected tools are on their own tab now, so reaching one means switching first. That makes this a
+# stronger assertion than it used to be: it proves the tab actually filters, not just that a row exists.
 # `invoke` rather than `click` — click simulates a mouse and silently no-ops on a locked workstation.
+#
+# The row is DISCOVERED, not named. This used to wait for MapPathInput_uv, and it went red the day uv
+# was installed on this workstation — the product was fine, the tool had simply moved to the other tab.
+# Which ecosystems are undetected is a property of the machine, so pinning one turns "the developer
+# installed something" into a test failure. Any map-path row proves the tab rendered; the next test
+# proves it filtered.
 Test-UI "Caches: Not-installed tab switches" {
     winapp ui invoke "CacheTab_NotInstalled" -a $AppPid
-    winapp ui wait-for "MapPathInput_uv" -a $AppPid -t 4000
+    $deadline = (Get-Date).AddMilliseconds(4000)
+    $seen = $false
+    while (-not $seen -and (Get-Date) -lt $deadline) {
+        $tree = winapp ui inspect -a $AppPid --interactive 2>$null | Out-String
+        if ($tree -match 'MapPathInput_') { $seen = $true } else { Start-Sleep -Milliseconds 200 }
+    }
+    if (-not $seen) { throw "No MapPathInput_* row appeared on the Not installed tab" }
 }
 # ...and Cargo must be gone from that tab, which is the half the presence check cannot prove.
+# --interactive, NOT --json: at the root, --json reports slugified selectors (txt-mappathinput-9f2c),
+# never the raw AutomationId, so a --json grep for an AutomationId matches nothing whether the row is
+# on screen or not. This assertion used --json and was therefore vacuous — it could not fail.
 Test-UI "Caches: Not-installed tab excludes detected rows" {
-    $found = winapp ui inspect -a $AppPid --json 2>$null | Out-String
+    $found = winapp ui inspect -a $AppPid --interactive 2>$null | Out-String
+    if ($found -notmatch 'MapPathInput_') { throw "Not installed tab is not rendered; the exclusion check would be vacuous" }
     if ($found -match 'MoveCache_Cargo') { throw "Cargo is still visible on the Not installed tab" }
 }
 Test-UI "Caches: back to Detected" {

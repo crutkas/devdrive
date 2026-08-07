@@ -24,6 +24,7 @@ namespace DevDriveManager.Controls;
 public sealed partial class CapacityBar : Control
 {
     private Grid? _root;
+    private Border? _track;
 
     public CapacityBar()
     {
@@ -35,6 +36,11 @@ public sealed partial class CapacityBar : Control
         // light/dark or high-contrast switch -- and high contrast is precisely the case where a
         // stale palette stops being cosmetic.
         ActualThemeChanged += (_, _) => Rebuild();
+
+        // The radius can only be resolved once the bar has been measured, and it has to be redone
+        // whenever either the request or the size changes.
+        SizeChanged += (_, _) => ApplyCornerRadius();
+        RegisterPropertyChangedCallback(CornerRadiusProperty, (_, _) => ApplyCornerRadius());
     }
 
     /// <summary>The bands to draw.</summary>
@@ -77,7 +83,50 @@ public sealed partial class CapacityBar : Control
     {
         base.OnApplyTemplate();
         _root = GetTemplateChild("PART_Root") as Grid;
+        _track = GetTemplateChild("PART_Track") as Border;
+        ApplyCornerRadius();
         Rebuild();
+    }
+
+    /// <summary>
+    /// Rounds the ends by as much as the bar's own height allows, and no more.
+    /// </summary>
+    /// <remarks>
+    /// A pill's radius is <i>half its height</i> — a relationship, not a number — so one constant
+    /// cannot serve bars that are 5, 8, 9 and 12 px tall. <c>SmPillCornerRadius</c> is 10, which is
+    /// exactly right for the 20 px status pills it was written for and four times too large for a
+    /// 5 px strip.
+    /// <para>
+    /// An impossible radius is not refused. The corner is fitted to the height while staying as wide
+    /// as it was asked to be, so the cap is drawn as a flattened ellipse and both ends of the bar
+    /// read as stretched — which is precisely what they did at 5, 8 and 9 px, while the one bar that
+    /// asked for a radius it could afford (12 px tall, radius 3) looked right.
+    /// </para>
+    /// <para>
+    /// Clamping here rather than at each call site keeps the token meaning "as round as this bar can
+    /// be" at any height, and means a bar added later cannot bring the defect back by forgetting to
+    /// override it.
+    /// </para>
+    /// </remarks>
+    private void ApplyCornerRadius()
+    {
+        if (_track is null)
+        {
+            return;
+        }
+
+        // Before the first layout pass there is no size to clamp against, and SizeChanged will call
+        // back the moment there is.
+        double width = ActualWidth > 0 ? ActualWidth : double.MaxValue;
+        double height = ActualHeight > 0 ? ActualHeight : double.MaxValue;
+        double limit = Math.Min(width, height) / 2;
+
+        CornerRadius asked = CornerRadius;
+        _track.CornerRadius = new CornerRadius(
+            Math.Min(asked.TopLeft, limit),
+            Math.Min(asked.TopRight, limit),
+            Math.Min(asked.BottomRight, limit),
+            Math.Min(asked.BottomLeft, limit));
     }
 
     private static void OnCapacityChanged(DependencyObject d, DependencyPropertyChangedEventArgs e) =>
