@@ -54,6 +54,9 @@ BundleArtifacts/
 *.appxupload
 *.msix
 *.msixbundle
+
+# Staging folder produced when running the packaged app from a build output
+AppX/
 *.cer
 *.pfx
 Package.StoreAssociation.xml

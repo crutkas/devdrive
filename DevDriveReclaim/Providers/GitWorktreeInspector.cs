@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text;
 
 namespace DevDriveReclaim.Providers;
 
@@ -106,6 +107,26 @@ public sealed class GitWorktreeInspector : IWorktreeInspector
     }
 
     /// <summary>Runs git and returns stdout, or null when git failed, was missing, or timed out.</summary>
+    /// <remarks>
+    /// <para>
+    /// The reads are asynchronous and the wait is bounded, and both of those are load-bearing.
+    /// Calling <c>StandardOutput.ReadToEnd()</c> before <c>WaitForExit(timeout)</c> — the obvious
+    /// way to write this — deadlocks twice over. <c>ReadToEnd</c> blocks until git closes stdout,
+    /// so a git that hangs (an index lock, a credential prompt, a dead network mount) never
+    /// returns and the timeout below it is unreachable dead code. And with stderr redirected but
+    /// never drained, a git chatty enough to fill the ~4 KB pipe buffer blocks writing to it,
+    /// which means it never exits, which means stdout never reaches EOF either.
+    /// </para>
+    /// <para>
+    /// <c>BeginOutputReadLine</c>/<c>BeginErrorReadLine</c> drain both pipes on the thread pool, so
+    /// <c>WaitForExit</c> is reached immediately and its timeout is real. Stderr is discarded, but
+    /// it has to be <i>read</i> to be discarded safely.
+    /// </para>
+    /// <para>
+    /// This runs once per worktree — 41 times per scan on the machine this was written against —
+    /// so a single hang stalls the whole Reclaim scan indefinitely.
+    /// </para>
+    /// </remarks>
     private static string? Run(string workingDirectory, string arguments, CancellationToken cancellationToken)
     {
         try
@@ -119,29 +140,60 @@ public sealed class GitWorktreeInspector : IWorktreeInspector
                 CreateNoWindow = true,
             };
 
+            // Never let git stop to ask a human something. A credential or passphrase prompt on a
+            // background scan thread is invisible and waits forever, which is the exact hang the
+            // timeout exists to bound — better to fail fast and grade the worktree Careful.
+            psi.Environment["GIT_TERMINAL_PROMPT"] = "0";
+            psi.Environment["GIT_OPTIONAL_LOCKS"] = "0";
+            psi.Environment["GCM_INTERACTIVE"] = "never";
+
             using Process? process = Process.Start(psi);
             if (process is null)
             {
                 return null;
             }
 
-            string output = process.StandardOutput.ReadToEnd();
-            if (!process.WaitForExit((int)Timeout.TotalMilliseconds))
+            var output = new StringBuilder();
+
+            // Append under a lock: OutputDataReceived is raised on thread-pool threads and there is
+            // no ordering guarantee that one callback completes before the next begins.
+            process.OutputDataReceived += (_, e) =>
             {
-                try
+                if (e.Data is null)
                 {
-                    process.Kill(entireProcessTree: true);
-                }
-                catch (InvalidOperationException)
-                {
-                    // Already exited between the timeout and the kill — nothing to do.
+                    return;
                 }
 
+                lock (output)
+                {
+                    output.Append(e.Data).Append('\n');
+                }
+            };
+
+            // Read and drop. Draining is not optional even when the content is unwanted: an unread
+            // stderr pipe is a deadlock, not merely wasted output.
+            process.ErrorDataReceived += static (_, _) => { };
+
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+
+            if (!WaitForExit(process, cancellationToken))
+            {
+                Kill(process);
                 return null;
             }
 
+            // The process has exited; this second wait has no timeout because it is only flushing
+            // the asynchronous read callbacks, which are guaranteed to complete once the pipes hit
+            // EOF. Without it the last lines of output can still be in flight.
+            process.WaitForExit();
+
             cancellationToken.ThrowIfCancellationRequested();
-            return process.ExitCode == 0 ? output : null;
+
+            lock (output)
+            {
+                return process.ExitCode == 0 ? output.ToString() : null;
+            }
         }
         catch (OperationCanceledException)
         {
@@ -150,6 +202,52 @@ public sealed class GitWorktreeInspector : IWorktreeInspector
         catch
         {
             return null;
+        }
+    }
+
+    /// <summary>
+    /// Waits for git, giving up at <see cref="Timeout"/> or as soon as the scan is cancelled.
+    /// </summary>
+    /// <remarks>
+    /// Polling in short slices rather than one long <c>WaitForExit(10000)</c> so that cancelling a
+    /// scan does not have to wait out a hung git first. A scan cancelled by the user should stop
+    /// now, not in ten seconds' time, and there are as many of these calls as there are worktrees.
+    /// </remarks>
+    private static bool WaitForExit(Process process, CancellationToken cancellationToken)
+    {
+        long deadline = Environment.TickCount64 + (long)Timeout.TotalMilliseconds;
+
+        while (true)
+        {
+            if (cancellationToken.IsCancellationRequested)
+            {
+                Kill(process);
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+
+            long remaining = deadline - Environment.TickCount64;
+            if (remaining <= 0)
+            {
+                return false;
+            }
+
+            if (process.WaitForExit((int)Math.Min(remaining, 100)))
+            {
+                return true;
+            }
+        }
+    }
+
+    private static void Kill(Process process)
+    {
+        try
+        {
+            process.Kill(entireProcessTree: true);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or NotSupportedException)
+        {
+            // Already exited between the check and the kill, or the platform will not walk the
+            // tree. Either way there is nothing left to do and nothing worth reporting.
         }
     }
 }
