@@ -259,6 +259,14 @@ Test-UI "Reclaim: does not scan on entry" {
     $s = Get-Value "ReclaimStatus"
     if ($s -notmatch 'Nothing scanned yet') { throw "expected an unscanned resting state, got '$s'" }
 }
+# Both stop buttons are bound to Visibility, and a stop button offered when nothing is running is a
+# lie about what the app is doing. Collapsed controls have no UIA peer at all (verified), so absence
+# here is a real assertion: binding either one to something always-true turns this red.
+Test-UI "Reclaim: stop is offered only while something is running" {
+    if (-not (Test-Present "ReclaimReviewButton")) { throw "the reclaim button is missing entirely" }
+    if (Test-Present "ReclaimStopButton")   { throw "Stop is offered while no reclaim is running" }
+    if (Test-Present "ReclaimCancelButton") { throw "Cancel is offered while no scan is running" }
+}
 winapp ui screenshot -a $AppPid -o "screenshots\01b-reclaim.png" 2>$null | Out-Null
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -175,8 +175,8 @@ public sealed class ReclaimExecutorTests
     }
 
     /// <summary>
-    /// Cancellation must leave the disk in a state the user can reason about: the items already
-    /// removed are gone, and every item not reached is still there and says so.
+    /// Cancelling before anything runs must leave the disk untouched, and every item must say it
+    /// was not reached rather than silently vanishing from the report.
     /// </summary>
     [TestMethod]
     public async Task CancellingBeforeTheRunLeavesEverythingInPlace()
@@ -193,6 +193,52 @@ public sealed class ReclaimExecutorTests
         Assert.IsTrue(Directory.Exists(folder));
         Assert.IsTrue(outcome.Cancelled);
         Assert.AreEqual(ReclaimItemStatus.Cancelled, outcome.Items.Single().Status);
+    }
+
+    /// <summary>Reports on the calling thread, so a cancel raised from it lands before the run advances.</summary>
+    private sealed class ImmediateProgress<T>(Action<T> onReport) : IProgress<T>
+    {
+        public void Report(T value) => onReport(value);
+    }
+
+    /// <summary>
+    /// The state the Stop button actually creates, which cancelling before the run does not reach:
+    /// some items already gone, the rest untouched. The disk and the report have to agree about
+    /// which is which, because the ViewModel deletes exactly the rows the report calls removed —
+    /// so an item wrongly listed as removed disappears from the table while still occupying the
+    /// space it claimed to give back.
+    /// </summary>
+    [TestMethod]
+    public async Task StoppingPartwayKeepsWhatWentAndLeavesTheRestOnDisk()
+    {
+        using var fixture = new ReclaimFixture();
+        string first = fixture.Dir("deleted-before-the-stop");
+        string second = fixture.Dir("unreached");
+        fixture.File(@"deleted-before-the-stop\a.bin", 4096);
+        fixture.File(@"unreached\b.bin", 4096);
+
+        using var cts = new CancellationTokenSource();
+
+        // Progress is reported after each removal, so cancelling from the first report stops the
+        // run between the two items rather than at a moment the test has to guess at.
+        var stopAfterTheFirst = new ImmediateProgress<ReclaimExecutionProgress>(_ => cts.Cancel());
+
+        ReclaimOutcome outcome = await new ReclaimExecutor().ExecuteAsync(
+            [Candidate(first, size: 4096), Candidate(second, size: 4096)],
+            stopAfterTheFirst,
+            cts.Token);
+
+        Assert.IsTrue(outcome.Cancelled);
+        Assert.AreEqual(1, outcome.RemovedCount);
+        Assert.AreEqual(4096, outcome.BytesFreed, "Only what really went may be counted as freed.");
+
+        // Deepest-first orders by path length, so the longer name is the one that went.
+        Assert.IsFalse(Directory.Exists(first));
+        Assert.IsTrue(Directory.Exists(second), "The unreached item must still be on disk.");
+
+        ReclaimItemOutcome stopped = outcome.Items.Single(i => i.Candidate.Path == second);
+        Assert.AreEqual(ReclaimItemStatus.Cancelled, stopped.Status);
+        Assert.IsFalse(stopped.Removed, "A folder still on disk must never be reported as removed.");
     }
 
     [TestMethod]

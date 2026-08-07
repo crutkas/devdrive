@@ -528,14 +528,30 @@
                                         TextTrimming="CharacterEllipsis" />
                                 </StackPanel>
 
-                                <Button
+                                <StackPanel
                                     Grid.Column="2"
                                     VerticalAlignment="Center"
-                                    AutomationProperties.AutomationId="ReclaimReviewButton"
-                                    Command="{x:Bind ViewModel.ReclaimCommand}"
-                                    Content="{x:Bind ViewModel.ReclaimButtonText, Mode=OneWay}"
-                                    IsEnabled="{x:Bind ViewModel.CanReclaim, Mode=OneWay}"
-                                    Style="{StaticResource SmCompactButtonStyle}" />
+                                    Orientation="Horizontal"
+                                    Spacing="8">
+                                    <!--
+                                        "Stop", not "Cancel". Cancel invites the reading that the run
+                                        is undone; it is not. The executor keeps what it has already
+                                        removed and marks the rest as not reached, so the honest verb
+                                        is the one that only promises to stop making progress.
+                                    -->
+                                    <Button
+                                        AutomationProperties.AutomationId="ReclaimStopButton"
+                                        Command="{x:Bind ViewModel.CancelReclaimCommand}"
+                                        Content="Stop"
+                                        Style="{StaticResource SmCompactButtonStyle}"
+                                        Visibility="{x:Bind ViewModel.IsReclaiming, Mode=OneWay}" />
+                                    <Button
+                                        AutomationProperties.AutomationId="ReclaimReviewButton"
+                                        Command="{x:Bind ViewModel.ReclaimCommand}"
+                                        Content="{x:Bind ViewModel.ReclaimButtonText, Mode=OneWay}"
+                                        IsEnabled="{x:Bind ViewModel.CanReclaim, Mode=OneWay}"
+                                        Style="{StaticResource SmCompactButtonStyle}" />
+                                </StackPanel>
                             </Grid>
                         </Border>
                     </Grid>
