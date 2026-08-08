@@ -27,6 +27,18 @@ public static class ShellFileOperationError
     /// </summary>
     public static string? Describe(int code) => code switch
     {
+        // Not in the documented DE_ range. Measured, because the code alone is misleading: as a
+        // Win32 code 0x20 is ERROR_SHARING_VIOLATION, which sends the reader hunting for an open
+        // file that does not exist. A tree whose every file opens cleanly with FileShare.None still
+        // returns 0x20 when a single process has its CURRENT DIRECTORY inside it -- a working
+        // directory is not a handle on any file, so nothing shows up in a lock scan.
+        //
+        // This is the common case for the folders this app is pointed at. On the machine this was
+        // found on, 19 processes were sitting in worktrees at once: every agent session, shell and
+        // editor holds the folder it was opened in.
+        0x20 => "a program has this folder open as its working directory — a terminal, editor or "
+              + "agent session is probably sitting in it",
+
         0x71 => "the source and destination are the same file",
         0x74 => "it is the root of a drive, which the shell will not delete",
         0x75 => "the operation was cancelled",

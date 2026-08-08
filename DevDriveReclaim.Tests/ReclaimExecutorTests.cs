@@ -121,6 +121,66 @@ public sealed class ReclaimExecutorTests
     }
 
     /// <summary>
+    /// A folder that is some other process's working directory is the most common reason a reclaim
+    /// fails on a developer machine, and it is the one both delete paths report worst.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Nothing here is locked in the sense a lock scan would find. Every file inside opens cleanly
+    /// with <c>FileShare.None</c>; the obstacle is that a process is <i>sitting</i> in the
+    /// directory. A working directory is not a handle on any file, so it never shows up in a lock
+    /// scan &mdash; which is why both the shell's 0x20 ("sharing violation") and .NET's "being used
+    /// by another process" send the reader hunting for an open file that does not exist.
+    /// </para>
+    /// <para>
+    /// Run against both paths because they fail through completely different mechanisms &mdash; the
+    /// shell returns a code, .NET throws &mdash; and a fix to one says nothing about the other.
+    /// Neither run puts anything in the developer's Recycle Bin, because neither delete succeeds.
+    /// </para>
+    /// </remarks>
+    [TestMethod]
+    [DataRow(true, DisplayName = "recycle path")]
+    [DataRow(false, DisplayName = "permanent path")]
+    public async Task AFolderSomethingIsSittingInFailsAndSaysSo(bool supportsRecycleBin)
+    {
+        using var fixture = new ReclaimFixture();
+        string occupied = fixture.Dir("occupied");
+        fixture.File(@"occupied\readme.txt", 32);
+
+        using var sitting = System.Diagnostics.Process.Start(
+            new System.Diagnostics.ProcessStartInfo("cmd.exe", "/c pause")
+            {
+                WorkingDirectory = occupied,
+                UseShellExecute = false,
+                RedirectStandardInput = true,
+                RedirectStandardOutput = true,
+            })!;
+
+        try
+        {
+            // The working directory is only taken once the process is actually up.
+            await Task.Delay(600);
+
+            ReclaimOutcome outcome = await Execute(
+                Candidate(occupied, size: 32, supportsRecycleBin: supportsRecycleBin));
+
+            Assert.IsTrue(Directory.Exists(occupied), "the occupied folder was removed anyway");
+            Assert.AreEqual(1, outcome.FailedCount);
+            Assert.AreEqual(0, outcome.BytesFreed);
+
+            string message = outcome.Failures.Single().Message;
+            StringAssert.Contains(
+                message,
+                "working directory",
+                $"the reader was told '{message}', which does not name the obstacle");
+        }
+        finally
+        {
+            try { sitting.Kill(entireProcessTree: true); sitting.WaitForExit(5000); } catch { }
+        }
+    }
+
+    /// <summary>
     /// The guard's refusals have to reach the user through the executor, or the safest code in the
     /// app is a silent no-op that reports success.
     /// </summary>

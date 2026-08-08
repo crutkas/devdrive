@@ -44,6 +44,28 @@ public sealed class ShellFileOperationErrorTests
     }
 
     [TestMethod]
+    public void TheSharingViolationCodeNamesTheWorkingDirectory()
+    {
+        // 0x20 is not in the documented DE_ range, and its Win32 reading (ERROR_SHARING_VIOLATION)
+        // actively misleads. Measured with a probe calling SHFileOperation under three conditions:
+        //
+        //   plain temp tree ............................ 0x0, deleted
+        //   one file held with FileShare.None .......... 0x7C
+        //   another process's current directory ........ 0x20
+        //
+        // A working directory is not a handle on any file, so a lock scan finds nothing. On the
+        // machine this was found on, a FileShare.None scan of all 33,697 files in the failing tree
+        // reported zero locked -- while 19 processes were sitting inside worktrees.
+        string? described = ShellFileOperationError.Describe(0x20);
+
+        Assert.IsNotNull(described, "0x20 is the most common reclaim failure and must be described");
+        StringAssert.Contains(described, "working directory", StringComparison.Ordinal);
+        Assert.IsFalse(
+            described.Contains("sharing violation", StringComparison.OrdinalIgnoreCase),
+            "the Win32 name for 0x20 sends the reader hunting for an open file that does not exist");
+    }
+
+    [TestMethod]
     public void AnUnknownCodeIsNotGuessedAt()
     {
         // Inventing a description for a code we do not recognise is worse than admitting we do

@@ -193,7 +193,8 @@ public sealed class ReclaimExecutor : IReclaimExecutor
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            return new ReclaimItemOutcome(candidate, ReclaimItemStatus.Failed, 0, exception.Message);
+            return new ReclaimItemOutcome(
+                candidate, ReclaimItemStatus.Failed, 0, FileSystemRemovalError.Explain(exception));
         }
     }
 
