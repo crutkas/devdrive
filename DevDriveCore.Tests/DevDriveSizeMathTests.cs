@@ -169,4 +169,58 @@ public sealed class DevDriveSizeMathTests
             Assert.AreEqual(DevDriveSizeMath.ClampSizeBytes(actual, selectable), actual, 1d);
         }
     }
+
+    private const double Terabyte = 1024d * 1024d * 1024d * 1024d;
+
+    /// <summary>
+    /// The size bar turns its free segment amber at the same point Settings promises to warn, so
+    /// the warning arrives while the choice can still be changed rather than after the drive exists.
+    /// </summary>
+    [TestMethod]
+    public void CarvingTooMuchLeavesTheSourceLowOnSpace()
+    {
+        // 1 TB source, 900 GB free, taking 860 leaves 40 GB -- under 4% of capacity.
+        bool low = DevDriveSizeMath.LeavesSourceLowOnSpace(
+            totalBytes: Terabyte,
+            maximumSelectableBytes: 900d * DevDriveSizeMath.BytesPerGigabyte,
+            selectedBytes: 860d * DevDriveSizeMath.BytesPerGigabyte,
+            lowFreeFraction: 0.15d);
+
+        Assert.IsTrue(low);
+    }
+
+    [TestMethod]
+    public void AModestCarveLeavesTheSourceComfortable()
+    {
+        // The counter-test: if this also reported low, the amber would be permanent and therefore
+        // meaningless. 900 GB free less 100 leaves 800 GB, comfortably above 15% of a 1 TB volume.
+        bool low = DevDriveSizeMath.LeavesSourceLowOnSpace(
+            totalBytes: Terabyte,
+            maximumSelectableBytes: 900d * DevDriveSizeMath.BytesPerGigabyte,
+            selectedBytes: 100d * DevDriveSizeMath.BytesPerGigabyte,
+            lowFreeFraction: 0.15d);
+
+        Assert.IsFalse(low);
+    }
+
+    [TestMethod]
+    public void TheThresholdIsHonouredRatherThanHardCoded()
+    {
+        // Same carve, two thresholds. Settings advertises "Warns below N% free", so a bar that
+        // ignored N would quietly contradict the setting it claims to follow.
+        double total = Terabyte;
+        double max = 900d * DevDriveSizeMath.BytesPerGigabyte;
+        double selected = 700d * DevDriveSizeMath.BytesPerGigabyte; // leaves 200 GB, ~19.5%
+
+        Assert.IsFalse(DevDriveSizeMath.LeavesSourceLowOnSpace(total, max, selected, 0.15d));
+        Assert.IsTrue(DevDriveSizeMath.LeavesSourceLowOnSpace(total, max, selected, 0.25d));
+    }
+
+    [TestMethod]
+    public void ABarWithNothingLoadedIsNotCalledLow()
+    {
+        // Remaining is 0 before a source is chosen, which is arithmetically "low" and semantically
+        // nonsense -- it would open the page already showing a warning about a drive nobody picked.
+        Assert.IsFalse(DevDriveSizeMath.LeavesSourceLowOnSpace(0d, 0d, 0d, 0.15d));
+    }
 }

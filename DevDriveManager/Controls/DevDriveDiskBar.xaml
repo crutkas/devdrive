@@ -39,7 +39,8 @@
                 <ResourceDictionary x:Key="Light">
                     <StaticResource x:Key="DiskBarUsedBrush" ResourceKey="SmCategory0Brush" />
                     <StaticResource x:Key="DiskBarDevBrush" ResourceKey="SmCategory2Brush" />
-                    <SolidColorBrush x:Key="DiskBarFreeBrush" Color="#C9D2E2" />
+                    <StaticResource x:Key="DiskBarFreeBrush" ResourceKey="SmFreeTrackBrush" />
+                    <StaticResource x:Key="DiskBarFreeLowBrush" ResourceKey="SmCategory3Brush" />
                     <SolidColorBrush x:Key="DiskBarSeamBrush" Color="#59FFFFFF" />
                     <SolidColorBrush x:Key="DiskBarFreeBorderBrush" Color="Transparent" />
                     <Thickness x:Key="DiskBarFreeBorderThickness">0</Thickness>
@@ -47,7 +48,8 @@
                 <ResourceDictionary x:Key="Dark">
                     <StaticResource x:Key="DiskBarUsedBrush" ResourceKey="SmCategory0Brush" />
                     <StaticResource x:Key="DiskBarDevBrush" ResourceKey="SmCategory2Brush" />
-                    <SolidColorBrush x:Key="DiskBarFreeBrush" Color="#39415A" />
+                    <StaticResource x:Key="DiskBarFreeBrush" ResourceKey="SmFreeTrackBrush" />
+                    <StaticResource x:Key="DiskBarFreeLowBrush" ResourceKey="SmCategory3Brush" />
                     <SolidColorBrush x:Key="DiskBarSeamBrush" Color="#59000000" />
                     <SolidColorBrush x:Key="DiskBarFreeBorderBrush" Color="Transparent" />
                     <Thickness x:Key="DiskBarFreeBorderThickness">0</Thickness>
@@ -56,18 +58,65 @@
                     <StaticResource x:Key="DiskBarUsedBrush" ResourceKey="SystemColorWindowTextColorBrush" />
                     <StaticResource x:Key="DiskBarDevBrush" ResourceKey="SystemColorHighlightColorBrush" />
                     <StaticResource x:Key="DiskBarFreeBrush" ResourceKey="SystemColorWindowColorBrush" />
+                    <StaticResource x:Key="DiskBarFreeLowBrush" ResourceKey="SystemColorWindowColorBrush" />
                     <StaticResource x:Key="DiskBarSeamBrush" ResourceKey="SystemColorWindowTextColorBrush" />
                     <StaticResource x:Key="DiskBarFreeBorderBrush" ResourceKey="SystemColorWindowTextColorBrush" />
                     <Thickness x:Key="DiskBarFreeBorderThickness">2</Thickness>
                 </ResourceDictionary>
             </ResourceDictionary.ThemeDictionaries>
+
+            <!--
+                The free channel is swapped between two states in code, and a Brush cannot be handed
+                across that seam. Resources.TryGetValue returns the instance belonging to whichever
+                theme dictionary is live at the moment it is called, and assigning it to Background
+                sets a local value that outranks the style and never re-resolves — so the bar would
+                keep its dark ink after a switch to Light. This is the fifth site in this app to hit
+                that; the established answer is to hand over a Style instead.
+
+                A Style object is theme-independent, so a static lookup of it is safe, and its
+                ThemeResource setters re-resolve when the theme changes. Both styles live here, at
+                dictionary root, deliberately outside ThemeDictionaries.
+            -->
+            <Style x:Key="DiskBarFreeSegmentStyle" TargetType="Border">
+                <Setter Property="Background" Value="{ThemeResource DiskBarFreeBrush}" />
+                <Setter Property="BorderBrush" Value="{ThemeResource DiskBarFreeBorderBrush}" />
+                <Setter Property="BorderThickness" Value="{ThemeResource DiskBarFreeBorderThickness}" />
+            </Style>
+
+            <Style
+                x:Key="DiskBarFreeSegmentLowStyle"
+                BasedOn="{StaticResource DiskBarFreeSegmentStyle}"
+                TargetType="Border">
+                <Setter Property="Background" Value="{ThemeResource DiskBarFreeLowBrush}" />
+            </Style>
+
+            <Style x:Key="DiskBarFreeSwatchStyle" TargetType="Border">
+                <Setter Property="Width" Value="10" />
+                <Setter Property="Height" Value="10" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+                <Setter Property="CornerRadius" Value="2" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="BorderBrush" Value="{ThemeResource DiskBarSeamBrush}" />
+                <Setter Property="Background" Value="{ThemeResource DiskBarFreeBrush}" />
+            </Style>
+
+            <Style
+                x:Key="DiskBarFreeSwatchLowStyle"
+                BasedOn="{StaticResource DiskBarFreeSwatchStyle}"
+                TargetType="Border">
+                <Setter Property="Background" Value="{ThemeResource DiskBarFreeLowBrush}" />
+            </Style>
         </ResourceDictionary>
     </UserControl.Resources>
 
     <StackPanel Spacing="8">
 
-        <!--  Read-only visualization: used + protected | shrinkable free (hatched) | carved Dev Drive.
-              Non-interactive on purpose — the page's Slider + NumberBox change the size.  -->
+        <!--  Read-only visualization: used + protected | free | carved Dev Drive.
+              Non-interactive on purpose — the page's Slider + NumberBox change the size.
+
+              The Dev Drive is drawn as its own rounded chunk with a gap before it, not as a third
+              flush band. It is about to become a separate volume, and a bar that renders it flush
+              with C: says the opposite — that it is one more region of the same disk.  -->
         <Border
             Height="32"
             Background="{ThemeResource ControlFillColorDefaultBrush}"
@@ -86,15 +135,19 @@
                     BorderBrush="{ThemeResource DiskBarSeamBrush}"
                     BorderThickness="0,0,1,0" />
                 <Border
+                    x:Name="FreeSegment"
                     Grid.Column="1"
-                    Background="{ThemeResource DiskBarFreeBrush}"
-                    BorderBrush="{ThemeResource DiskBarFreeBorderBrush}"
-                    BorderThickness="{ThemeResource DiskBarFreeBorderThickness}" />
+                    Style="{StaticResource DiskBarFreeSegmentStyle}" />
+                <!--  Inset and fully rounded so it reads as a separate drive sitting in the space
+                      carved for it. MinWidth keeps a tiny selection visible as a sliver rather than
+                      collapsing to nothing at the low end of the slider.  -->
                 <Border
+                    x:Name="DevSegment"
                     Grid.Column="2"
+                    MinWidth="6"
+                    Margin="3"
                     Background="{ThemeResource DiskBarDevBrush}"
-                    BorderBrush="{ThemeResource DiskBarSeamBrush}"
-                    BorderThickness="1,0,0,0" />
+                    CornerRadius="{StaticResource ControlCornerRadius}" />
             </Grid>
         </Border>
 
@@ -136,14 +189,7 @@
                 Grid.Column="1"
                 Orientation="Horizontal"
                 Spacing="6">
-                <Border
-                    Width="10"
-                    Height="10"
-                    VerticalAlignment="Center"
-                    Background="{ThemeResource DiskBarFreeBrush}"
-                    BorderBrush="{ThemeResource DiskBarSeamBrush}"
-                    BorderThickness="1"
-                    CornerRadius="2" />
+                <Border x:Name="FreeSwatch" Style="{StaticResource DiskBarFreeSwatchStyle}" />
                 <TextBlock
                     Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                     Style="{StaticResource CaptionTextBlockStyle}"

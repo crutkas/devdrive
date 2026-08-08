@@ -137,6 +137,16 @@ public partial class CreateDevDriveViewModel : ObservableObject
     [ObservableProperty]
     public partial double MaximumSelectableBytes { get; set; }
 
+    /// <summary>
+    /// The share of the source's capacity below which its remaining free space is shown as low.
+    /// </summary>
+    /// <remarks>
+    /// Read from preferences rather than hard-coded so the size bar warns at the same point
+    /// Settings says it will ("Warns below N% free"). A bar that turned amber at a different
+    /// threshold than the one advertised would quietly contradict the setting.
+    /// </remarks>
+    public double LowFreeFraction => Services.PreferencesService.Current.LowFreeFraction;
+
     [ObservableProperty]
     public partial string UsedBarLabel { get; set; } = "Used + protected";
 

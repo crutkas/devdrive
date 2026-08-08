@@ -22,6 +22,19 @@
             <SolidColorBrush x:Key="SmStrokeBrush" Color="#2C3244" />
             <SolidColorBrush x:Key="SmDividerBrush" Color="#262C3B" />
 
+            <!--
+                Free space on a capacity bar. Deliberately NOT SmDividerBrush, which is what this
+                used to be: a divider is designed to be barely there, and at #262C3B on the card
+                header it measured 1.12:1, against the 3:1 WCAG asks for a graphical object. Free
+                space was effectively invisible, which is a problem for the one quantity the whole
+                app exists to increase.
+
+                #657090 measures 3.19:1 on the card header and 3.47:1 on the card, while staying
+                2.3:1 or more below the saturated bands so it still reads as an empty channel rather
+                than another segment.
+            -->
+            <SolidColorBrush x:Key="SmFreeTrackBrush" Color="#657090" />
+
             <SolidColorBrush x:Key="SmTextBrush" Color="#FFFFFF" />
             <SolidColorBrush x:Key="SmMutedBrush" Color="#C8FFFFFF" />
             <SolidColorBrush x:Key="SmDimBrush" Color="#8BFFFFFF" />
@@ -72,6 +85,10 @@
             <SolidColorBrush x:Key="SmStrokeBrush" Color="#D9DEE9" />
             <SolidColorBrush x:Key="SmDividerBrush" Color="#E6EAF2" />
 
+            <!--  3.38:1 on the white card and 3.04:1 on the canvas. Same reasoning as dark: free
+                  space is a channel that has to be seen, not a divider.  -->
+            <SolidColorBrush x:Key="SmFreeTrackBrush" Color="#818CA4" />
+
             <SolidColorBrush x:Key="SmTextBrush" Color="#141821" />
             <SolidColorBrush x:Key="SmMutedBrush" Color="#CC141821" />
             <SolidColorBrush x:Key="SmDimBrush" Color="#94141821" />
@@ -117,6 +134,11 @@
             <SolidColorBrush x:Key="SmCardHeaderBrush" Color="{ThemeResource SystemColorWindowColor}" />
             <SolidColorBrush x:Key="SmStrokeBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
             <SolidColorBrush x:Key="SmDividerBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
+
+            <!--  GrayText, not WindowText: the free channel has to be visible against the window
+                  while staying distinguishable from the bands beside it, which are WindowText and
+                  Highlight. A free channel painted WindowText would merge with the used band.  -->
+            <SolidColorBrush x:Key="SmFreeTrackBrush" Color="{ThemeResource SystemColorGrayTextColor}" />
 
             <SolidColorBrush x:Key="SmTextBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
             <SolidColorBrush x:Key="SmMutedBrush" Color="{ThemeResource SystemColorWindowTextColor}" />

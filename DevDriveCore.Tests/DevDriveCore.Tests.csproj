@@ -99,6 +99,16 @@
     <Compile Include="..\DevDriveManager\ViewModels\EcosystemsViewModel.cs" Link="EcosystemViewModels\EcosystemsViewModel.cs" />
   </ItemGroup>
 
+  <!--
+    The theme dictionary is copied in, not linked as source, because the thing under test is the
+    shipped XAML itself: the free-space channel was once painted with a divider brush and measured
+    1.12:1 against its own card. A colour that cannot be seen is not catchable by any test that
+    reads C#, so the test reads the file the app actually loads.
+  -->
+  <ItemGroup>
+    <None Include="..\DevDriveManager\Themes\StorageManagerTheme.xaml" Link="Themes\StorageManagerTheme.xaml" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
   <ItemGroup>
     <Using Include="Microsoft.VisualStudio.TestTools.UnitTesting" />
   </ItemGroup>

@@ -133,5 +133,26 @@ public static class DevDriveSizeMath
     public static double RemainingFraction(double totalBytes, double maximumSelectableBytes, double selectedBytes) =>
         totalBytes <= 0d ? 0d : Clamp01(RemainingBytes(maximumSelectableBytes, selectedBytes) / totalBytes);
 
+    /// <summary>
+    /// Whether carving this Dev Drive would leave the source below the user's low-free threshold.
+    /// </summary>
+    /// <remarks>
+    /// Drives the colour of the free segment on the size bar, so the moment a drag crosses into
+    /// territory the app would otherwise warn about afterwards, the bar says so while the choice is
+    /// still being made rather than once it has been committed.
+    /// <para>
+    /// A bar with nothing loaded reports <c>0</c> remaining, which is not the same as a source that
+    /// is genuinely full — so an unloaded bar is never called low.
+    /// </para>
+    /// </remarks>
+    /// <param name="totalBytes">Capacity of the source volume.</param>
+    /// <param name="maximumSelectableBytes">Largest Dev Drive the source can give up.</param>
+    /// <param name="selectedBytes">The size currently chosen.</param>
+    /// <param name="lowFreeFraction">The share of capacity below which free space counts as low.</param>
+    public static bool LeavesSourceLowOnSpace(
+        double totalBytes, double maximumSelectableBytes, double selectedBytes, double lowFreeFraction) =>
+        totalBytes > 0d
+        && RemainingFraction(totalBytes, maximumSelectableBytes, selectedBytes) < lowFreeFraction;
+
     private static double Clamp01(double value) => Math.Clamp(value, 0d, 1d);
 }

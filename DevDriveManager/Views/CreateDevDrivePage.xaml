@@ -576,6 +576,7 @@
                             <controls:DevDriveDiskBar
                                 AutomationProperties.AutomationId="DevDriveDiskBar"
                                 DevDriveLabel="{x:Bind ViewModel.DevBarLabel, Mode=OneWay}"
+                                LowFreeFraction="{x:Bind ViewModel.LowFreeFraction}"
                                 MaximumSelectableBytes="{x:Bind ViewModel.MaximumSelectableBytes, Mode=OneWay}"
                                 RemainingLabel="{x:Bind ViewModel.RemainingBarLabel, Mode=OneWay}"
                                 SelectedBytes="{x:Bind ViewModel.SelectedBytes, Mode=TwoWay}"

@@ -31,9 +31,14 @@
                     <!--  The track is the free space, so an empty volume reads as empty rather than
                           as a bar full of a "free" colour.
 
+                          Painted with SmFreeTrackBrush rather than SmDividerBrush. A divider is
+                          meant to be barely there; free space is not. As a divider this measured
+                          1.12:1 against the card header, so the one quantity the app exists to
+                          increase was the one thing on the bar nobody could see.
+
                           CornerRadius is applied from code rather than template-bound, because it has
                           to be clamped against the measured height before it can be honoured.  -->
-                    <Border x:Name="PART_Track" Background="{ThemeResource SmDividerBrush}">
+                    <Border x:Name="PART_Track" Background="{ThemeResource SmFreeTrackBrush}">
                         <Grid x:Name="PART_Root" />
                     </Border>
                 </ControlTemplate>

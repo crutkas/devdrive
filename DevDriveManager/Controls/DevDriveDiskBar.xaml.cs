@@ -91,6 +91,25 @@ public sealed partial class DevDriveDiskBar : UserControl
         set => SetValue(DevDriveLabelProperty, value);
     }
 
+    /// <summary>
+    /// Share of the source's capacity below which its remaining free space is shown as low.
+    /// </summary>
+    /// <remarks>
+    /// A property rather than a read of the preferences singleton, so the threshold the bar paints
+    /// against is the same one Settings advertises and the control stays testable without a store.
+    /// </remarks>
+    public static readonly DependencyProperty LowFreeFractionProperty = DependencyProperty.Register(
+        nameof(LowFreeFraction),
+        typeof(double),
+        typeof(DevDriveDiskBar),
+        new PropertyMetadata(AttentionSignalBuilder.LowFreeFraction, OnVisualChanged));
+
+    public double LowFreeFraction
+    {
+        get => (double)GetValue(LowFreeFractionProperty);
+        set => SetValue(LowFreeFractionProperty, value);
+    }
+
     private static void OnVisualChanged(DependencyObject d, DependencyPropertyChangedEventArgs e) =>
         ((DevDriveDiskBar)d).UpdateVisual();
 
@@ -119,7 +138,47 @@ public sealed partial class DevDriveDiskBar : UserControl
         RemainingColumn.Width = new GridLength(remainingFraction, GridUnitType.Star);
         DevColumn.Width = new GridLength(devFraction, GridUnitType.Star);
 
+        ApplyFreeStyle();
+
         AutomationProperties.SetName(this, $"Dev Drive size {ByteSizeFormatter.Format(ToBytes(SelectedBytes))}");
+    }
+
+    /// <summary>
+    /// Colours the free segment by how much of it is left.
+    /// </summary>
+    /// <remarks>
+    /// Amber is the app's "worth your attention" colour, and the size bar is the one place where
+    /// crossing the low-free line is still undoable. Saying it here, live as the slider moves,
+    /// beats saying it once the drive exists.
+    /// <para>
+    /// This bar has no reclaimable band, so amber is unambiguous on it. The shared
+    /// <c>CapacityBar</c> deliberately does <i>not</i> do this: there amber already means
+    /// "reclaimable", and an amber free channel beside an amber reclaimable band would read as one
+    /// band twice the size.
+    /// </para>
+    /// <para>
+    /// A <see cref="Style"/> is applied rather than a <see cref="Brush"/> assigned. A brush pulled
+    /// out of <c>Resources</c> belongs to whichever theme was live when it was read, and assigning
+    /// it sets a local value that outranks the style and never re-resolves — so the segment would
+    /// keep its dark fill after a switch to Light. A style is theme-independent and its setters
+    /// re-resolve, which is the pattern the rest of this app settled on for exactly this seam.
+    /// </para>
+    /// </remarks>
+    private void ApplyFreeStyle()
+    {
+        bool low = DevDriveSizeMath.LeavesSourceLowOnSpace(
+            TotalBytes, MaximumSelectableBytes, SelectedBytes, LowFreeFraction);
+
+        Apply(FreeSegment, low ? "DiskBarFreeSegmentLowStyle" : "DiskBarFreeSegmentStyle");
+        Apply(FreeSwatch, low ? "DiskBarFreeSwatchLowStyle" : "DiskBarFreeSwatchStyle");
+
+        void Apply(Border target, object key)
+        {
+            if (Resources.TryGetValue(key, out object? value) && value is Style style)
+            {
+                target.Style = style;
+            }
+        }
     }
 
     private static ulong ToBytes(double value) => value <= 0d ? 0UL : (ulong)Math.Round(value);
