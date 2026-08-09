@@ -25,10 +25,21 @@
       # indicator, and note its PID. This script exits with code 2 if the seam is absent.
       .\ui-tests.ps1 -AppPid <PID>
 
+      # ...and additionally run the Reclaim scan assertions, which are minutes of real disk I/O:
+      .\ui-tests.ps1 -AppPid <PID> -IncludeSlowScans
+
     Exit code 0 = all passed, 1 = one or more failures, 2 = safe mutation mode is absent.
     Results are also written to test-results.json next to this script.
 #>
-param([Parameter(Mandatory)][int]$AppPid)
+param(
+    [Parameter(Mandatory)][int]$AppPid,
+
+    # A real Reclaim scan walks every source tree on the machine and takes over a minute, so the
+    # assertions that need one are opt-in rather than paid for on every structural run. They are the
+    # only place the room's post-scan selection state can be observed at all: ReclaimViewModel cannot
+    # be link-compiled into a unit test, because StatusEmphasis lives in a control's code-behind and
+    # would drag Microsoft.UI.Xaml in with it.
+    [switch]$IncludeSlowScans)
 # NOTE: do NOT name the parameter $Pid — it is read-only in PowerShell.
 
 $ErrorActionPreference = 'Continue'
@@ -59,6 +70,15 @@ function Test-UI {
 function Get-Name([string]$id) {
     $json = winapp ui get-property $id -a $AppPid -p Name --json 2>$null | ConvertFrom-Json
     return [string]$json.properties.Name
+}
+
+# Read a raw UIA property (ControlType, IsKeyboardFocusable, ...). Note that LocalizedControlType is
+# NOT among the properties this tool surfaces, so an assertion about what a screen reader *says* has to
+# be made against what the control *does* instead — which is the stronger claim anyway.
+function Get-UiaProperty([string]$id, [string]$property) {
+    $json = winapp ui get-property $id -a $AppPid --json 2>$null | ConvertFrom-Json
+    $global:LASTEXITCODE = 0
+    return [string]$json.properties.$property
 }
 
 # Read a control's effective value (ComboBox selected item, TextBox text, etc.).
@@ -188,7 +208,7 @@ Test-UI "Nav: Create Dev Drive present"     { winapp ui wait-for "NavCreate"    
 # ─────────────────────────────────────────────────────────────────────────────
 Test-UI "Navigate to Overview"               { Goto "NavDashboard" "SignalsSubtitle" }
 Test-UI "Overview: volume strip"             { winapp ui wait-for "OverviewVolumeStrip"   -a $AppPid -t 3000 }
-Test-UI "Overview: scan action"              { winapp ui wait-for "ScanEverythingButton"  -a $AppPid -t 3000 }
+Test-UI "Overview: scan action"              { winapp ui wait-for "ScanBarScanButton"     -a $AppPid -t 3000 }
 Test-UI "Overview: last-scan chip"           { winapp ui wait-for "LastScanChip"          -a $AppPid -t 3000 }
 Test-UI "Overview: free-space chart card"    { winapp ui wait-for "TrendSubtitle"         -a $AppPid -t 3000 }
 Test-UI "Overview: inspector title"          { winapp ui wait-for "OverviewInspectorTitle" -a $AppPid -t 3000 }
@@ -252,7 +272,7 @@ winapp ui screenshot -a $AppPid -o "screenshots\01-overview.png" 2>$null | Out-N
 #       state: the room renders, every category is listed, and Scan is offered rather than running.
 # ─────────────────────────────────────────────────────────────────────────────
 Test-UI "Navigate to Reclaim"                { Goto "NavReclaim" "ReclaimCategoryList" }
-Test-UI "Reclaim: Scan present"              { winapp ui wait-for "ReclaimScanButton"   -a $AppPid -t 3000 }
+Test-UI "Reclaim: Scan present"              { winapp ui wait-for "ScanBarScanButton"   -a $AppPid -t 3000 }
 Test-UI "Reclaim: found total present"       { winapp ui wait-for "ReclaimFoundBytes"   -a $AppPid -t 3000 }
 Test-UI "Reclaim: selected total present"    { winapp ui wait-for "ReclaimSelectedBytes" -a $AppPid -t 3000 }
 Test-UI "Reclaim: does not scan on entry" {
@@ -264,8 +284,23 @@ Test-UI "Reclaim: does not scan on entry" {
 # here is a real assertion: binding either one to something always-true turns this red.
 Test-UI "Reclaim: stop is offered only while something is running" {
     if (-not (Test-Present "ReclaimReviewButton")) { throw "the reclaim button is missing entirely" }
-    if (Test-Present "ReclaimStopButton")   { throw "Stop is offered while no reclaim is running" }
-    if (Test-Present "ReclaimCancelButton") { throw "Cancel is offered while no scan is running" }
+    if (Test-Present "ReclaimStopButton")     { throw "Stop is offered while no reclaim is running" }
+    if (Test-Present "ScanBarCancelButton")   { throw "Cancel is offered while no scan is running" }
+    if (Test-Present "ScanBarRing")           { throw "a progress ring is spinning while nothing is running" }
+}
+# Nothing is preselected. This is the room's most important safety property and the one thing about it
+# that a user could get wrong in a single click: the previous build ran SelectSafe() after every scan,
+# so a room opened to "let me look" arrived with 404 GB ticked and a live delete button. The resting
+# state is the cheap half of the assertion — the scanned half is at the end of the suite, because a
+# real scan is ~70 s of I/O and belongs nowhere near the fast structural passes.
+Test-UI "Reclaim: nothing is selected at rest" {
+    $selected = Get-Value "ReclaimSelectedBytes"
+    if ($selected -notmatch '(^|\s)(0 B|—)(\s|$)') {
+        throw "the room opened with something already ticked: '$selected'"
+    }
+    if ((Get-UiaProperty "ReclaimReviewButton" "IsEnabled") -eq "True") {
+        throw "the delete button is live with nothing selected"
+    }
 }
 winapp ui screenshot -a $AppPid -o "screenshots\01b-reclaim.png" 2>$null | Out-Null
 
@@ -284,7 +319,19 @@ Test-UI "Space: breadcrumb"                  { winapp ui wait-for "SpaceBreadcru
 Test-UI "Space: inspector title"             { winapp ui wait-for "SpaceInspectorTitle"  -a $AppPid -t 3000 }
 Test-UI "Space: status bar"                  { winapp ui wait-for "SpaceStatusBar"       -a $AppPid -t 3000 }
 Test-UI "Space: rescan is offered, not running" {
-    Assert-Present @("SpaceRescanButton", "SpaceViewMode", "SpaceModeFolders", "SpaceModeLargestFiles")
+    Assert-Present @("ScanBarScanButton", "SpaceViewMode", "SpaceModeFolders", "SpaceModeLargestFiles")
+    if (Test-Present "ScanBarCancelButton") { throw "Cancel is offered while no scan is running" }
+    if (Test-Present "ScanBarProgress")     { throw "a progress bar is shown while no scan is running" }
+}
+# The room acts on one volume, so it opens with one chosen — and the button says which. A room whose
+# one verb is greyed out on arrival states that it cannot be used. The label is the assertion because
+# it is derived from the selection: "Scan" with no letter is exactly what a null scope produces.
+Test-UI "Space: opens with a scope chosen, and the button names it" {
+    $label = Get-Name "ScanBarScanButton"
+    if ($label -notmatch '^Scan [A-Z]:$') {
+        throw "expected the scan button to name a volume, got '$label'"
+    }
+    if ($label -match 'Rescan') { throw "a button does not become a different button because it was pressed" }
 }
 # The unmeasured contract, asserted where a user would actually read it. An unscanned root reports its
 # size as an em dash; "0 bytes" would be a claim we measured it and found nothing there.
@@ -293,6 +340,60 @@ Test-UI "Space: an unmeasured size reads as a dash, not zero" {
     if ($detail -match '\b0 bytes\b') { throw "unmeasured coverage reported '0 bytes' instead of '—': '$detail'" }
 }
 winapp ui screenshot -a $AppPid -o "screenshots\01c-space.png" 2>$null | Out-Null
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  (2d) The scan grammar, across rooms.
+#
+#  Overview, Reclaim and Space each used to invent their own scan affordance: three different labels,
+#  three different enablement rules, and — on Space alone — a volume chip that silently started a full
+#  volume scan when clicked. Same app, same gesture, three answers. They now share RoomScanBar, and
+#  these assert the grammar it exists to enforce rather than any one room's strings:
+#
+#    · Rooms that do the identical thing say the identical thing.
+#    · The label names the scope and never becomes "Rescan" — a button does not turn into a different
+#      button because it has been pressed.
+#    · Chips select scope; only the button starts work.
+# ─────────────────────────────────────────────────────────────────────────────
+Test-UI "Scan grammar: whole-machine rooms use one label" {
+    Goto "NavDashboard" "SignalsSubtitle"
+    $overview = Get-Name "ScanBarScanButton"
+    Goto "NavReclaim" "ReclaimCategoryList"
+    $reclaim = Get-Name "ScanBarScanButton"
+
+    if ($overview -ne $reclaim) {
+        throw "two rooms that scan the whole machine disagree about what that is called: '$overview' vs '$reclaim'"
+    }
+    if ($overview -notmatch '^Scan this PC$') {
+        throw "expected the whole-machine label, got '$overview'"
+    }
+}
+# The chip is a readout in a room with nothing to choose. It used to be a focusable, hoverable Button
+# on every page and act on exactly one of them — a promise made to everyone who tried it, and to a
+# keyboard or screen-reader user a tab stop that does nothing when pressed. Focusability is the
+# assertion because it is the behaviour; the spoken control type follows it in VolumeCard.Refresh(),
+# but LocalizedControlType is not a property this tool can read back.
+Test-UI "Scan grammar: an inert chip is not a tab stop" {
+    Goto "NavDashboard" "SignalsSubtitle"
+    if ((Get-UiaProperty "VolumeCard_C" "IsKeyboardFocusable") -eq "True") {
+        throw "an inert volume chip is still in the tab order"
+    }
+}
+# ...and where the chip IS the scope control, it is reachable from the keyboard.
+Test-UI "Scan grammar: a chip that picks scope is a tab stop" {
+    Goto "NavSpace" "SpaceItemsList"
+    if ((Get-UiaProperty "VolumeCard_C" "IsKeyboardFocusable") -ne "True") {
+        throw "the scope chip cannot be reached from the keyboard"
+    }
+}
+# Picking a scope is not the same request as "scan it". Space used to conflate them, so a click meant
+# to change what you were looking at started minutes of I/O with no confirmation.
+Test-UI "Scan grammar: picking a scope does not start a scan" {
+    Goto "NavSpace" "SpaceItemsList"
+    winapp ui invoke "VolumeCard_C" -a $AppPid 2>$null | Out-Null
+    Start-Sleep -Milliseconds 900
+    if (Test-Present "ScanBarCancelButton") { throw "choosing a volume started a scan" }
+    if ((Get-Name "ScanBarScanButton") -ne "Scan C:") { throw "the label did not follow the chosen scope" }
+}
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  (3) Package caches — two tabs over one table: Detected, then Not installed.
@@ -612,6 +713,73 @@ winapp ui screenshot -a $AppPid -o "screenshots\11-settings-light.png" 2>$null |
 Select-Combo "ThemeSelector" "ThemeOptionSystem"
 Test-UI "Theme override -> System default (restored)" {
     winapp ui wait-for "ThemeSelector" -a $AppPid --value "System default" -t 3000
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  (7b) The Reclaim scan — opt-in, because it is minutes of real disk I/O.
+#
+#  This is the only place the room's post-scan state can be observed. The property it exists to hold
+#  is a safety one: a scan finds hundreds of gigabytes across seven categories, and the room must
+#  arrive at the end of it with NOTHING ticked. The previous build ran SelectSafe() automatically, so
+#  "let me see what's here" produced 404 GB selected and a live delete button one misread click away.
+#
+#  It also covers the scan affordance in its running state, which no resting-state test can: the
+#  button disables and keeps its label, progress appears, and Cancel is offered.
+# ─────────────────────────────────────────────────────────────────────────────
+if ($IncludeSlowScans) {
+    Test-UI "Reclaim: a scan runs, and reports itself while it does" {
+        Goto "NavReclaim" "ReclaimCategoryList"
+        $label = Get-Name "ScanBarScanButton"
+        winapp ui invoke "ScanBarScanButton" -a $AppPid 2>$null | Out-Null
+        Start-Sleep -Milliseconds 1500
+
+        if (-not (Test-Present "ScanBarCancelButton")) { throw "no way to stop a running scan" }
+        if (-not (Test-Present "ScanBarRing"))         { throw "a running scan shows no progress" }
+        if ((Get-UiaProperty "ScanBarScanButton" "IsEnabled") -eq "True") {
+            throw "the scan button is still live during its own scan"
+        }
+        # The label names the scope, and a scope does not change because work started on it.
+        if ((Get-Name "ScanBarScanButton") -ne $label) {
+            throw "the button relabelled itself mid-scan: '$label' -> '$(Get-Name "ScanBarScanButton")'"
+        }
+    }
+
+    Test-UI "Reclaim: the scan finishes" {
+        # Worktrees gate the run at ~70 s on a developer machine; allow generous headroom for a cold
+        # cache without waiting forever on a genuinely wedged scan.
+        $deadline = (Get-Date).AddMinutes(8)
+        while ((Test-Present "ScanBarCancelButton" 1000) -and (Get-Date) -lt $deadline) {
+            Start-Sleep -Seconds 5
+        }
+        if (Test-Present "ScanBarCancelButton" 1000) { throw "the scan did not finish within 8 minutes" }
+        $found = Get-Value "ReclaimFoundBytes"
+        if ($found -match '^\s*(0 B|—)\s*$') { throw "the scan finished having found nothing at all: '$found'" }
+    }
+
+    # THE assertion. A scan is a question, not an instruction.
+    Test-UI "Reclaim: a finished scan selects nothing" {
+        $selected = Get-Value "ReclaimSelectedBytes"
+        if ($selected -notmatch '(^|\s)(0 B|—)(\s|$)') {
+            throw "the scan pre-selected $selected for deletion"
+        }
+        if ((Get-UiaProperty "ReclaimReviewButton" "IsEnabled") -eq "True") {
+            throw "the delete button is live immediately after a scan, with nothing knowingly chosen"
+        }
+    }
+
+    # ...and choosing is still one click away, so the default is a choice rather than an obstacle.
+    Test-UI "Reclaim: selecting the safe tier is one click" {
+        winapp ui invoke "ReclaimSelectSafeButton" -a $AppPid 2>$null | Out-Null
+        Start-Sleep -Milliseconds 800
+        $selected = Get-Value "ReclaimSelectedBytes"
+        if ($selected -match '(^|\s)(0 B|—)(\s|$)') { throw "Select safe selected nothing: '$selected'" }
+        if ((Get-UiaProperty "ReclaimReviewButton" "IsEnabled") -ne "True") {
+            throw "something is selected but the reclaim button is dead"
+        }
+        winapp ui invoke "ReclaimClearButton" -a $AppPid 2>$null | Out-Null
+        Start-Sleep -Milliseconds 500
+    }
+    winapp ui screenshot -a $AppPid -o "screenshots\01b-reclaim-scanned.png" 2>$null | Out-Null
 }
 
 # ─────────────────────────────────────────────────────────────────────────────

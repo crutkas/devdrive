@@ -119,8 +119,6 @@ public sealed partial class DashboardPage : Page, INotifyPropertyChanged
 
     // ---- Head text ---------------------------------------------------------------------------
 
-    public string ScanButtonText => Reclaim.IsScanning ? "Scanning…" : "Scan this PC";
-
     public string SignalsSubtitle => _signals.Count switch
     {
         0 => "nothing outstanding",
@@ -338,7 +336,6 @@ public sealed partial class DashboardPage : Page, INotifyPropertyChanged
         RebuildInspector();
         UpdateStatusBar();
 
-        Raise(nameof(ScanButtonText));
         Raise(nameof(SignalsSubtitle));
         Raise(nameof(LastScanText));
         Raise(nameof(EmptyTitle));
@@ -386,6 +383,18 @@ public sealed partial class DashboardPage : Page, INotifyPropertyChanged
         Raise(nameof(HasSignals));
         Raise(nameof(SelectedSignal));
         RaiseInspector();
+    }
+
+    /// <summary>
+    /// Overview scans the whole machine, which is the same act Reclaim performs, so it runs the
+    /// same command rather than a parallel copy of it.
+    /// </summary>
+    private void ScanBar_ScanRequested(object? sender, EventArgs e)
+    {
+        if (Reclaim.ScanCommand.CanExecute(null))
+        {
+            Reclaim.ScanCommand.Execute(null);
+        }
     }
 
     /// <summary>

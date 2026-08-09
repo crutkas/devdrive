@@ -105,6 +105,47 @@ public static class VolumeStrip
     }
 
     /// <summary>
+    /// Picks which volume a single-scope room should open on: the one with the smallest fraction of
+    /// its capacity free.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A room that arrives with nothing chosen arrives with its one verb disabled, which reads as
+    /// broken rather than as an invitation. So something has to be picked, and the pick has to be
+    /// defensible rather than "whatever sorted first".
+    /// </para>
+    /// <para>
+    /// Tightest-first is the rule because it matches the reason someone opens a space explorer at
+    /// all. It is deliberately a <em>fraction</em> and not free bytes: 40 GB free is roomy on a
+    /// 256 GB volume and nearly empty on a 4 TB one, which is the same absolute-versus-percentage
+    /// argument that fixed the Create room's thresholds — inverted, because there the question was
+    /// how much is left over and here it is how full the volume is.
+    /// </para>
+    /// <para>
+    /// Nothing is scanned as a result. This only decides which chip is ticked when the room opens,
+    /// and the chip says plainly which volume that is.
+    /// </para>
+    /// </remarks>
+    /// <param name="entries">The strip, as returned by <see cref="Build"/>.</param>
+    /// <returns>The entry to open on, or null when the strip is empty.</returns>
+    public static VolumeStripEntry? DefaultScope(IReadOnlyList<VolumeStripEntry> entries)
+    {
+        ArgumentNullException.ThrowIfNull(entries);
+
+        return entries
+            // A volume that reports no capacity cannot be ranked by fullness, and treating its
+            // unknown as 0% free would hand it the default. Sorted last, but still eligible when it
+            // is all there is — an unrankable volume is better than no volume.
+            .OrderBy(entry => entry.Volume.CapacityBytes > 0 ? 0 : 1)
+            .ThenBy(entry => entry.Volume.CapacityBytes > 0
+                ? (double)entry.Volume.FreeBytes / entry.Volume.CapacityBytes
+                : 0d)
+            // Ties are broken by letter so the same machine opens the same way twice.
+            .ThenBy(entry => entry.Volume.DriveLetter, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault();
+    }
+
+    /// <summary>
     /// Reduces any spelling of a volume root to a comparable key: <c>"C:\"</c>, <c>"c:"</c>, and
     /// <c>"C:\\"</c> all become <c>"C"</c>.
     /// </summary>

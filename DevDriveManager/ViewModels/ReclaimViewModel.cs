@@ -692,7 +692,12 @@ public sealed partial class ReclaimViewModel : ObservableObject
         // This is the one moment in the room's life where re-reading the volumes earns its cost.
         InvalidateVolumes();
 
-        SelectSafe();
+        // Deliberately nothing. A scan is a question, not an instruction: arriving with the whole
+        // Safe tier pre-ticked means the distance between "let me look" and "delete 40 GB" is one
+        // misplaced click on a button the user has not read yet. Every tick in this room is going
+        // to be someone's data, so every tick is theirs to make. "Select safe" is still one click
+        // away for anyone who wants the old behaviour, and it is now a choice rather than a default.
+        ClearSelection();
     }
 
     private void OnRowPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)

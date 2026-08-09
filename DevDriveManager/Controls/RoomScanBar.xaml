@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<UserControl
+    x:Class="DevDriveManager.Controls.RoomScanBar"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:DevDriveManager.Controls"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:storage="using:DevDriveStorage"
+    d:DesignWidth="1200"
+    mc:Ignorable="d">
+
+    <!--
+        The bar every room opens with, as RoomStatusBar is the bar every room closes with.
+
+        Before this existed each room grew its own. Overview said "Scan this PC", Reclaim said
+        "Scan this machine" for the identical act, and Space said "Rescan" and stayed disabled
+        until a scan had already happened. Space's chips silently started a scan on click while
+        every other room's chips did nothing at all, so the same gesture meant "read this" in five
+        rooms and "spend two minutes of disk IO" in the sixth. None of that difference was a
+        decision; it was three rooms written on three days.
+
+        The grammar this fixes on, and that every room now shares:
+
+          - Chips select scope. They never start work, so a click is free and reversible everywhere.
+            Where a room has no scope to choose, its chips are inert rather than merely ignored.
+          - The button starts work. It is the only thing on this bar that does.
+          - The label names the scope and does not change once you have used it. A button does not
+            become a different button because it has been pressed, which is what "Rescan" claimed.
+          - While scanning, the button keeps its label and disables, and progress plus Cancel appear
+            to its left. One place owns scan state, and it is the same place in every room.
+
+        Derived visuals are set in code-behind rather than through x:Bind function calls, matching
+        VolumeCard: several of them depend on two properties at once, and a nest of converter
+        functions in markup is harder to read than the one Refresh() that decides them together.
+    -->
+    <Grid
+        Padding="18,10"
+        ColumnSpacing="14"
+        BorderBrush="{ThemeResource SmDividerBrush}"
+        BorderThickness="0,0,0,1">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+
+        <ItemsControl
+            x:Name="PartStrip"
+            Grid.Column="0"
+            ItemsSource="{x:Bind Volumes, Mode=OneWay}">
+            <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                    <StackPanel Orientation="Horizontal" Spacing="10" />
+                </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="storage:VolumeStripEntry">
+                    <controls:VolumeCard
+                        AccentRole="{x:Bind AccentRole}"
+                        IsSystemVolume="{x:Bind IsSystemVolume}"
+                        ReclaimableBytes="{x:Bind ReclaimableBytes}"
+                        Volume="{x:Bind Volume}" />
+                </DataTemplate>
+            </ItemsControl.ItemTemplate>
+        </ItemsControl>
+
+        <StackPanel
+            Grid.Column="1"
+            VerticalAlignment="Center"
+            Orientation="Horizontal"
+            Spacing="8">
+
+            <!--
+                What is happening right now, for rooms that can say. Only shown mid-scan, because
+                between scans it would be a stale sentence sitting beside a live button.
+            -->
+            <TextBlock
+                x:Name="PartStatusText"
+                MaxWidth="420"
+                VerticalAlignment="Center"
+                AutomationProperties.AutomationId="ScanBarStatusText"
+                Style="{StaticResource SmCardSubTextStyle}"
+                TextTrimming="CharacterEllipsis"
+                Visibility="Collapsed" />
+
+            <!--
+                A determinate bar where the room genuinely knows a fraction, a ring where it does
+                not. A superset rather than a fork: a room that cannot measure progress does not opt
+                in and still gets the ring, in the same place, at the same moment.
+            -->
+            <ProgressBar
+                x:Name="PartProgressBar"
+                Width="140"
+                VerticalAlignment="Center"
+                AutomationProperties.AutomationId="ScanBarProgress"
+                Maximum="1"
+                Visibility="Collapsed" />
+
+            <ProgressRing
+                x:Name="PartRing"
+                Width="18"
+                Height="18"
+                AutomationProperties.AutomationId="ScanBarRing"
+                IsActive="False"
+                Visibility="Collapsed" />
+
+            <Button
+                x:Name="PartCancelButton"
+                AutomationProperties.AutomationId="ScanBarCancelButton"
+                Click="OnCancelClick"
+                Content="Cancel"
+                Visibility="Collapsed" />
+
+            <Button
+                x:Name="PartScanButton"
+                AutomationProperties.AutomationId="ScanBarScanButton"
+                Click="OnScanClick"
+                Style="{StaticResource AccentButtonStyle}" />
+        </StackPanel>
+    </Grid>
+</UserControl>

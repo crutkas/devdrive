@@ -22,53 +22,21 @@
         <!--
             The same context strip every room carries. Here it is genuinely context rather than
             subject: the table below is about what to do, and the strip is the machine it is about.
+
+            Overview acts on the whole machine, so there is no scope to pick and the chips are
+            inert. The label is the identical string Reclaim uses, because it is the identical act.
         -->
-        <Grid
+        <controls:RoomScanBar
+            x:Name="ScanBar"
             Grid.Row="0"
-            Padding="18,10"
-            ColumnSpacing="14"
-            BorderBrush="{ThemeResource SmDividerBrush}"
-            BorderThickness="0,0,0,1">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
-
-            <ItemsControl
-                Grid.Column="0"
-                AutomationProperties.AutomationId="OverviewVolumeStrip"
-                AutomationProperties.Name="Volumes on this machine"
-                ItemsSource="{x:Bind VolumeStripEntries}">
-                <ItemsControl.ItemsPanel>
-                    <ItemsPanelTemplate>
-                        <StackPanel Orientation="Horizontal" Spacing="10" />
-                    </ItemsPanelTemplate>
-                </ItemsControl.ItemsPanel>
-                <ItemsControl.ItemTemplate>
-                    <DataTemplate x:DataType="storage:VolumeStripEntry">
-                        <controls:VolumeCard
-                            AccentRole="{x:Bind AccentRole}"
-                            IsSystemVolume="{x:Bind IsSystemVolume}"
-                            ReclaimableBytes="{x:Bind ReclaimableBytes}"
-                            Volume="{x:Bind Volume}" />
-                    </DataTemplate>
-                </ItemsControl.ItemTemplate>
-            </ItemsControl>
-
-            <!--
-                The room's one verb. Overview cannot tell you what is reclaimable until something has
-                looked, and the largest signal in the table is the one this button produces — so the
-                button that fills the room lives on the room, not three rooms away.
-            -->
-            <Button
-                Grid.Column="1"
-                VerticalAlignment="Center"
-                AutomationProperties.AutomationId="ScanEverythingButton"
-                Command="{x:Bind Reclaim.ScanCommand}"
-                Content="{x:Bind ScanButtonText, Mode=OneWay}"
-                IsEnabled="{x:Bind local:UiHelpers.Not(Reclaim.IsScanning), Mode=OneWay}"
-                Style="{StaticResource AccentButtonStyle}" />
-        </Grid>
+            CanScan="True"
+            IsScanning="{x:Bind Reclaim.IsScanning, Mode=OneWay}"
+            ScanLabel="Scan this PC"
+            ScanRequested="ScanBar_ScanRequested"
+            SelectionMode="None"
+            StripAutomationId="OverviewVolumeStrip"
+            StripAutomationName="Volumes on this machine"
+            Volumes="{x:Bind VolumeStripEntries}" />
 
         <Grid
             Grid.Row="1"

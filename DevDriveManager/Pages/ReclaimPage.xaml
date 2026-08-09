@@ -26,61 +26,18 @@
             puts scanning on its strip: the thing you act on and the thing you act with belong
             together.
         -->
-        <Grid
+        <controls:RoomScanBar
+            x:Name="ScanBar"
             Grid.Row="0"
-            Padding="18,10"
-            ColumnSpacing="14"
-            BorderBrush="{ThemeResource SmDividerBrush}"
-            BorderThickness="0,0,0,1">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
-
-            <ItemsControl
-                Grid.Column="0"
-                AutomationProperties.AutomationId="ReclaimVolumeStrip"
-                AutomationProperties.Name="Volumes on this machine"
-                ItemsSource="{x:Bind ViewModel.VolumeStripEntries}">
-                <ItemsControl.ItemsPanel>
-                    <ItemsPanelTemplate>
-                        <StackPanel Orientation="Horizontal" Spacing="10" />
-                    </ItemsPanelTemplate>
-                </ItemsControl.ItemsPanel>
-                <ItemsControl.ItemTemplate>
-                    <DataTemplate x:DataType="storage:VolumeStripEntry">
-                        <controls:VolumeCard
-                            AccentRole="{x:Bind AccentRole}"
-                            IsSystemVolume="{x:Bind IsSystemVolume}"
-                            ReclaimableBytes="{x:Bind ReclaimableBytes}"
-                            Volume="{x:Bind Volume}" />
-                    </DataTemplate>
-                </ItemsControl.ItemTemplate>
-            </ItemsControl>
-
-            <StackPanel
-                Grid.Column="1"
-                VerticalAlignment="Center"
-                Orientation="Horizontal"
-                Spacing="8">
-                <ProgressRing
-                    Width="18"
-                    Height="18"
-                    AutomationProperties.AutomationId="ReclaimProgressRing"
-                    IsActive="{x:Bind ViewModel.IsScanning, Mode=OneWay}"
-                    Visibility="{x:Bind ViewModel.IsScanning, Mode=OneWay}" />
-                <Button
-                    AutomationProperties.AutomationId="ReclaimCancelButton"
-                    Command="{x:Bind ViewModel.CancelScanCommand}"
-                    Content="Cancel"
-                    Visibility="{x:Bind ViewModel.IsScanning, Mode=OneWay}" />
-                <Button
-                    AutomationProperties.AutomationId="ReclaimScanButton"
-                    Command="{x:Bind ViewModel.ScanCommand}"
-                    Content="Scan this machine"
-                    Style="{StaticResource AccentButtonStyle}" />
-            </StackPanel>
-        </Grid>
+            CanScan="True"
+            CancelRequested="ScanBar_CancelRequested"
+            IsScanning="{x:Bind ViewModel.IsScanning, Mode=OneWay}"
+            ScanLabel="Scan this PC"
+            ScanRequested="ScanBar_ScanRequested"
+            SelectionMode="None"
+            StripAutomationId="ReclaimVolumeStrip"
+            StripAutomationName="Volumes on this machine"
+            Volumes="{x:Bind ViewModel.VolumeStripEntries}" />
 
         <!--
             The room. Same three-column grammar as Space, and deliberately so: the category rail

@@ -98,4 +98,72 @@ public sealed class VolumeStripTests
         Assert.IsFalse(strip.Any(e => e.IsSystemVolume));
         Assert.AreEqual("C:", strip[0].Volume.DriveLetter);
     }
+
+    [TestMethod]
+    public void AnEmptyStripHasNoDefaultScope() =>
+        Assert.IsNull(VolumeStrip.DefaultScope([]));
+
+    /// <summary>
+    /// The tightest volume wins, not the first one, not the system one, and not the Dev Drive. Here
+    /// C: leads the strip and is the system volume, and G: is the Dev Drive, so anything that picked
+    /// on position or role would return C: — the volume with three times the headroom.
+    /// </summary>
+    [TestMethod]
+    public void TheDefaultScopeIsTheVolumeWithTheLeastRoomLeft()
+    {
+        var strip = VolumeStrip.Build(
+            [Vol("C", capacity: 1000, free: 300), Vol("G", capacity: 1000, free: 100, devDrive: true)],
+            "C:\\");
+
+        Assert.AreEqual("G:", VolumeStrip.DefaultScope(strip)?.Volume.DriveLetter);
+    }
+
+    /// <summary>
+    /// Fullness is a fraction, so the volume with the <em>most</em> free bytes can still be the one
+    /// that needs looking at. D: has 400 GB free against C:'s 100 and is still the tighter of the
+    /// two, at 4% against 10%.
+    /// </summary>
+    [TestMethod]
+    public void FullnessIsAFractionRatherThanFreeBytes()
+    {
+        var strip = VolumeStrip.Build(
+            [Vol("C", capacity: 1_000, free: 100), Vol("D", capacity: 10_000, free: 400)],
+            "C:\\");
+
+        Assert.AreEqual("D:", VolumeStrip.DefaultScope(strip)?.Volume.DriveLetter);
+    }
+
+    /// <summary>
+    /// A volume that reports no capacity cannot be ranked, and must not win the default by dividing
+    /// its way to zero percent free. It sorts behind every rankable volume.
+    /// </summary>
+    [TestMethod]
+    public void AVolumeWithUnknownCapacityDoesNotWinTheDefault()
+    {
+        var strip = VolumeStrip.Build(
+            [Vol("C", capacity: 1_000, free: 900), Vol("Z", capacity: 0, free: 0)],
+            "C:\\");
+
+        Assert.AreEqual("C:", VolumeStrip.DefaultScope(strip)?.Volume.DriveLetter);
+    }
+
+    /// <summary>...but it is still offered when it is the only thing there is.</summary>
+    [TestMethod]
+    public void AnUnrankableVolumeIsBetterThanNoVolume()
+    {
+        var strip = VolumeStrip.Build([Vol("Z", capacity: 0, free: 0)], "C:\\");
+
+        Assert.AreEqual("Z:", VolumeStrip.DefaultScope(strip)?.Volume.DriveLetter);
+    }
+
+    /// <summary>Two equally full volumes must not open a different room on each visit.</summary>
+    [TestMethod]
+    public void EquallyFullVolumesBreakTheTieByLetter()
+    {
+        var strip = VolumeStrip.Build(
+            [Vol("G", capacity: 1_000, free: 100, devDrive: true), Vol("D", capacity: 2_000, free: 200)],
+            "C:\\");
+
+        Assert.AreEqual("D:", VolumeStrip.DefaultScope(strip)?.Volume.DriveLetter);
+    }
 }

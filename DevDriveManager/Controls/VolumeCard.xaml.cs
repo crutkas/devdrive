@@ -99,6 +99,26 @@ public sealed partial class VolumeCard : UserControl
     public static readonly DependencyProperty IsSelectedProperty = DependencyProperty.Register(
         nameof(IsSelected), typeof(bool), typeof(VolumeCard), new PropertyMetadata(false, OnAnyChanged));
 
+    /// <summary>
+    /// Whether this card is something the user can act on, or purely a readout.
+    /// </summary>
+    /// <remarks>
+    /// The card is built on a <c>Button</c> because in the rooms where it is pickable that is
+    /// exactly what it is. In the rooms where nothing is pickable it used to stay a button anyway:
+    /// it hovered, it took focus, it sat in the tab order and it announced itself as a button to a
+    /// screen reader, and pressing it did nothing at all. Defaults to false so that a room has to
+    /// opt into interactivity, which is the safer way round for a promise this control makes.
+    /// </remarks>
+    public bool IsInteractive
+    {
+        get => (bool)GetValue(IsInteractiveProperty);
+        set => SetValue(IsInteractiveProperty, value);
+    }
+
+    public static readonly DependencyProperty IsInteractiveProperty = DependencyProperty.Register(
+        nameof(IsInteractive), typeof(bool), typeof(VolumeCard),
+        new PropertyMetadata(false, OnAnyChanged));
+
     private static void OnAnyChanged(DependencyObject d, DependencyPropertyChangedEventArgs e) =>
         ((VolumeCard)d).Refresh();
 
@@ -135,6 +155,15 @@ public sealed partial class VolumeCard : UserControl
         PartBar.Capacity = VolumeCapacity.ForVolume(volume, ReclaimableBytes);
 
         VisualStateManager.GoToState(PartButton, IsSelected ? "Selected" : "Unselected", false);
+
+        // An inert card keeps every pixel of its appearance and loses every affordance: no hover,
+        // no press, no focus rectangle, no place in the tab order.
+        PartButton.IsHitTestVisible = IsInteractive;
+        PartButton.IsTabStop = IsInteractive;
+
+        // Without this a screen reader still says "button" for something that cannot be pressed.
+        // Naming the control type after what it actually is keeps the spoken description honest.
+        AutomationProperties.SetLocalizedControlType(PartButton, IsInteractive ? "button" : "volume");
 
         // Stable across launches, and stable across relabelling, because tests address volumes by letter.
         AutomationProperties.SetAutomationId(PartButton, $"VolumeCard_{letter}");

@@ -40,73 +40,17 @@
             scans that volume — so the thing you act on and the thing you act with sit together and
             there is exactly one place on screen that owns scan state.
         -->
-        <Grid
+        <controls:RoomScanBar
+            x:Name="ScanBar"
             Grid.Row="0"
-            Padding="18,10"
-            ColumnSpacing="14"
-            BorderBrush="{ThemeResource SmDividerBrush}"
-            BorderThickness="0,0,0,1">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
-
-            <ItemsControl
-                x:Name="VolumeStripHost"
-                Grid.Column="0"
-                AutomationProperties.AutomationId="SpaceVolumeStrip"
-                AutomationProperties.Name="Volumes on this machine, select one to scan"
-                ItemsSource="{x:Bind StripEntries}">
-                <ItemsControl.ItemsPanel>
-                    <ItemsPanelTemplate>
-                        <StackPanel Orientation="Horizontal" Spacing="10" />
-                    </ItemsPanelTemplate>
-                </ItemsControl.ItemsPanel>
-                <ItemsControl.ItemTemplate>
-                    <DataTemplate x:DataType="storage:VolumeStripEntry">
-                        <controls:VolumeCard
-                            AccentRole="{x:Bind AccentRole}"
-                            IsSystemVolume="{x:Bind IsSystemVolume}"
-                            Selected="VolumeCard_Selected"
-                            Volume="{x:Bind Volume}" />
-                    </DataTemplate>
-                </ItemsControl.ItemTemplate>
-            </ItemsControl>
-
-            <StackPanel
-                Grid.Column="1"
-                VerticalAlignment="Center"
-                Orientation="Horizontal"
-                Spacing="8">
-                <TextBlock
-                    MaxWidth="420"
-                    VerticalAlignment="Center"
-                    AutomationProperties.AutomationId="SpaceLiveScanLabel"
-                    Style="{StaticResource SmCardSubTextStyle}"
-                    Text="{x:Bind LiveScanText, Mode=OneWay}"
-                    TextTrimming="CharacterEllipsis"
-                    Visibility="{x:Bind local:SpacePage.BoolToVisibility(IsScanning), Mode=OneWay}" />
-                <ProgressBar
-                    Width="140"
-                    VerticalAlignment="Center"
-                    AutomationProperties.AutomationId="SpaceLiveScanProgress"
-                    IsIndeterminate="{x:Bind local:SpacePage.IsIndeterminate(ViewModel.Progress), Mode=OneWay}"
-                    Maximum="1"
-                    Value="{x:Bind ViewModel.Progress, Mode=OneWay}"
-                    Visibility="{x:Bind local:SpacePage.BoolToVisibility(IsScanning), Mode=OneWay}" />
-                <Button
-                    AutomationProperties.AutomationId="SpaceLiveCancelScan"
-                    Click="CancelScanButton_Click"
-                    Content="Cancel"
-                    Visibility="{x:Bind local:SpacePage.BoolToVisibility(IsScanning), Mode=OneWay}" />
-                <Button
-                    AutomationProperties.AutomationId="SpaceRescanButton"
-                    Click="RescanButton_Click"
-                    Content="Rescan"
-                    IsEnabled="{x:Bind CanRescan, Mode=OneWay}"
-                    Style="{StaticResource AccentButtonStyle}" />
-            </StackPanel>
-        </Grid>
+            CancelRequested="ScanBar_CancelRequested"
+            ScanRequested="ScanBar_ScanRequested"
+            SelectionMode="Single"
+            ShowProgress="True"
+            StripAutomationId="SpaceVolumeStrip"
+            StripAutomationName="Volumes on this machine, select one to scan"
+            VolumeSelected="ScanBar_VolumeSelected"
+            Volumes="{x:Bind StripEntries}" />
 
         <!--  The room. Spec: 11px gap, 11px/18px padding, three columns.  -->
         <Grid

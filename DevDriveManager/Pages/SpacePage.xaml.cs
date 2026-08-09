@@ -53,7 +53,6 @@ public sealed partial class SpacePage : Page, INotifyPropertyChanged
     [
         nameof(ShowOverlay),
         nameof(IsScanning),
-        nameof(CanRescan),
         nameof(LiveScanText),
         nameof(OverlayTitle),
         nameof(OverlayDetail),
@@ -67,6 +66,14 @@ public sealed partial class SpacePage : Page, INotifyPropertyChanged
     private StorageRowViewModel? _watchedRow;
     private bool _isLoaded;
     private string? _pendingVolumeLabel;
+    /// <summary>
+    /// The volume the strip currently has selected. This is scope, not a scan: picking a chip
+    /// changes what the button will do, and nothing else. Before this room shared the scan bar,
+    /// clicking a chip started a full volume scan on the spot, which made a click that is free in
+    /// every other room cost minutes of disk I/O in this one.
+    /// </summary>
+    private StorageVolume? _selectedVolume;
+
     private double _nameColumnWidth = 220;
 
     public SpacePage()
@@ -162,12 +169,6 @@ public sealed partial class SpacePage : Page, INotifyPropertyChanged
     /// state — there is no second progress bar or cancel button anywhere below it.
     /// </summary>
     public bool IsScanning => ViewModel.ScanState is ExplorerScanState.Scanning;
-
-    /// <summary>
-    /// Rescan re-runs the scope that is already loaded, so it has nothing to act on until a first
-    /// scan has produced one. Before that the volume cards are the way in, and the overlay says so.
-    /// </summary>
-    public bool CanRescan => ViewModel.Snapshot is not null && !IsScanning;
 
     /// <summary>Reminds the reader that live rows are still moving, and offers the way out.</summary>
     public string LiveScanText => _pendingVolumeLabel is null
@@ -277,9 +278,10 @@ public sealed partial class SpacePage : Page, INotifyPropertyChanged
     }
 
     /// <summary>
-    /// Re-points the volume strip at whatever the shared view model is already showing. The scan
-    /// survives navigation; this page does not, so without this a completed G:\ scan would come
-    /// back with its results intact but no volume card selected and a generic "Scanning" label.
+    /// Re-points the volume strip at whatever the shared view model is already showing, falling back
+    /// to a sensible default scope on a first visit. The scan survives navigation; this page does
+    /// not, so without the first half a completed G:\ scan would come back with its results intact
+    /// but no volume card selected and a generic "Scanning" label.
     /// </summary>
     private void RestoreScopeSelection()
     {
@@ -290,17 +292,22 @@ public sealed partial class SpacePage : Page, INotifyPropertyChanged
                 scope,
                 StringComparison.OrdinalIgnoreCase));
 
+        // Nothing loaded yet, so there is no scope to restore — pick one. Arriving with the room's
+        // one verb greyed out states that the room cannot be used, which is not what is meant.
+        entry ??= VolumeStrip.DefaultScope(StripEntries);
+
         if (entry is null)
         {
             return;
         }
 
         _pendingVolumeLabel = entry.Volume.DisplayName;
-        foreach (VolumeCard card in FindVolumeCards())
-        {
-            card.IsSelected = card.Volume is StorageVolume volume &&
-                string.Equals(volume.RootPath, scope, StringComparison.OrdinalIgnoreCase);
-        }
+        _selectedVolume = entry.Volume;
+
+        // The bar owns chip selection now, so restoring scope is a matter of telling it which
+        // volume is current rather than walking containers that may not be realised yet.
+        ScanBar.SelectedVolumePath = entry.Volume.RootPath;
+        RefreshScanBar();
     }
 
     /// <summary>
@@ -411,6 +418,7 @@ public sealed partial class SpacePage : Page, INotifyPropertyChanged
 
         UpdateInspector();
         UpdateStatusBar();
+        RefreshScanBar();
     }
 
     private void UpdateStatusBar()
@@ -446,33 +454,14 @@ public sealed partial class SpacePage : Page, INotifyPropertyChanged
         SpaceStatusBar.Facts.Add(new StatusFact(ViewModel.SnapshotSummary));
     }
 
-    private void VolumeCard_Selected(object? sender, EventArgs args)
+    /// <summary>
+    /// Picking a volume sets the scope and nothing else. The scan bar's button is the only thing in
+    /// this room, as in every other room, that spends disk I/O.
+    /// </summary>
+    private void ScanBar_VolumeSelected(object? sender, StorageVolume volume)
     {
-        if (sender is not VolumeCard { Volume: StorageVolume volume })
-        {
-            return;
-        }
-
-        foreach (VolumeCard card in FindVolumeCards())
-        {
-            card.IsSelected = ReferenceEquals(card, sender);
-        }
-
-        _pendingVolumeLabel = volume.DisplayName;
-        _ = ViewModel.LoadScenarioAsync(volume.RootPath);
-    }
-
-    private IEnumerable<VolumeCard> FindVolumeCards()
-    {
-        for (int i = 0; i < VolumeStripHost.Items.Count; i++)
-        {
-            if (VolumeStripHost.ContainerFromIndex(i) is ContentPresenter presenter &&
-                VisualTreeHelper.GetChildrenCount(presenter) > 0 &&
-                VisualTreeHelper.GetChild(presenter, 0) is VolumeCard card)
-            {
-                yield return card;
-            }
-        }
+        _selectedVolume = volume;
+        RefreshScanBar();
     }
 
     private void ViewModeSelector_SelectionChanged(
@@ -523,11 +512,48 @@ public sealed partial class SpacePage : Page, INotifyPropertyChanged
     private void RetryScanButton_Click(object sender, RoutedEventArgs args) =>
         _ = ViewModel.RetryAsync();
 
+    private void ScanBar_CancelRequested(object? sender, EventArgs args) => ViewModel.CancelScan();
+
     /// <summary>
-    /// Same act as F5, on the strip where the room's other scan controls live.
+    /// Scans the selected volume. Re-running a scope that is already loaded and scanning it for the
+    /// first time are the same request from the user's side, so they are the same button — the only
+    /// difference is whether the view model can reuse what it already has.
     /// </summary>
-    private void RescanButton_Click(object sender, RoutedEventArgs args) =>
-        _ = ViewModel.RefreshAsync();
+    private void ScanBar_ScanRequested(object? sender, EventArgs args)
+    {
+        if (_selectedVolume is not StorageVolume volume)
+        {
+            return;
+        }
+
+        _pendingVolumeLabel = volume.DisplayName;
+
+        _ = ViewModel.Snapshot is not null &&
+            string.Equals(ViewModel.ScenarioId, volume.RootPath, StringComparison.OrdinalIgnoreCase)
+                ? ViewModel.RefreshAsync()
+                : ViewModel.LoadScenarioAsync(volume.RootPath);
+    }
+
+    /// <summary>
+    /// Pushes scan state onto the shared bar. The label names the scope so the button says what it
+    /// will actually do, and it reads the same before and after a scan — a button does not become a
+    /// different button because it has been pressed, which is what the old "Rescan" claimed.
+    /// </summary>
+    private void RefreshScanBar()
+    {
+        if (ScanBar is null)
+        {
+            return;
+        }
+
+        ScanBar.IsScanning = IsScanning;
+        ScanBar.StatusText = LiveScanText;
+        ScanBar.Progress = ViewModel.Progress;
+        ScanBar.CanScan = _selectedVolume is not null;
+        ScanBar.ScanLabel = _selectedVolume is StorageVolume volume
+            ? $"Scan {volume.DriveLetter}"
+            : "Scan";
+    }
 
     private void Page_KeyDown(object sender, KeyRoutedEventArgs args)
     {

@@ -6,9 +6,14 @@ namespace DevDriveReclaim.Tests;
 /// <summary>
 /// The hole this closes: <c>git status --porcelain</c> is silent about ignored files, so a
 /// worktree that is clean, pushed and merged — but is also the only place a <c>.env</c> exists —
-/// graded <see cref="ReclaimRisk.Safe"/> and was ticked automatically by the <c>SelectSafe()</c>
-/// that runs after every scan. Nothing anywhere in the room mentioned the file.
+/// graded <see cref="ReclaimRisk.Safe"/>, and nothing anywhere in the room mentioned the file.
 /// </summary>
+/// <remarks>
+/// This mattered more when a scan pre-ticked the whole Safe tier; selection is now empty until the
+/// user makes it, so a bad grade no longer arrives pre-armed. The grade still has to be right —
+/// "Safe" is the word this room uses to earn a tick, and it should not be given to a folder that
+/// holds the only copy of something.
+/// </remarks>
 [TestClass]
 public sealed class WorktreeLocalOnlyGradingTests
 {
