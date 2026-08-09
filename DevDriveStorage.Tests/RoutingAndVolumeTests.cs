@@ -101,4 +101,112 @@ public sealed class VolumeProviderTests
         var unlabeled = dev with { Label = "" };
         Assert.AreEqual("D:", unlabeled.DisplayName);
     }
+
+    /// <summary>
+    /// A volume the probe could not read must not be described as an ordinary ReFS volume. That is
+    /// the exact shape a BitLockered or locked Dev Drive takes: the FSCTL never ran, so every flag
+    /// is false, and false is indistinguishable from a genuine plain-NTFS answer of 0x0000.
+    /// </summary>
+    [TestMethod]
+    public void AnUnreadVolumeDoesNotClaimToBeAPlainReFSVolume()
+    {
+        var unread = new StorageVolume(
+            @"E:\", "E:", "Locked", "ReFS", 0, 0, IsReFS: true, IsDevDrive: false, IsTrusted: false)
+        {
+            IsDevDriveStateKnown = false,
+        };
+
+        Assert.AreNotEqual(
+            "ReFS volume",
+            unread.ClassificationDisplay,
+            "an unread volume must not be reported as one we checked and found ordinary");
+        StringAssert.Contains(unread.ClassificationDisplay, "unknown");
+    }
+
+    /// <summary>
+    /// The other direction, which matters just as much: an unknown must not be promoted into a
+    /// positive claim either. Silence about which way it went is the only honest answer.
+    /// </summary>
+    [TestMethod]
+    public void AnUnreadVolumeIsNotReportedAsADevDriveEither()
+    {
+        var unread = new StorageVolume(
+            @"E:\", "E:", "Locked", "ReFS", 0, 0, IsReFS: true, IsDevDrive: false, IsTrusted: false)
+        {
+            IsDevDriveStateKnown = false,
+        };
+
+        Assert.IsFalse(unread.ClassificationDisplay.Contains("Dev Drive ·", StringComparison.Ordinal));
+        Assert.IsFalse(unread.ClassificationDisplay.Contains("trusted", StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// The counter-test. Without it the rule above is satisfied by saying "unknown" about
+    /// everything, which trades a false claim for a useless one.
+    /// </summary>
+    [TestMethod]
+    public void AVolumeWeDidReadStillReportsWhatWeFound()
+    {
+        var plainReFS = new StorageVolume(
+            @"E:\", "E:", "Data", "ReFS", 1000, 400, IsReFS: true, IsDevDrive: false, IsTrusted: false);
+        var plainNtfs = new StorageVolume(
+            @"C:\", "C:", "Windows", "NTFS", 1000, 400, IsReFS: false, IsDevDrive: false, IsTrusted: false);
+
+        Assert.AreEqual("ReFS volume", plainReFS.ClassificationDisplay);
+        Assert.AreEqual("NTFS", plainNtfs.ClassificationDisplay);
+    }
+
+    /// <summary>
+    /// Both flags default to known, so the mock scenarios, the fakes and every hand-built volume in
+    /// the suite keep meaning what they always meant. Only the live probe clears them.
+    /// </summary>
+    [TestMethod]
+    public void AHandBuiltVolumeIsKnownUnlessItSaysOtherwise()
+    {
+        var volume = new StorageVolume(
+            @"C:\", "C:", "Windows", "NTFS", 1000, 400, IsReFS: false, IsDevDrive: false, IsTrusted: false);
+
+        Assert.IsTrue(volume.IsDevDriveStateKnown);
+        Assert.IsTrue(volume.IsSizeKnown);
+    }
+
+    /// <summary>
+    /// The guard on the new nullable plumbing: if <c>flags.HasValue</c> or the size pair were wired
+    /// backwards, every volume on a perfectly readable machine would start reporting as unknown and
+    /// nothing else in the suite would notice.
+    /// </summary>
+    [TestMethod]
+    public void EveryFixedVolumeOnThisMachineIsActuallyRead()
+    {
+        IReadOnlyList<StorageVolume> volumes = new SystemVolumeProvider().GetFixedVolumes();
+
+        Assert.IsNotEmpty(volumes);
+        foreach (StorageVolume volume in volumes)
+        {
+            Assert.IsTrue(
+                volume.IsDevDriveStateKnown,
+                $"{volume.DriveLetter} is a readable fixed volume; its Dev Drive state should be known");
+            Assert.IsTrue(
+                volume.IsSizeKnown,
+                $"{volume.DriveLetter} reported {volume.CapacityBytes} bytes, so its size should be known");
+        }
+    }
+
+    /// <summary>
+    /// The invariant that makes the flag trustworthy: a positive verdict can only come from a probe
+    /// that ran. A volume claiming to be a Dev Drive while claiming nobody asked is incoherent.
+    /// </summary>
+    [TestMethod]
+    public void NoVolumeClaimsADevDriveVerdictItNeverProbedFor()
+    {
+        foreach (StorageVolume volume in new SystemVolumeProvider().GetFixedVolumes())
+        {
+            if (volume.IsDevDrive || volume.IsTrusted)
+            {
+                Assert.IsTrue(
+                    volume.IsDevDriveStateKnown,
+                    $"{volume.DriveLetter} reports Dev Drive flags but claims the state is unknown");
+            }
+        }
+    }
 }

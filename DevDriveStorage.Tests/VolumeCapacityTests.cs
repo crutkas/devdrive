@@ -90,6 +90,42 @@ public sealed class VolumeCapacityTests
         Assert.AreEqual("NTFS · System", VolumeCapacity.CaptionFor(windows, isSystemVolume: true));
         Assert.AreEqual("NTFS", VolumeCapacity.CaptionFor(windows, isSystemVolume: false));
     }
+
+    /// <summary>
+    /// An unread volume gets its own qualifier rather than falling through to bare filesystem. With
+    /// no qualifier it renders byte-identically to a volume we checked and found ordinary, which is
+    /// the same unknown-looks-like-false defect the flag exists to close — just moved one control
+    /// along, into the strip caption where the user actually reads it.
+    /// </summary>
+    [TestMethod]
+    public void AnUnreadVolumesCaptionDoesNotReadLikeAnOrdinaryOne()
+    {
+        StorageVolume plain = new("E:\\", "E", "Data", "ReFS", 1000, 400, true, false, false);
+        StorageVolume unread = plain with { IsDevDriveStateKnown = false };
+
+        Assert.AreEqual("ReFS", VolumeCapacity.CaptionFor(plain));
+        Assert.AreNotEqual(
+            VolumeCapacity.CaptionFor(plain),
+            VolumeCapacity.CaptionFor(unread),
+            "an unread volume must not caption identically to one we read and found ordinary");
+        StringAssert.Contains(VolumeCapacity.CaptionFor(unread), "unknown");
+    }
+
+    /// <summary>
+    /// Unknown outranks System. Both are true of a locked system volume, and "System" is the one
+    /// the reader already knows — it is the drive Windows booted from, which is not news. That the
+    /// probe failed is.
+    /// </summary>
+    [TestMethod]
+    public void UnknownOutranksTheSystemQualifier()
+    {
+        StorageVolume windows = new("C:\\", "C", "Windows", "NTFS", 1000, 400, false, false, false)
+        {
+            IsDevDriveStateKnown = false,
+        };
+
+        StringAssert.Contains(VolumeCapacity.CaptionFor(windows, isSystemVolume: true), "unknown");
+    }
     // ---- AfterReclaim: the one-bar after-picture ----
 
     [TestMethod]

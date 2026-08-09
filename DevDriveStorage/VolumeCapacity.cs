@@ -192,8 +192,13 @@ public static class VolumeCapacity
 
         // Only one qualifier is shown. Trusted implies Dev Drive, and a Dev Drive is never the system
         // volume, so these cannot collide — and stacking them would cost the strip its density.
+        //
+        // An unread volume gets its own qualifier rather than falling through to silence: with no
+        // qualifier it renders identically to a volume we checked and found ordinary, which is the
+        // same unknown-looks-like-false defect the flag exists to close.
         string? qualifier = volume switch
         {
+            { IsDevDriveStateKnown: false } => "Dev Drive unknown",
             { IsDevDrive: true, IsTrusted: true } => "Trusted",
             { IsDevDrive: true } => "Dev Drive",
             _ when isSystemVolume => "System",

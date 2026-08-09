@@ -18,15 +18,48 @@ public sealed record StorageVolume(
     bool IsDevDrive,
     bool IsTrusted)
 {
+    /// <summary>
+    /// False when the Dev Drive probe could not run — the volume root would not open, or the FSCTL
+    /// refused.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Without this, "we asked and the answer was no" and "we could not ask" arrive looking
+    /// identical, and a BitLockered or locked ReFS Dev Drive is reported as an ordinary ReFS
+    /// volume — a confident claim about the one property this product exists to manage, made on
+    /// no evidence at all.
+    /// </para>
+    /// <para>
+    /// Defaults to <see langword="true"/> so every construction site that knows what it is building
+    /// — tests, fakes, scenarios — is unaffected; only the live probe clears it. Same shape, and the
+    /// same reasoning, as <c>VolumeInfo.IsDevDriveStateKnown</c> in DevDriveCore.
+    /// </para>
+    /// </remarks>
+    public bool IsDevDriveStateKnown { get; init; } = true;
+
+    /// <summary>
+    /// False when capacity or free space could not be read. <see cref="CapacityBytes"/> and
+    /// <see cref="FreeBytes"/> are 0 in that case, which is also a legitimate answer to a different
+    /// question — hence the flag rather than a sentinel.
+    /// </summary>
+    public bool IsSizeKnown { get; init; } = true;
+
     public long UsedBytes => Math.Max(0, CapacityBytes - FreeBytes);
 
     /// <summary>Short label for pickers, e.g. "Dev Drive (D:)" or "Windows (C:)".</summary>
     public string DisplayName =>
         string.IsNullOrWhiteSpace(Label) ? DriveLetter : $"{Label} ({DriveLetter})";
 
-    public string ClassificationDisplay => IsDevDrive
-        ? IsTrusted ? "Dev Drive · trusted" : "Dev Drive"
-        : IsReFS ? "ReFS volume" : FileSystem;
+    /// <summary>
+    /// What this volume is, in one phrase. Never asserts a Dev Drive verdict the probe did not
+    /// actually return: an unread volume names its filesystem and says the rest is unknown, because
+    /// "ReFS volume" reads as a finding rather than as a gap.
+    /// </summary>
+    public string ClassificationDisplay => !IsDevDriveStateKnown
+        ? $"{FileSystem} · Dev Drive unknown"
+        : IsDevDrive
+            ? IsTrusted ? "Dev Drive · trusted" : "Dev Drive"
+            : IsReFS ? "ReFS volume" : FileSystem;
 }
 
 /// <summary>
@@ -126,14 +159,26 @@ public sealed class SystemVolumeProvider : IVolumeProvider
             string letter = root.TrimEnd('\\');
             string fileSystem = SafeString(() => drive.DriveFormat, "Unknown");
             string label = SafeString(() => drive.VolumeLabel, string.Empty);
-            long capacity = SafeLong(() => drive.TotalSize);
-            long free = SafeLong(() => drive.TotalFreeSpace);
+            long? capacity = SafeLong(() => drive.TotalSize);
+            long? free = SafeLong(() => drive.TotalFreeSpace);
 
-            (bool isDev, bool isTrusted) = QueryDevDriveFlags(root);
+            uint? flags = QueryPersistentVolumeState(root);
             bool isReFS = string.Equals(fileSystem, "ReFS", StringComparison.OrdinalIgnoreCase);
 
             return new StorageVolume(
-                root, letter, label, fileSystem, capacity, free, isReFS, isDev, isTrusted);
+                root,
+                letter,
+                label,
+                fileSystem,
+                capacity ?? 0,
+                free ?? 0,
+                isReFS,
+                (flags & DevVolumeFlag) != 0,
+                (flags & TrustedVolumeFlag) != 0)
+            {
+                IsDevDriveStateKnown = flags.HasValue,
+                IsSizeKnown = capacity.HasValue && free.HasValue,
+            };
         }
         catch (IOException)
         {
@@ -145,7 +190,23 @@ public sealed class SystemVolumeProvider : IVolumeProvider
         }
     }
 
-    private (bool IsDevDrive, bool IsTrusted) QueryDevDriveFlags(string volumeRootPath)
+    /// <summary>
+    /// Reads the volume's persistent state flags, or null when the probe could not run.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Null is not "no flags are set" — it is "nobody asked the volume". A handle that will not
+    /// open (BitLocker locked, permissions, a volume that vanished between enumeration and probe)
+    /// and an FSCTL that refuses both land here, and both are indistinguishable from a plain NTFS
+    /// answer of 0x0000 if they are folded into a bool.
+    /// </para>
+    /// <para>
+    /// Mirrors <c>NativeVolumeApi.QueryPersistentVolumeState</c> in DevDriveCore, which returns
+    /// <c>uint?</c> for the same reason. The declaration is duplicated rather than shared because
+    /// this library deliberately depends on nothing but .NET and Win32 — see the class remarks.
+    /// </para>
+    /// </remarks>
+    private uint? QueryPersistentVolumeState(string volumeRootPath)
     {
         try
         {
@@ -160,7 +221,7 @@ public sealed class SystemVolumeProvider : IVolumeProvider
 
             if (handle.IsInvalid)
             {
-                return (false, false);
+                return null;
             }
 
             var input = new FILE_FS_PERSISTENT_VOLUME_INFORMATION
@@ -178,22 +239,15 @@ public sealed class SystemVolumeProvider : IVolumeProvider
                 ref output, size,
                 out _, IntPtr.Zero);
 
-            if (!ok)
-            {
-                return (false, false);
-            }
-
-            bool isDev = (output.VolumeFlags & DevVolumeFlag) != 0;
-            bool isTrusted = (output.VolumeFlags & TrustedVolumeFlag) != 0;
-            return (isDev, isTrusted);
+            return ok ? output.VolumeFlags : null;
         }
         catch (DllNotFoundException)
         {
-            return (false, false);
+            return null;
         }
         catch (EntryPointNotFoundException)
         {
-            return (false, false);
+            return null;
         }
     }
 
@@ -214,7 +268,12 @@ public sealed class SystemVolumeProvider : IVolumeProvider
         }
     }
 
-    private static long SafeLong(Func<long> read)
+    /// <summary>
+    /// Reads a size, or null when it could not be read. Null rather than 0, because 0 is a
+    /// legitimate answer to a different question — a volume with nothing free reads exactly the
+    /// same as one nobody could measure.
+    /// </summary>
+    private static long? SafeLong(Func<long> read)
     {
         try
         {
@@ -222,11 +281,11 @@ public sealed class SystemVolumeProvider : IVolumeProvider
         }
         catch (IOException)
         {
-            return 0;
+            return null;
         }
         catch (UnauthorizedAccessException)
         {
-            return 0;
+            return null;
         }
     }
 }

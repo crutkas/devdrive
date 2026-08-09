@@ -148,8 +148,13 @@ public sealed partial class VolumeCard : UserControl
         PartName.Text = volume.DisplayName;
         PartCaption.Text = VolumeCapacity.CaptionFor(volume, IsSystemVolume);
 
-        string free = ByteSize.Format(volume.FreeBytes <= 0 ? 0UL : (ulong)volume.FreeBytes);
-        PartFree.Text = $"{free} free";
+        // An em dash, not "0 B": under a label that promises free space, a zero is a measurement.
+        // The same rule the Caches room already follows for an undetected cache's size.
+        string free = volume.IsSizeKnown
+            ? $"{ByteSize.Format(volume.FreeBytes <= 0 ? 0UL : (ulong)volume.FreeBytes)} free"
+            : "\u2014 free";
+
+        PartFree.Text = free;
 
         PartBar.AccentRole = AccentRole;
         PartBar.Capacity = VolumeCapacity.ForVolume(volume, ReclaimableBytes);
@@ -172,7 +177,7 @@ public sealed partial class VolumeCard : UserControl
         // and free space have to travel with the name rather than sit in unread sibling TextBlocks.
         AutomationProperties.SetName(
             PartButton,
-            $"{volume.DisplayName}, {PartCaption.Text}, {free} free");
+            $"{volume.DisplayName}, {PartCaption.Text}, {free}");
     }
 
     private void OnCardClick(object sender, RoutedEventArgs e) => Selected?.Invoke(this, EventArgs.Empty);
