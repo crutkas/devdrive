@@ -8,7 +8,8 @@ public sealed record ReclaimCategoryResult(
     ReclaimCategory Category,
     ImmutableArray<ReclaimCandidate> Candidates,
     string? FailureReason = null,
-    TimeSpan Elapsed = default)
+    TimeSpan Elapsed = default,
+    bool Cancelled = false)
 {
     public bool Succeeded => FailureReason is null;
 
@@ -56,6 +57,18 @@ public sealed class ReclaimResult
     public ImmutableArray<ReclaimCategoryResult> FailedCategories =>
         [.. Categories.Where(c => !c.Succeeded)];
 
+    /// <summary>
+    /// Categories that never finished because the user stopped the scan. Separate from
+    /// <see cref="FailedCategories"/> because the two need different words: a category that failed
+    /// hit something the app could not handle, while one that was cancelled was simply not reached.
+    /// Both make <see cref="TotalBytes"/> a floor, but only one of them is the app's fault.
+    /// </summary>
+    public ImmutableArray<ReclaimCategoryResult> CancelledCategories =>
+        [.. Categories.Where(c => c.Cancelled)];
+
+    /// <summary>True when the scan ran to completion with every category checked.</summary>
+    public bool Complete => Categories.All(c => c.Succeeded);
+
     /// <summary>Reclaimable bytes in a risk tier, nesting resolved within that tier.</summary>
     public long BytesFor(ReclaimRisk risk) =>
         ReclaimOverlapResolver.ReclaimableBytes(AllCandidates.Where(c => c.Risk == risk));
@@ -101,6 +114,13 @@ public sealed class ReclaimEngine(IEnumerable<IReclaimProvider> providers)
     public ImmutableArray<ReclaimCategory> Categories =>
         [.. _providers.Select(p => p.Category).OrderBy(c => c.Order)];
 
+    /// <summary>
+    /// Runs every provider concurrently and returns what they found. Cancellation returns the
+    /// categories that <em>did</em> finish rather than throwing them away: this scan is 174 s warm
+    /// and 497 s cold, so a user who stops at 480 s has waited out almost all of it, and answering
+    /// them with nothing punishes them for stopping. Unreached categories come back marked, so the
+    /// room can say the total is a floor rather than presenting a partial answer as a complete one.
+    /// </summary>
     public async Task<ReclaimResult> ScanAsync(
         ReclaimScanContext context,
         IProgress<ReclaimScanProgress>? progress = null,
@@ -144,7 +164,11 @@ public sealed class ReclaimEngine(IEnumerable<IReclaimProvider> providers)
         }
         catch (OperationCanceledException)
         {
-            throw;
+            // Degraded, not fatal. Returning rather than rethrowing is what lets Task.WhenAll
+            // complete and hand back the categories that finished before the user pressed Cancel.
+            return new ReclaimCategoryResult(
+                provider.Category, [], "Cancelled before this finished",
+                Stopwatch.GetElapsedTime(startedAt), Cancelled: true);
         }
         catch (Exception exception)
         {

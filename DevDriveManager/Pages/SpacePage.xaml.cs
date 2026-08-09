@@ -560,9 +560,18 @@ public sealed partial class SpacePage : Page, INotifyPropertyChanged
         bool menu = InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Menu)
             .HasFlag(CoreVirtualKeyStates.Down);
 
-        if (args.Key == VirtualKey.F5 && ViewModel.Snapshot is not null)
+        // Through the command, never straight to RefreshAsync. RefreshCommand carries the
+        // !IsScanning predicate that the scan button and every other caller respect; calling the
+        // method directly walked around it, and Snapshot goes non-null about 100 ms into a scan when
+        // the first partial lands. Held-down F5 auto-repeats ~30×/s, and each one cancelled and
+        // relaunched a full-volume walk whose predecessor only stops at its next directory
+        // boundary — dozens of concurrent walks fighting each other for the same disk, with the room
+        // unable to settle for as long as the key was down.
+        if (args.Key == VirtualKey.F5 &&
+            ViewModel.Snapshot is not null &&
+            ViewModel.RefreshCommand.CanExecute(null))
         {
-            _ = ViewModel.RefreshAsync();
+            ViewModel.RefreshCommand.Execute(null);
             args.Handled = true;
         }
         else if (menu && args.Key == VirtualKey.Up)

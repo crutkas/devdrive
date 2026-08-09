@@ -62,6 +62,14 @@ public sealed partial class TreemapPane : UserControl
     {
         InitializeComponent();
         ActualThemeChanged += (_, _) => Render();
+
+        // Rows is a OneTime bind to App.SharedSpace.VisibleItems — an app-lifetime collection — so
+        // the unhook in OnRowsChanged is unreachable: the property is written once and never again.
+        // Without this pair, every visit to the Space room left another pane (and, through the XAML
+        // parent chain, its whole page) subscribed to that collection forever, each one re-running a
+        // full projection and rectangle rebuild on every reconciliation tick of every later scan.
+        Loaded += (_, _) => HookRows();
+        Unloaded += (_, _) => UnhookRows();
     }
 
     public event EventHandler<StorageNodeInvokedEventArgs>? NodeInvoked;
@@ -89,18 +97,33 @@ public sealed partial class TreemapPane : UserControl
         DependencyPropertyChangedEventArgs args)
     {
         var pane = (TreemapPane)dependencyObject;
-        if (pane._observableRows is not null)
-        {
-            pane._observableRows.CollectionChanged -= pane.Rows_CollectionChanged;
-        }
-
-        pane._observableRows = args.NewValue as INotifyCollectionChanged;
-        if (pane._observableRows is not null)
-        {
-            pane._observableRows.CollectionChanged += pane.Rows_CollectionChanged;
-        }
-
+        pane.UnhookRows();
+        pane.HookRows();
         pane.Render();
+    }
+
+    /// <summary>
+    /// Idempotent by construction: the handler is removed before it is added, so a pane that leaves
+    /// and re-enters the visual tree — which WinUI allows without reconstructing it — attaches
+    /// exactly once rather than once per visit.
+    /// </summary>
+    private void HookRows()
+    {
+        _observableRows = Rows as INotifyCollectionChanged;
+        if (_observableRows is not null)
+        {
+            _observableRows.CollectionChanged -= Rows_CollectionChanged;
+            _observableRows.CollectionChanged += Rows_CollectionChanged;
+        }
+    }
+
+    private void UnhookRows()
+    {
+        if (_observableRows is not null)
+        {
+            _observableRows.CollectionChanged -= Rows_CollectionChanged;
+            _observableRows = null;
+        }
     }
 
     private static void OnRevisionChanged(

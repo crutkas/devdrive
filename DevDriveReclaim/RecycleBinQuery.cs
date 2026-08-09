@@ -12,10 +12,21 @@ namespace DevDriveReclaim;
 /// how much the bin is holding, and the executor that checks whether an item genuinely reached it —
 /// must agree about the layout or they will disagree about reality.
 /// <para>
-/// <b>No <c>Pack</c>.</b> The header does not pack <c>SHQUERYRBINFO</c>: the two <c>__int64</c>
-/// fields are 8-byte aligned, so <c>i64Size</c> sits at offset 8 behind four bytes of padding.
-/// <c>cbSize</c> is filled from <see cref="Marshal.SizeOf{T}()"/> so the declared size can never
-/// drift from the actual layout.
+/// <b>No <c>Pack</c>.</b> The header does not pack <c>SHQUERYRBINFO</c> <em>for 64-bit targets</em>:
+/// the two <c>__int64</c> fields are 8-byte aligned, so <c>i64Size</c> sits at offset 8 behind four
+/// bytes of padding. <c>shellapi.h</c> does apply <c>pshpack1</c> under
+/// <c>#if !defined(_WIN64)</c>, so this declaration would need <c>Pack = 1</c> if x86 were ever
+/// added to <c>&lt;Platforms&gt;</c>. <c>cbSize</c> is filled from
+/// <see cref="Marshal.SizeOf{T}()"/> so the declared size can never drift from the actual layout.
+/// </para>
+/// <para>
+/// <b>Apartment.</b> <see cref="ReclaimExecutor"/> goes to the trouble of a dedicated STA thread
+/// because <c>SHFileOperation</c> is documented to need an initialised apartment. These queries
+/// deliberately do not, and the distinction is worth stating rather than leaving to be rediscovered:
+/// this class is reached from both sides — the executor's STA thread, and the provider's plain
+/// thread-pool thread during a scan. It is a read-only query that returns an HRESULT rather than
+/// driving shell UI, and <see cref="TryQuery"/> degrades to <c>false</c> on any non-zero result, so
+/// the worst case is a Recycle Bin category that reports nothing rather than a wrong number.
 /// </para>
 /// </remarks>
 internal static class RecycleBinQuery

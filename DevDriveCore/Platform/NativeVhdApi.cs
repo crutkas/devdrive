@@ -57,10 +57,29 @@ public sealed class NativeVhdApi : INativeVhdApi
         public Guid VendorId;
     }
 
+    /// <summary>
+    /// The native <c>CREATE_VIRTUAL_DISK_PARAMETERS</c> is a <c>ULONG Version</c> followed by an
+    /// anonymous union. Every member of that union starts with a <c>GUID</c> but also contains
+    /// <c>ULONGLONG</c> and <c>PCWSTR</c> fields, so the union's alignment is 8 and the compiler
+    /// inserts four bytes after <c>Version</c>. Flattening the union away in C# loses that: a
+    /// <see cref="Guid"/> aligns to 4, so <c>UniqueId</c> would land at offset 4 and every byte of
+    /// it would be read from the wrong place.
+    /// <para>
+    /// The explicit pad is load-bearing and invisible. Total size is 56 either way — the gap simply
+    /// moves from before the GUID to after it — and every field <em>after</em> <c>UniqueId</c> is
+    /// correctly placed in both layouts, so a size assertion passes and the struct appears fine.
+    /// It is also silent at runtime today, because the one caller passes <see cref="Guid.Empty"/>
+    /// and the managed padding is zero-filled, which virtdisk reads as GUID_NULL and honours as
+    /// "assign one for me". The first caller to pass a real identifier would get a disk created
+    /// with a different ID than it asked for, and no error. Verified against
+    /// <c>10.0.26100.0\um\virtdisk.h</c>, which applies no <c>pshpack</c>.
+    /// </para>
+    /// </summary>
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     private struct CREATE_VIRTUAL_DISK_PARAMETERS_V1
     {
         public uint Version;
+        public uint UnionAlignmentPadding;
         public Guid UniqueId;
         public ulong MaximumSize;
         public uint BlockSizeInBytes;

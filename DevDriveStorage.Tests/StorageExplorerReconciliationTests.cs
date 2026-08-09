@@ -43,6 +43,11 @@ public sealed class StorageExplorerReconciliationTests
             [Stage(docs: 100, build: 40)],
             [Stage(docs: 500, build: 40), Stage(docs: 900, build: 40), Stage(docs: 900, build: 40)]));
 
+        await viewModel.LoadScenarioAsync("test");
+
+        // Subscribe after the scenario load, because a scenario switch is a different gesture and
+        // is *supposed* to clear the table — see ChangingScenarioEmptiesTheTableRatherThanShowing
+        // TheOldDrive. Counting both together would let a regression in either hide behind the other.
         var resets = 0;
         ((INotifyCollectionChanged)viewModel.VisibleItems).CollectionChanged += (_, args) =>
         {
@@ -52,12 +57,32 @@ public sealed class StorageExplorerReconciliationTests
             }
         };
 
-        await viewModel.LoadScenarioAsync("test");
         await viewModel.RefreshAsync();
 
         // A reset tells the list that everything it has built is gone, which is exactly the
         // rebuild-per-tick this design exists to stop.
         Assert.AreEqual(0, resets, "a streamed update must not reset the table");
+    }
+
+    [TestMethod]
+    public async Task ChangingScenarioEmptiesTheTableRatherThanShowingTheOldDrive()
+    {
+        var source = new SwitchableSource(Stage(docs: 100, build: 40));
+        var viewModel = new StorageExplorerViewModel(source);
+        await viewModel.LoadScenarioAsync("first");
+        Assert.IsNotEmpty(viewModel.VisibleItems);
+
+        // The second scan fails before it publishes anything — an ejected drive, a locked volume,
+        // a root that no longer exists. Nothing replaces the table, so whatever the switch left
+        // behind is what the user is looking at underneath the error card.
+        source.FailNext(new IOException("the drive went away"));
+        await viewModel.LoadScenarioAsync("second");
+
+        Assert.IsEmpty(
+            viewModel.VisibleItems,
+            "a failed switch must not leave the previous drive's rows on screen");
+        Assert.IsNull(viewModel.Snapshot, "nor pin the previous drive's node graph behind them");
+        Assert.IsEmpty(viewModel.Breadcrumbs);
     }
 
     [TestMethod]
@@ -340,5 +365,20 @@ public sealed class StorageExplorerReconciliationTests
 
             return Task.FromResult(stages[^1]);
         }
+    }
+
+    /// <summary>Serves one snapshot until told to fail, which is what a switched-to drive that is
+    /// no longer readable looks like: the scan throws before it ever publishes a partial.</summary>
+    private sealed class SwitchableSource(StorageSnapshot snapshot) : IStorageSnapshotSource
+    {
+        private Exception? _failure;
+
+        public void FailNext(Exception exception) => _failure = exception;
+
+        public Task<StorageSnapshot> GetSnapshotAsync(
+            StorageSnapshotRequest request,
+            IProgress<StorageScanProgress>? progress,
+            CancellationToken cancellationToken) =>
+            _failure is null ? Task.FromResult(snapshot) : throw _failure;
     }
 }

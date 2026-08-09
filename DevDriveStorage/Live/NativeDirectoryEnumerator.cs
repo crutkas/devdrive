@@ -151,11 +151,34 @@ internal static class NativeDirectoryEnumerator
         }
     }
 
+    /// <summary>
+    /// Walks one buffer of variable-length records. Every offset the kernel hands back is validated
+    /// against the buffer before it is used: <c>NextEntryOffset</c> is a <c>ULONG</c> read as a
+    /// signed <c>int</c>, so a hostile or buggy filesystem returning ≥ 0x80000000 would otherwise
+    /// walk the cursor backwards, and an over-long <c>FileNameLength</c> would read past the end.
+    /// Neither produces a catchable exception — <see cref="Marshal.PtrToStringUni(IntPtr, int)"/>
+    /// off the end of an <see cref="Marshal.AllocHGlobal(int)"/> block raises an
+    /// <see cref="AccessViolationException"/>, which .NET treats as corrupted state and does not
+    /// deliver to managed handlers, so the caller's "fall back to the managed path" contract could
+    /// not hold and the process would simply die mid-scan.
+    /// </summary>
+    /// <exception cref="InvalidDataException">
+    /// A record does not fit the buffer. Thrown rather than returning what was read so far, because
+    /// a silently truncated directory listing undercounts sizes without ever saying so; the caller
+    /// catches this and re-reads the directory through the fully-correct managed enumerator.
+    /// </exception>
     private static void ParseBuffer(IntPtr buffer, int nameOffset, List<NativeDirEntry> entries)
     {
         int offset = 0;
         while (true)
         {
+            // nameOffset (88 or 104) is past every fixed field, so this covers the header too.
+            if (offset < 0 || offset > BufferSize - nameOffset)
+            {
+                throw new InvalidDataException(
+                    $"Directory record at offset {offset} does not fit the {BufferSize}-byte buffer.");
+            }
+
             IntPtr record = buffer + offset;
             int nextEntry = Marshal.ReadInt32(record, OffsetNextEntry);
             long lastWrite = Marshal.ReadInt64(record, OffsetLastWriteTime);
@@ -163,6 +186,12 @@ internal static class NativeDirectoryEnumerator
             long allocation = Marshal.ReadInt64(record, OffsetAllocationSize);
             uint attributes = unchecked((uint)Marshal.ReadInt32(record, OffsetFileAttributes));
             int nameLengthBytes = Marshal.ReadInt32(record, OffsetFileNameLength);
+
+            if (nameLengthBytes < 0 || nameLengthBytes > BufferSize - offset - nameOffset)
+            {
+                throw new InvalidDataException(
+                    $"Directory record at offset {offset} claims a {nameLengthBytes}-byte name.");
+            }
 
             string name = nameLengthBytes > 0
                 ? Marshal.PtrToStringUni(record + nameOffset, nameLengthBytes / 2) ?? string.Empty
@@ -181,6 +210,14 @@ internal static class NativeDirectoryEnumerator
             if (nextEntry == 0)
             {
                 return;
+            }
+
+            // Strictly forward, and strictly inside the buffer. Subtraction rather than addition so
+            // a large nextEntry cannot overflow the comparison it is meant to fail.
+            if (nextEntry < 0 || nextEntry > BufferSize - offset)
+            {
+                throw new InvalidDataException(
+                    $"Directory record at offset {offset} points {nextEntry} bytes on.");
             }
 
             offset += nextEntry;

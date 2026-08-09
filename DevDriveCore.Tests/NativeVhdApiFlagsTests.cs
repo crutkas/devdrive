@@ -57,13 +57,31 @@ public sealed class NativeVhdApiFlagsTests
     }
 
     [TestMethod]
-    public void CreateParametersV1_HaveTheExpectedManagedLayout()
+    public void CreateParametersV1_PutEveryFieldWhereVirtdiskExpectsIt()
     {
-        // CREATE_VIRTUAL_DISK_PARAMETERS_V1: Version + Guid + MaximumSize + BlockSize + SectorSize, then
-        // two LPWStr pointers. The fixed prefix marshals to 40 bytes; the two pointers add 2 * IntPtr.Size
-        // (56 on x64, 48 on x86). Asserting against IntPtr.Size keeps the guard architecture-robust while
-        // still catching any field add/remove or re-ordering.
-        int expected = 40 + (2 * IntPtr.Size);
-        Assert.AreEqual(expected, Marshal.SizeOf(NestedType("CREATE_VIRTUAL_DISK_PARAMETERS_V1")));
+        // Field-by-field, not just total size. The size check this replaced could not fail: the
+        // native struct's anonymous union forces UniqueId to offset 8, the managed Guid wanted
+        // offset 4, and the four bytes of padding merely moved from before the GUID to after it —
+        // so the total stayed 56, every later field stayed correct, and the one misplaced field
+        // sailed through. Offsets below are from 10.0.26100.0\um\virtdisk.h, which applies no
+        // pshpack: ULONG Version, then a union whose members contain ULONGLONG and PCWSTR and
+        // therefore align to 8.
+        Type type = NestedType("CREATE_VIRTUAL_DISK_PARAMETERS_V1");
+
+        AssertOffset(type, "Version", 0);
+        AssertOffset(type, "UniqueId", 8);
+        AssertOffset(type, "MaximumSize", 24);
+        AssertOffset(type, "BlockSizeInBytes", 32);
+        AssertOffset(type, "SectorSizeInBytes", 36);
+        AssertOffset(type, "ParentPath", 40);
+        AssertOffset(type, "SourcePath", 48);
+
+        Assert.AreEqual(56, Marshal.SizeOf(type), "The whole struct must be 56 bytes on x64.");
     }
+
+    private static void AssertOffset(Type type, string field, int expected) =>
+        Assert.AreEqual(
+            expected,
+            Marshal.OffsetOf(type, field).ToInt32(),
+            $"{field} must marshal to offset {expected}; virtdisk reads it from there regardless.");
 }

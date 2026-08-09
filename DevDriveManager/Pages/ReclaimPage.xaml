@@ -29,7 +29,7 @@
         <controls:RoomScanBar
             x:Name="ScanBar"
             Grid.Row="0"
-            CanScan="True"
+            CanScan="{x:Bind ViewModel.CanScan, Mode=OneWay}"
             CancelRequested="ScanBar_CancelRequested"
             IsScanning="{x:Bind ViewModel.IsScanning, Mode=OneWay}"
             ScanLabel="Scan this PC"

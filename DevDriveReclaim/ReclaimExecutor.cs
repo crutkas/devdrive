@@ -140,18 +140,32 @@ public sealed class ReclaimExecutor : IReclaimExecutor
                 ? container
                 : "another selected item";
 
-            bool containerRemoved =
+            ReclaimItemOutcome? containerOutcome =
                 container is not null &&
-                rootOutcomes.TryGetValue(container, out ReclaimItemOutcome? containerOutcome) &&
-                containerOutcome.Removed;
+                rootOutcomes.TryGetValue(container, out ReclaimItemOutcome? found)
+                    ? found
+                    : null;
 
-            outcomes.Add(containerRemoved
-                ? new ReclaimItemOutcome(candidate, ReclaimItemStatus.Absorbed, 0, $"removed with {parent}")
-                : new ReclaimItemOutcome(
+            // Its container's fate, not the run's. Reading the run-wide flag meant a child whose
+            // container was reached and genuinely failed got labelled Cancelled purely because some
+            // unrelated item later in the ordering was never reached — which drops it out of
+            // outcome.Failures, so the row keeps no failure text and stays ticked while the executor
+            // knew the exact reason all along.
+            outcomes.Add(containerOutcome switch
+            {
+                { Removed: true } => new ReclaimItemOutcome(
+                    candidate, ReclaimItemStatus.Absorbed, 0, $"removed with {parent}"),
+                { Status: ReclaimItemStatus.Cancelled } => new ReclaimItemOutcome(
+                    candidate, ReclaimItemStatus.Cancelled, 0, "not reached — the run was stopped"),
+                not null => new ReclaimItemOutcome(
+                    candidate, ReclaimItemStatus.Failed, 0,
+                    $"still here — {parent} could not be removed"),
+                null => new ReclaimItemOutcome(
                     candidate,
                     cancelled ? ReclaimItemStatus.Cancelled : ReclaimItemStatus.Failed,
                     0,
-                    $"still here — {parent} could not be removed"));
+                    $"still here — {parent} could not be removed"),
+            });
         }
 
         return new ReclaimOutcome(outcomes, cancelled);
@@ -207,11 +221,22 @@ public sealed class ReclaimExecutor : IReclaimExecutor
         int hr = SHEmptyRecycleBinW(
             IntPtr.Zero, volumeRoot, NoConfirmation | NoProgressUi | NoSound);
 
-        // S_OK, or "the bin was already empty" — which is a success from the user's point of view
-        // even though the scan that found bytes there was reading a moment that has passed.
-        const int AlreadyEmpty = unchecked((int)0x8000FFFF);
+        if (hr == 0)
+        {
+            return new ReclaimItemOutcome(
+                candidate, ReclaimItemStatus.Emptied, candidate.SizeBytes,
+                $"emptied the Recycle Bin on {volumeRoot.TrimEnd('\\')}");
+        }
 
-        return hr is 0 or AlreadyEmpty
+        // 0x8000FFFF is E_UNEXPECTED, the generic catastrophic-failure HRESULT. SHEmptyRecycleBin
+        // documents S_OK for success and "a COM-defined error value" otherwise; there is no
+        // documented code for "it was already empty", so reading this one as success was a guess —
+        // and an expensive one, because Emptied credits the bin's whole size to the run's headline
+        // and this is the one path here with no undo. Ask instead of assume: the sibling Recycle
+        // path already verifies its claim with SHQueryRecycleBin, and this borrows the same check.
+        bool empty = RecycleBinQuery.TryQuery(volumeRoot, out _, out long remaining) && remaining == 0;
+
+        return empty
             ? new ReclaimItemOutcome(
                 candidate, ReclaimItemStatus.Emptied, candidate.SizeBytes,
                 $"emptied the Recycle Bin on {volumeRoot.TrimEnd('\\')}")
@@ -326,6 +351,13 @@ public sealed class ReclaimExecutor : IReclaimExecutor
     /// bytes of padding after <c>wFunc</c>. Packing tightly moves it to offset 12, the shell reads a
     /// pointer straddling two fields, and the process dies with an access violation inside
     /// shell32 — no managed exception, no chance to report anything.
+    /// <para>
+    /// That is true <em>because this app is 64-bit only</em>. <c>shellapi.h</c> wraps this struct in
+    /// <c>#include &lt;pshpack1.h&gt;</c> under <c>#if !defined(_WIN64)</c>, so the copied
+    /// <c>Pack = 1</c> is correct on x86 and only wrong here. Every project pins
+    /// <c>&lt;Platforms&gt;x64;ARM64&lt;/Platforms&gt;</c>; if x86 is ever added, this declaration
+    /// and <c>SHQUERYRBINFO</c> both need <c>Pack = 1</c> under that target.
+    /// </para>
     /// </remarks>
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     private struct ShFileOpStruct

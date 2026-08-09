@@ -233,7 +233,14 @@ public sealed partial class ReclaimViewModel : ObservableObject
 
     public string SelectedBytesText => ReclaimFormat.Bytes(SelectedBytes);
 
-    /// <summary>Everything found, nesting resolved. The honest headline.</summary>
+    /// <summary>
+    /// Everything found, nesting resolved. The honest headline — and honest specifically because it
+    /// is <em>derived</em> from the rows on screen in <see cref="RecomputeTotals"/> rather than
+    /// assigned from a scan result. Assigning it meant a cancelled or failed rescan left the
+    /// previous run's number sitting above an emptied table (and in the Overview room's tile), which
+    /// is the one failure this room exists to prevent: a number someone acts on that the current
+    /// table cannot corroborate.
+    /// </summary>
     [ObservableProperty]
     public partial long FoundBytes { get; set; }
 
@@ -293,6 +300,18 @@ public sealed partial class ReclaimViewModel : ObservableObject
     public bool CanReclaim => SelectedRiskMix.HasAny && !IsReclaiming && !IsScanning;
 
     /// <summary>
+    /// The mirror of <see cref="CanReclaim"/>, and the reason it exists. Exclusion was enforced in
+    /// one direction only: Reclaim disabled itself during a scan, but the scan button stayed live
+    /// during a reclaim. Pressing it mid-delete cleared every category's rows, so when the executor
+    /// returned, the loop that writes each failure onto its row had nothing left to write onto — the
+    /// summary still said "N items could not be removed and is still listed" while nothing was
+    /// listed, and the concurrent scan re-listed those same folders as ordinary candidates with no
+    /// failure text at all. That is precisely the explanation the delete path was taught to produce.
+    /// Scanning a tree that SHFileOperation is actively emptying also just measures it wrong.
+    /// </summary>
+    public bool CanScan => !IsReclaiming;
+
+    /// <summary>
     /// How many rows are ticked. Paired with <see cref="SelectedBytesText"/> in the totals card,
     /// where the tier cards' own counts cannot be summed — tiers overlap, the total does not.
     /// </summary>
@@ -326,6 +345,7 @@ public sealed partial class ReclaimViewModel : ObservableObject
         OnPropertyChanged(nameof(FooterDetailText));
         OnPropertyChanged(nameof(ReclaimButtonText));
         OnPropertyChanged(nameof(CanReclaim));
+        OnPropertyChanged(nameof(CanScan));
     }
 
     partial void OnIsReclaimingChanged(bool value) => RaiseActionState();
@@ -343,7 +363,10 @@ public sealed partial class ReclaimViewModel : ObservableObject
     [RelayCommand]
     private async Task ScanAsync()
     {
-        if (IsScanning)
+        // Both, not just IsScanning. A scan starting mid-reclaim empties the rows the executor's
+        // outcome is about to be written onto — see CanScan. The button is bound to match, but the
+        // gate has to hold on its own: a command can be invoked from a key handler or a test.
+        if (IsScanning || IsReclaiming)
         {
             return;
         }
@@ -358,6 +381,11 @@ public sealed partial class ReclaimViewModel : ObservableObject
         LastRunSummary = null;
         LastRunHadFailures = false;
         OnPropertyChanged(nameof(HasLastRun));
+
+        // Emptying the table has to empty the claim made about it. A rescan that is cancelled or
+        // fails otherwise leaves the previous run's headline over no rows at all, here and in the
+        // Overview tile. Until this scan puts something back, the truthful answer is "don't know".
+        HasScanned = false;
 
         foreach (ReclaimCategoryViewModel category in Categories)
         {
@@ -378,16 +406,16 @@ public sealed partial class ReclaimViewModel : ObservableObject
                 () => _engine.ScanAsync(_contextFactory(), progress, token), token);
 
             Apply(result);
-            HasScanned = true;
-            StatusText = result.FailedCategories.Length > 0
-                ? $"Found {ReclaimFormat.Bytes(result.TotalBytes)} — {result.FailedCategories.Length} " +
-                  "category could not be checked, so this is a floor."
-                : $"Found {ReclaimFormat.Bytes(result.TotalBytes)}.";
+
+            // A scan that checked nothing has not scanned, whatever it did with the time.
+            HasScanned = result.Categories.Any(c => c.Succeeded);
+            StatusText = Describe(result);
         }
         catch (OperationCanceledException)
         {
-            // Cancelling is a normal outcome on a scan this long, not an error. Whatever streamed in
-            // before the cancel stays on screen; throwing it away would punish the user for stopping.
+            // Reachable only when the cancel lands before the work starts — the engine itself now
+            // returns partial results rather than throwing, so a mid-scan cancel takes the path
+            // above and keeps whatever finished.
             StatusText = "Scan cancelled.";
             foreach (ReclaimCategoryViewModel category in Categories.Where(c => c.IsScanning))
             {
@@ -590,8 +618,8 @@ public sealed partial class ReclaimViewModel : ObservableObject
             _suspendRecompute = false;
         }
 
-        FoundBytes = ReclaimOverlapResolver.ReclaimableBytes(AllRows.Select(r => r.Candidate));
-
+        // Both totals now come from RecomputeTotals, which derives them from the rows that survived
+        // the run — so a partial or stopped run cannot leave a headline the table can't back up.
         InvalidateVolumes();
         RecomputeTotals();
 
@@ -601,28 +629,13 @@ public sealed partial class ReclaimViewModel : ObservableObject
         OnPropertyChanged(nameof(HasLastRun));
     }
 
-    private static string Summarize(ReclaimOutcome outcome)
-    {
-        string freed = ReclaimFormat.Bytes(outcome.BytesFreed);
-        string items = outcome.RemovedCount == 1 ? "1 item" : $"{outcome.RemovedCount:N0} items";
+    // Both lines live in ReclaimNarration, beside ReclaimConfirmationRequest and for the same
+    // reason: they are the only account the user gets of a destructive operation, so they are
+    // behaviour rather than copy, and belong somewhere a headless test can assert them.
+    private static string Describe(ReclaimResult result) => ReclaimNarration.DescribeScan(result);
 
-        if (outcome.Cancelled)
-        {
-            return $"Stopped after freeing {freed} across {items}. Nothing else was touched.";
-        }
+    private static string Summarize(ReclaimOutcome outcome) => ReclaimNarration.SummarizeRun(outcome);
 
-        if (outcome.FailedCount == 0)
-        {
-            return outcome.RemovedCount == 0
-                ? "Nothing was removed."
-                : $"Freed {freed} across {items}.";
-        }
-
-        string failed = outcome.FailedCount == 1 ? "1 item" : $"{outcome.FailedCount:N0} items";
-        return $"Freed {freed} across {items}. {failed} could not be removed and is still listed.";
-    }
-
-    /// <summary>Ticks exactly the Safe tier. Never Check, never Careful.</summary>
     [RelayCommand]
     private void SelectSafe() =>
         SetSelection(row => row.Candidate.Risk == ReclaimRisk.Safe);
@@ -681,12 +694,14 @@ public sealed partial class ReclaimViewModel : ObservableObject
 
             category.TotalBytes = categoryResult.TotalBytes;
             category.FailureReason = categoryResult.FailureReason;
-            category.StatusText = categoryResult.Succeeded
-                ? $"{categoryResult.Candidates.Length:N0} found · {categoryResult.Elapsed.TotalSeconds:N1}s"
-                : "Could not be checked";
+            category.StatusText = categoryResult switch
+            {
+                { Succeeded: true } => $"{categoryResult.Candidates.Length:N0} found · " +
+                                       $"{categoryResult.Elapsed.TotalSeconds:N1}s",
+                { Cancelled: true } => "Not reached",
+                _ => "Could not be checked",
+            };
         }
-
-        FoundBytes = result.TotalBytes;
 
         // A scan walks the disk and can take minutes, during which free space genuinely moves.
         // This is the one moment in the room's life where re-reading the volumes earns its cost.
@@ -764,6 +779,7 @@ public sealed partial class ReclaimViewModel : ObservableObject
 
         SelectedRiskMix = RiskMixOf(candidates);
         FoundRiskMix = RiskMixOf(AllRows.Select(r => r.Candidate));
+        FoundBytes = ReclaimOverlapResolver.ReclaimableBytes(AllRows.Select(r => r.Candidate));
 
         IReadOnlyDictionary<string, string> containers =
             ReclaimOverlapResolver.ContainerByPath(candidates);

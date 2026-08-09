@@ -366,4 +366,51 @@ public sealed class ReclaimExecutorTests
         Assert.IsTrue(outcome.Cancelled);
         Assert.IsTrue(Directory.Exists(outer), "Nothing should have been touched.");
     }
+
+    /// <summary>
+    /// A child inherits its <em>container's</em> fate, not the run's. In a run that both failed on
+    /// one item and was stopped before another, reading the run-wide cancelled flag labelled the
+    /// child of the genuinely-failed container "Cancelled" — which drops it out of
+    /// <see cref="ReclaimOutcome.Failures"/>, so the row keeps no failure text and stays ticked
+    /// while the executor knew the exact reason all along. That is the Phase 15 defect class: the
+    /// delete behaved as designed and the diagnosis was thrown away at the last step.
+    /// </summary>
+    [TestMethod]
+    public async Task AChildOfAFailedContainerSaysItFailedEvenWhenTheRunWasAlsoStopped()
+    {
+        using var fixture = new ReclaimFixture();
+
+        // Deepest-first orders by path length, so the longer name is reached first. The lock makes
+        // it fail, its progress report stops the run, and the shorter name is never reached.
+        string container = fixture.Dir("container-that-cannot-be-removed");
+        string child = fixture.Dir("container-that-cannot-be-removed", "obj");
+        string unreached = fixture.Dir("later");
+
+        using var cts = new CancellationTokenSource();
+        var stopAfterTheFirst = new ImmediateProgress<ReclaimExecutionProgress>(_ => cts.Cancel());
+
+        using var handle = new FileStream(
+            Path.Combine(child, "held-open.bin"), FileMode.Create, FileAccess.Write, FileShare.None);
+
+        ReclaimOutcome outcome = await new ReclaimExecutor().ExecuteAsync(
+            [Candidate(container), Candidate(child), Candidate(unreached)],
+            stopAfterTheFirst,
+            cts.Token);
+
+        Assert.IsTrue(outcome.Cancelled, "the run really was stopped, which is the whole setup");
+        Assert.IsTrue(Directory.Exists(container), "the lock really did stop the removal");
+
+        ReclaimItemOutcome childOutcome = outcome.Items.Single(i => i.Candidate.Path == child);
+        Assert.AreEqual(
+            ReclaimItemStatus.Failed,
+            childOutcome.Status,
+            "its container was reached and failed — 'not reached' is simply untrue");
+        StringAssert.Contains(childOutcome.Message, "container-that-cannot-be-removed");
+
+        // The item that genuinely was not reached still says so, so this is a discrimination
+        // between two fates rather than a blanket relabel.
+        Assert.AreEqual(
+            ReclaimItemStatus.Cancelled,
+            outcome.Items.Single(i => i.Candidate.Path == unreached).Status);
+    }
 }

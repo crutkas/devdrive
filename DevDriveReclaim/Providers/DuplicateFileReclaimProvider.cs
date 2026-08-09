@@ -98,7 +98,10 @@ public sealed class DuplicateFileReclaimProvider : IReclaimProvider
                             Split(group.Value, p => TryHash(p, HeadProbeBytes), cancellationToken))
                         {
                             foreach (List<string> identical in
-                                Split(sameHead, p => TryHash(p, wholeFile: true), cancellationToken))
+                                Split(
+                                    sameHead,
+                                    p => TryHash(p, wholeFile: true, cancellationToken: cancellationToken),
+                                    cancellationToken))
                             {
                                 if (identical.Count > 1)
                                 {
@@ -117,11 +120,19 @@ public sealed class DuplicateFileReclaimProvider : IReclaimProvider
                         }
                     });
             }
-            catch (AggregateException aggregate)
-                when (aggregate.InnerExceptions.All(e => e is OperationCanceledException))
+            catch (AggregateException aggregate) when (
+                cancellationToken.IsCancellationRequested &&
+                aggregate.InnerExceptions.Any(e => e is OperationCanceledException))
             {
                 // Parallel.ForEach wraps the cancellation its own options requested. Every caller
                 // above expects the bare OperationCanceledException that the rest of the scan throws.
+                //
+                // Any, not All. A mixed batch — one partition observing the cancel while another
+                // throws something TryHash does not filter, such as NotSupportedException from
+                // File.OpenRead on a device path — left the AggregateException unreduced. That is
+                // not an OperationCanceledException, so the engine graded it as a provider failure
+                // and the scan reported itself finished: the user pressed Cancel and was told the
+                // scan completed. Guarded on the token so a genuine failure is still a failure.
                 throw new OperationCanceledException(cancellationToken);
             }
 
@@ -254,20 +265,50 @@ public sealed class DuplicateFileReclaimProvider : IReclaimProvider
         return [.. byHash.Values.Where(v => v.Count > 1)];
     }
 
-    private static string? TryHash(string path, int prefixBytes = 0, bool wholeFile = false)
+    /// <summary>
+    /// Hashes a file, or just its head. Cancellation is checked between chunks rather than only
+    /// before the call: this provider's own measurements are against multi-GB precompiled headers,
+    /// and <see cref="SHA256.HashData(Stream)"/> is one uninterruptible read of the whole file. With
+    /// a worker per core each mid-way through one of those, a Cancel press did nothing for as long
+    /// as the slowest read took — in a room where cancelling is the only answer to a scan that runs
+    /// 174 s warm and 497 s cold.
+    /// </summary>
+    private static string? TryHash(
+        string path,
+        int prefixBytes = 0,
+        bool wholeFile = false,
+        CancellationToken cancellationToken = default)
     {
+        const int ChunkBytes = 1 << 20;
+
         try
         {
             using FileStream stream = File.OpenRead(path);
 
             if (wholeFile)
             {
-                return Convert.ToHexString(SHA256.HashData(stream));
+                using var incremental = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+                byte[] chunk = new byte[ChunkBytes];
+
+                while (true)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    int read = stream.Read(chunk, 0, chunk.Length);
+                    if (read == 0)
+                    {
+                        break;
+                    }
+
+                    incremental.AppendData(chunk, 0, read);
+                }
+
+                return Convert.ToHexString(incremental.GetHashAndReset());
             }
 
             byte[] buffer = new byte[prefixBytes];
-            int read = stream.ReadAtLeast(buffer, buffer.Length, throwOnEndOfStream: false);
-            return Convert.ToHexString(SHA256.HashData(buffer.AsSpan(0, read)));
+            int head = stream.ReadAtLeast(buffer, buffer.Length, throwOnEndOfStream: false);
+            return Convert.ToHexString(SHA256.HashData(buffer.AsSpan(0, head)));
         }
         catch (Exception exception) when (
             exception is IOException or UnauthorizedAccessException or

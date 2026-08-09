@@ -23,6 +23,93 @@ internal static class ReclaimFormat
 }
 
 /// <summary>
+/// The two lines the Reclaim room says about itself: how a scan went, and how a run went.
+/// </summary>
+/// <remarks>
+/// Lives beside <see cref="ReclaimConfirmationRequest"/>, free of any XAML dependency, for the same
+/// reason: these sentences are the only account the user gets of a destructive operation, so they
+/// are behaviour rather than copy. The distinctions they draw — cancelled against failed, a floor
+/// against a total, "nothing else was touched" against a run that touched something and failed —
+/// are exactly the kind that survive a rewrite by looking right and being wrong.
+/// </remarks>
+internal static class ReclaimNarration
+{
+    /// <summary>
+    /// One line for how the scan went. Cancelled and failed are worded apart on purpose: a category
+    /// that failed hit something the app could not handle, one that was cancelled was simply not
+    /// reached, and calling the user's own Cancel a failure is both wrong and alarming. Either way
+    /// the total is announced as a floor, because a partial answer presented as a complete one is
+    /// how someone concludes there is nothing left to reclaim when there is.
+    /// </summary>
+    public static string DescribeScan(ReclaimResult result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+
+        string found = ReclaimFormat.Bytes(result.TotalBytes);
+        int cancelled = result.CancelledCategories.Length;
+        int failed = result.FailedCategories.Length - cancelled;
+
+        if (cancelled > 0 && result.Categories.All(c => !c.Succeeded))
+        {
+            return "Cancelled before anything finished.";
+        }
+
+        List<string> caveats = [];
+        if (cancelled > 0)
+        {
+            caveats.Add($"{Categories(cancelled)} not reached");
+        }
+
+        if (failed > 0)
+        {
+            caveats.Add($"{Categories(failed)} could not be checked");
+        }
+
+        if (caveats.Count == 0)
+        {
+            return $"Found {found}.";
+        }
+
+        string prefix = cancelled > 0 ? "Cancelled." : string.Empty;
+        return $"{prefix} Found {found} — {string.Join(" and ", caveats)}, so this is a floor."
+            .TrimStart();
+
+        static string Categories(int count) => count == 1 ? "1 category" : $"{count} categories";
+    }
+
+    /// <summary>One line for how a reclaim run went.</summary>
+    public static string SummarizeRun(ReclaimOutcome outcome)
+    {
+        ArgumentNullException.ThrowIfNull(outcome);
+
+        string freed = ReclaimFormat.Bytes(outcome.BytesFreed);
+        string items = outcome.RemovedCount == 1 ? "1 item" : $"{outcome.RemovedCount:N0} items";
+        string failed = outcome.FailedCount == 1 ? "1 item" : $"{outcome.FailedCount:N0} items";
+
+        if (outcome.Cancelled)
+        {
+            // "Nothing else was touched" is only true of what was never reached. Items that were
+            // reached and refused were very much touched — one of them can even be a shell delete
+            // that aborted partway — so saying it unconditionally is the exact over-promise this
+            // room's copy is written to avoid, and it contradicts the failure banner shown beside it.
+            return outcome.FailedCount == 0
+                ? $"Stopped after freeing {freed} across {items}. Nothing else was touched."
+                : $"Stopped after freeing {freed} across {items}. {failed} could not be removed " +
+                  "and is still listed. Nothing after that was touched.";
+        }
+
+        if (outcome.FailedCount == 0)
+        {
+            return outcome.RemovedCount == 0
+                ? "Nothing was removed."
+                : $"Freed {freed} across {items}.";
+        }
+
+        return $"Freed {freed} across {items}. {failed} could not be removed and is still listed.";
+    }
+}
+
+/// <summary>
 /// Everything the confirmation must state, in the order it should be stated: what is about to
 /// happen, how much of it cannot be undone, and how bad the worst thing in the pile is.
 /// </summary>

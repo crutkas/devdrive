@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using DevDriveReclaim.Providers;
 
 namespace DevDriveReclaim.Tests;
@@ -45,15 +46,44 @@ public sealed class ReclaimEngineTests
     }
 
     [TestMethod]
-    public async Task CancellationPropagatesRatherThanReturningAPartialAnswer()
+    public async Task CancellingBeforeAnythingStartsReportsEveryCategoryUnreached()
     {
         using var cts = new CancellationTokenSource();
         await cts.CancelAsync();
 
         var engine = new ReclaimEngine([new FixedProvider(1_000)]);
 
-        await Assert.ThrowsAsync<OperationCanceledException>(
-            () => engine.ScanAsync(Context(), null, cts.Token));
+        ReclaimResult result = await engine.ScanAsync(Context(), null, cts.Token);
+
+        // Not an exception. A cancel is an answer about what was checked, and an exception erases
+        // that answer — which matters far more mid-scan than here, but the contract has to be one
+        // contract or the room needs two code paths for the same gesture.
+        Assert.IsFalse(result.Complete, "A cancelled scan must never claim to be complete.");
+        Assert.HasCount(1, result.CancelledCategories);
+        Assert.IsEmpty(result.AllCandidates);
+        Assert.AreEqual(0, result.TotalBytes);
+    }
+
+    [TestMethod]
+    public async Task CancellingMidScanKeepsTheCategoriesThatFinished()
+    {
+        using var cts = new CancellationTokenSource();
+
+        // Finishes, then cancels. The slow provider is therefore guaranteed to observe the cancel,
+        // and the fast one is guaranteed to have already produced its answer when it does.
+        var fast = new SignallingProvider(500, cts);
+        var slow = new BlockingProvider();
+
+        var engine = new ReclaimEngine([fast, slow]);
+
+        ReclaimResult result = await engine.ScanAsync(Context(), null, cts.Token);
+
+        // The whole point: 497 s cold, and stopping at 480 s used to return nothing at all.
+        Assert.AreEqual(500, result.TotalBytes, "The finished category's bytes were thrown away.");
+        Assert.HasCount(1, result.AllCandidates);
+        Assert.HasCount(1, result.CancelledCategories);
+        Assert.AreEqual("blocking", result.CancelledCategories[0].Category.Id);
+        Assert.IsFalse(result.Complete, "A total that is missing a category is a floor, not a fact.");
     }
 
     [TestMethod]
@@ -173,6 +203,39 @@ public sealed class ReclaimEngineTests
             cancellationToken.ThrowIfCancellationRequested();
             return Task.FromResult<IReadOnlyList<ReclaimCandidate>>(
                 [new("fixed", @"C:\x", "x", size, ReclaimRisk.Safe, "r", "h")]);
+        }
+    }
+
+    /// <summary>Answers, then trips the cancel — so a later provider is certain to see it.</summary>
+    private sealed class SignallingProvider(long size, CancellationTokenSource cts) : IReclaimProvider
+    {
+        public ReclaimCategory Category { get; } = new("signalling", "Signalling", "d", "\uE783", 1);
+
+        public async Task<IReadOnlyList<ReclaimCandidate>> ScanAsync(
+            ReclaimScanContext context, IProgress<ReclaimScanProgress>? progress,
+            CancellationToken cancellationToken)
+        {
+            var found = new ReclaimCandidate[]
+            {
+                new("signalling", @"C:\x", "x", size, ReclaimRisk.Safe, "r", "h"),
+            };
+
+            await cts.CancelAsync();
+            return found;
+        }
+    }
+
+    /// <summary>Never finishes on its own; only cancellation ends it.</summary>
+    private sealed class BlockingProvider : IReclaimProvider
+    {
+        public ReclaimCategory Category { get; } = new("blocking", "Blocking", "d", "\uE783", 2);
+
+        public async Task<IReadOnlyList<ReclaimCandidate>> ScanAsync(
+            ReclaimScanContext context, IProgress<ReclaimScanProgress>? progress,
+            CancellationToken cancellationToken)
+        {
+            await Task.Delay(Timeout.Infinite, cancellationToken);
+            throw new UnreachableException();
         }
     }
 

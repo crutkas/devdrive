@@ -666,6 +666,16 @@ public sealed class StorageExplorerViewModel : ObservableObject
         CurrentScope = null;
         SelectedRow = null;
         TreeRoots.Clear();
+
+        // The old snapshot goes with the old scope. LoadAsync only replaces it once a result
+        // arrives, and a scan can fail before its first partial — an ejected drive, a locked
+        // volume, a root that no longer exists all throw before the walk starts. Leaving these
+        // three alone pinned the entire previous volume's node graph, the largest thing this app
+        // allocates, behind a room that shows an error card and has no way back to it.
+        Snapshot = null;
+        Breadcrumbs.Clear();
+        VisibleItems.Clear();
+
         _searchText = string.Empty;
         OnPropertyChanged(nameof(SearchText));
         _mode = ExplorerMode.Folders;
