@@ -256,6 +256,7 @@
                     <Grid Grid.Row="2">
                         <!--  ================= Volumes =================  -->
                         <ListView
+                            x:Name="VolumesList"
                             MaxHeight="300"
                             AutomationProperties.AutomationId="VolumesList"
                             AutomationProperties.Name="Fixed volumes on this PC"
@@ -350,6 +351,7 @@
 
                         <!--  ================= Filter drivers =================  -->
                         <ListView
+                            x:Name="FiltersList"
                             MaxHeight="300"
                             AutomationProperties.AutomationId="FiltersList"
                             AutomationProperties.Name="Filter drivers in the Dev Drive's write path"

@@ -93,11 +93,13 @@
                     </Border>
 
                     <ListView
+                        x:Name="CategoryList"
                         Grid.Row="1"
                         AutomationProperties.AutomationId="ReclaimCategoryList"
                         AutomationProperties.Name="Categories of reclaimable space"
                         ItemsSource="{x:Bind ViewModel.Categories}"
-                        SelectedItem="{x:Bind ViewModel.SelectedCategory, Mode=TwoWay}"
+                        SelectedItem="{x:Bind ViewModel.SelectedCategory, Mode=OneWay}"
+                        SelectionChanged="CategoryList_SelectionChanged"
                         SelectionMode="Single">
                         <ListView.ItemContainerStyle>
                             <Style TargetType="ListViewItem">
@@ -331,12 +333,13 @@
                         </Border>
 
                         <ListView
+                            x:Name="RowList"
                             Grid.Row="2"
                             MaxHeight="268"
                             AutomationProperties.AutomationId="ReclaimRowList"
                             AutomationProperties.Name="Candidates in the selected category"
-                            ItemsSource="{x:Bind ViewModel.SelectedCategory.Rows, Mode=OneWay}"
-                            SelectedItem="{x:Bind ViewModel.SelectedRow, Mode=TwoWay}"
+                            SelectedItem="{x:Bind ViewModel.SelectedRow, Mode=OneWay}"
+                            SelectionChanged="RowList_SelectionChanged"
                             SelectionMode="Single">
                             <ListView.ItemContainerStyle>
                                 <Style TargetType="ListViewItem">
@@ -548,6 +551,7 @@
                         <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
                             <StackPanel Padding="14,12" Spacing="14">
                                 <ItemsControl
+                                    x:Name="VolumeImpactsList"
                                     AutomationProperties.AutomationId="ReclaimVolumeImpacts"
                                     AutomationProperties.Name="What each volume gets back"
                                     ItemsSource="{x:Bind ViewModel.VolumeImpacts}">

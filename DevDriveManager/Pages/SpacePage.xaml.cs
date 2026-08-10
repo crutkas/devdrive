@@ -101,17 +101,7 @@ public sealed partial class SpacePage : Page, INotifyPropertyChanged
         {
             ViewModel.PropertyChanged -= ViewModel_PropertyChanged;
             WatchSelectedRow(null);
-
-            // Same rule, but for the one subscription XAML makes on our behalf. ItemsSource binds
-            // the BreadcrumbBar to a collection on the shared ViewModel, and that subscription is
-            // native: it outlives this page, so every visit to the room leaves another unloaded
-            // bar listening to a collection that is still very much alive. Two crash dumps caught
-            // a collection change being dispatched across that boundary and fail-fasting the
-            // process, which nothing on this side can catch; one held seven live SpacePage
-            // instances and a CollectionChanged chain seven handlers deep. Dropping the source
-            // here is what makes the page's own stated rule true of the bindings as well as the
-            // handlers, and takes that chain back to one.
-            ScopeBreadcrumbBar.ItemsSource = null;
+            DetachItemsSources();
         };
     }
 
@@ -120,13 +110,57 @@ public sealed partial class SpacePage : Page, INotifyPropertyChanged
         ViewModel.PropertyChanged -= ViewModel_PropertyChanged;
         ViewModel.PropertyChanged += ViewModel_PropertyChanged;
         WatchSelectedRow(ViewModel.SelectedRow);
+        AttachItemsSources();
+    }
 
-        // Puts back what Unloaded dropped. This is belt and braces rather than the thing that makes
-        // navigation work: NavigationCacheMode is Disabled, so WinUI builds a new page on every
-        // visit and x:Bind assigns ItemsSource in the constructor anyway — verified by removing
-        // this line and watching the bar come back populated regardless. It earns its place for the
-        // case that assignment does not cover, a page WinUI reloads without reconstructing, where
-        // without it the bar would return empty and stay that way.
+    /// <summary>
+    /// Drops every list this page pointed at a collection on the shared ViewModel.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The page already releases its own handlers on <c>Unloaded</c>, for the reason stated in the
+    /// constructor. These are the subscriptions XAML makes on its behalf: an <c>ItemsSource</c>
+    /// binding to a collection on <see cref="App.SharedSpace"/> registers a <em>native</em>
+    /// listener that outlives the page, so with <see cref="Microsoft.UI.Xaml.Controls.Page.NavigationCacheMode"/>
+    /// left at its Disabled default — a fresh page per visit — every trip to the room left another
+    /// torn-down control listening to a collection that is still very much alive.
+    /// </para>
+    /// <para>
+    /// Two crash dumps caught a collection change being dispatched across that boundary and
+    /// fail-fasting the process, which nothing on the managed side can catch: not a
+    /// <c>try</c>/<c>catch</c>, not <see cref="Application.UnhandledException"/>. One held seven
+    /// live <c>SpacePage</c> instances and a <c>CollectionChanged</c> chain seven handlers deep.
+    /// </para>
+    /// <para>
+    /// <see cref="StorageExplorerViewModel.TreeRoots"/> and
+    /// <see cref="StorageExplorerViewModel.VisibleItems"/> matter more here than the breadcrumb
+    /// they were found alongside: a streaming scan reconciles both many times a second, where the
+    /// trail only moves when someone navigates.
+    /// </para>
+    /// </remarks>
+    private void DetachItemsSources()
+    {
+        FolderTree.ItemsSource = null;
+        ItemsList.ItemsSource = null;
+        ScopeBreadcrumbBar.ItemsSource = null;
+    }
+
+    /// <summary>
+    /// Puts back what <see cref="DetachItemsSources"/> dropped.
+    /// </summary>
+    /// <remarks>
+    /// Belt and braces rather than the thing that makes navigation work: NavigationCacheMode is
+    /// Disabled, so WinUI builds a new page on every visit and <c>x:Bind</c> assigns each
+    /// <c>ItemsSource</c> in the constructor anyway — verified by removing this and watching the
+    /// room come back populated regardless. It earns its place for the case that assignment does
+    /// not cover, a page WinUI reloads without reconstructing, where without it the lists would
+    /// return empty and stay that way. Safe to repeat because every binding here is <c>x:Bind</c>'s
+    /// implicit OneTime, so nothing re-pushes a source behind it.
+    /// </remarks>
+    private void AttachItemsSources()
+    {
+        FolderTree.ItemsSource = ViewModel.TreeRoots;
+        ItemsList.ItemsSource = ViewModel.VisibleItems;
         ScopeBreadcrumbBar.ItemsSource = ViewModel.Breadcrumbs;
     }
 
@@ -160,6 +194,32 @@ public sealed partial class SpacePage : Page, INotifyPropertyChanged
 
     private void SelectedRow_PropertyChanged(object? sender, PropertyChangedEventArgs args) =>
         UpdateInspector();
+
+    /// <summary>
+    /// Records a row the user picked, and ignores the list emptying its own selection.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>SelectedItem</c> used to be a TwoWay <c>x:Bind</c>. A <c>ListView</c> drops its selection
+    /// when its items go away, so the release in <see cref="DetachItemsSources"/> wrote that null
+    /// back into <see cref="App.SharedSpace"/> and the inspector came back describing nothing.
+    /// Proved in the Reclaim room, which carries the identical pair and where the loss is countable:
+    /// 30 rows before leaving, 0 on return, against 30 on the build without the release.
+    /// </para>
+    /// <para>
+    /// Reading one way and writing only on a real pick is immune to <em>when</em> the list clears
+    /// itself; capturing and restoring the selection around the detach was tried first and did not
+    /// hold. The ViewModel can still clear its own selection — the OneWay read carries that to the
+    /// list — but the list cannot clear the ViewModel's.
+    /// </para>
+    /// </remarks>
+    private void ItemsList_SelectionChanged(object sender, SelectionChangedEventArgs args)
+    {
+        if (args.AddedItems.Count > 0 && args.AddedItems[0] is StorageRowViewModel row)
+        {
+            ViewModel.SelectedRow = row;
+        }
+    }
 
     public StorageExplorerViewModel ViewModel { get; }
 

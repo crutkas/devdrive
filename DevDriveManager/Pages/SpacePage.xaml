@@ -280,7 +280,8 @@
                             ContainerContentChanging="Items_ContainerContentChanging"
                             DoubleTapped="ItemsList_DoubleTapped"
                             ItemsSource="{x:Bind ViewModel.VisibleItems}"
-                            SelectedItem="{x:Bind ViewModel.SelectedRow, Mode=TwoWay}"
+                            SelectedItem="{x:Bind ViewModel.SelectedRow, Mode=OneWay}"
+                        SelectionChanged="ItemsList_SelectionChanged"
                             SelectionMode="Single">
                             <ListView.ItemContainerStyle>
                                 <Style TargetType="ListViewItem">

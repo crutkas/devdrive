@@ -242,6 +242,7 @@ public sealed partial class DrivesPage : Page, INotifyPropertyChanged
         ViewModel.Volumes.CollectionChanged += OnCollectionChanged;
         ViewModel.Trust.Filters.CollectionChanged += OnCollectionChanged;
         ViewModel.Trust.PropertyChanged += OnTrustChanged;
+        AttachItemsSources();
 
         _selectedTab ??= Tabs[0];
         _selectedTab.IsSelected = true;
@@ -259,6 +260,36 @@ public sealed partial class DrivesPage : Page, INotifyPropertyChanged
         ViewModel.Volumes.CollectionChanged -= OnCollectionChanged;
         ViewModel.Trust.Filters.CollectionChanged -= OnCollectionChanged;
         ViewModel.Trust.PropertyChanged -= OnTrustChanged;
+        DetachItemsSources();
+    }
+
+    /// <summary>
+    /// Drops the two lists this page pointed at collections on the shared ViewModel.
+    /// </summary>
+    /// <remarks>
+    /// The same rule the three handlers above already follow, applied to the subscriptions XAML
+    /// makes on this page's behalf. An <c>ItemsSource</c> binding to a collection on
+    /// <see cref="App.Shared"/> registers a <em>native</em> listener that outlives the page, and
+    /// NavigationCacheMode is left at its Disabled default, so each visit left the previous list
+    /// subscribed. Dispatching a collection change to a torn-down control fail-fasts the process
+    /// from native code, which nothing here can catch; <c>SpacePage</c> carries the crash dumps
+    /// that proved it. Measured on a live app: two handlers on <c>Volumes</c> with the room
+    /// unloaded, where a page that releases cleanly leaves none.
+    /// </remarks>
+    private void DetachItemsSources()
+    {
+        VolumesList.ItemsSource = null;
+        FiltersList.ItemsSource = null;
+    }
+
+    /// <summary>
+    /// Puts back what <see cref="DetachItemsSources"/> dropped. Safe to repeat because both
+    /// bindings are <c>x:Bind</c>'s implicit OneTime, so nothing re-pushes a source behind us.
+    /// </summary>
+    private void AttachItemsSources()
+    {
+        VolumesList.ItemsSource = ViewModel.Volumes;
+        FiltersList.ItemsSource = ViewModel.Trust.Filters;
     }
 
     private void OnCollectionChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e) =>

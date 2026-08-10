@@ -50,12 +50,14 @@ public sealed partial class ReclaimPage : Page, INotifyPropertyChanged
         {
             ViewModel.PropertyChanged += OnViewModelPropertyChanged;
             ViewModel.ConfirmationRequested = ConfirmReclaimAsync;
+            AttachItemsSources();
             UpdateStatusBar();
         };
 
         Unloaded += (_, _) =>
         {
             ViewModel.PropertyChanged -= OnViewModelPropertyChanged;
+            DetachItemsSources();
 
             // Released with the page. The ViewModel outlives it, and a hook holding a XamlRoot from
             // an unloaded page would show the confirmation on a window that is no longer there.
@@ -64,6 +66,99 @@ public sealed partial class ReclaimPage : Page, INotifyPropertyChanged
                 ViewModel.ConfirmationRequested = null;
             }
         };
+    }
+
+    /// <summary>
+    /// Drops every list this page pointed at a collection on the shared ViewModel.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The same rule the handlers above follow, applied to the subscriptions XAML makes on this
+    /// page's behalf. An <c>ItemsSource</c> binding to a collection on <see cref="App.SharedReclaim"/>
+    /// registers a <em>native</em> listener that outlives the page, and NavigationCacheMode is left
+    /// at its Disabled default, so each visit to the room built a new list and left the previous
+    /// one subscribed. Measured on a live app: three handlers on both <c>Categories</c> and
+    /// <c>VolumeImpacts</c> with the room unloaded, growing with visits.
+    /// </para>
+    /// <para>
+    /// Dispatching a collection change to a torn-down control fail-fasts the process from native
+    /// code, which nothing here can catch. <c>SpacePage</c> carries the crash dumps that proved it.
+    /// </para>
+    /// </remarks>
+    private void DetachItemsSources()
+    {
+        CategoryList.ItemsSource = null;
+        RowList.ItemsSource = null;
+        VolumeImpactsList.ItemsSource = null;
+    }
+
+    /// <summary>
+    /// Points the lists back at the shared ViewModel for as long as this page is on screen.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>CategoryList</c> and <c>VolumeImpactsList</c> restore what <see cref="DetachItemsSources"/>
+    /// dropped; those bindings are <c>x:Bind</c>'s implicit OneTime, so nothing re-pushes a source
+    /// behind us.
+    /// </para>
+    /// <para>
+    /// <c>RowList</c> is assigned from here instead of bound because it followed a <em>changing</em>
+    /// path, <c>SelectedCategory.Rows</c>, in OneWay mode. A OneWay binding stays live on an
+    /// unloaded page — that is the leak, not a side effect of it — so it would re-attach the moment
+    /// the selected category changed, undoing the release. A scan does exactly that, and Reclaim
+    /// scans run for minutes while the user is in another room. Driving it from
+    /// <see cref="OnViewModelPropertyChanged"/>, which is itself subscribed only between Loaded and
+    /// Unloaded, is what makes the release hold.
+    /// </para>
+    /// </remarks>
+    private void AttachItemsSources()
+    {
+        CategoryList.ItemsSource = ViewModel.Categories;
+        VolumeImpactsList.ItemsSource = ViewModel.VolumeImpacts;
+        UpdateRowList();
+    }
+
+    private void UpdateRowList() => RowList.ItemsSource = ViewModel.SelectedCategory?.Rows;
+
+    /// <summary>
+    /// Records a category the user picked, and ignores the list emptying its own selection.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Both selections in this room used to be TwoWay <c>x:Bind</c>s. A <c>ListView</c> drops
+    /// <c>SelectedItem</c> when its items go away, so the release in
+    /// <see cref="DetachItemsSources"/> pushed that null straight back into the app-lifetime
+    /// ViewModel and the room came back empty. Measured across a real scan: 30 candidate rows
+    /// before leaving the room, 0 on return, against 30 on the build without the release.
+    /// </para>
+    /// <para>
+    /// Capturing the selection around the detach and restoring it was tried first and did not hold —
+    /// the list clears itself again after the restore. Reading one way and writing only on a real
+    /// pick is immune to <em>when</em> the clear lands, which is the property that matters here.
+    /// <c>DrivesPage</c> reached the same conclusion from the other direction, by refusing null in
+    /// its setter.
+    /// </para>
+    /// <para>
+    /// An empty <c>AddedItems</c> is therefore never written through. The ViewModel can still clear
+    /// its own selection — the OneWay read carries that to the list — but the list cannot clear the
+    /// ViewModel's.
+    /// </para>
+    /// </remarks>
+    private void CategoryList_SelectionChanged(object sender, SelectionChangedEventArgs args)
+    {
+        if (args.AddedItems.Count > 0 && args.AddedItems[0] is ReclaimCategoryViewModel category)
+        {
+            ViewModel.SelectedCategory = category;
+        }
+    }
+
+    /// <inheritdoc cref="CategoryList_SelectionChanged"/>
+    private void RowList_SelectionChanged(object sender, SelectionChangedEventArgs args)
+    {
+        if (args.AddedItems.Count > 0 && args.AddedItems[0] is ReclaimRowViewModel row)
+        {
+            ViewModel.SelectedRow = row;
+        }
     }
 
     /// <summary>
@@ -204,8 +299,15 @@ public sealed partial class ReclaimPage : Page, INotifyPropertyChanged
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(NameColumnWidth)));
     }
 
-    private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e) =>
+    private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(ReclaimViewModel.SelectedCategory))
+        {
+            UpdateRowList();
+        }
+
         UpdateStatusBar();
+    }
 
     private void ScanBar_ScanRequested(object? sender, EventArgs e)
     {

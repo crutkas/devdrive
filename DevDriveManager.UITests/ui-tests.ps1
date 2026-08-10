@@ -112,6 +112,20 @@ function Assert-Present([string[]]$ids, [int]$timeoutMs = 3000) {
     }
 }
 
+# How many rows a list is actually showing.
+#
+# Counted as ListItems from the control view rather than by AutomationId, because ReclaimPage is the
+# one room with no ContainerContentChanging hook, so its per-row ids never reach UIA at all. Grepping
+# for ReclaimRow_* there returns nothing whether the table is full or empty — a test written that way
+# reports PASS for exactly the state it was meant to catch.
+#
+# `--depth 1` keeps this counting containers rather than the labels inside them.
+function Get-RowCount([string]$listId) {
+    $text = winapp ui inspect $listId --depth 1 -a $AppPid 2>$null | Out-String
+    $global:LASTEXITCODE = 0
+    return ([regex]::Matches($text, 'ListItem')).Count
+}
+
 # Every AutomationId on screen matching a pattern, polled until at least one appears.
 #
 # Which ecosystems are installed, and which volume each cache sits on, are properties of THIS
@@ -778,6 +792,53 @@ if ($IncludeSlowScans) {
         }
         winapp ui invoke "ReclaimClearButton" -a $AppPid 2>$null | Out-Null
         Start-Sleep -Milliseconds 500
+    }
+
+    # Picking a category has to fill the row table, and that table has to survive leaving the room.
+    #
+    # Two changes meet here. ReclaimRowList used to follow SelectedCategory.Rows in OneWay mode, and
+    # a OneWay binding stays live on an unloaded page -- it would re-attach the list to the shared
+    # ViewModel the moment a scan changed the selection, undoing the leak fix on every scan. So the
+    # page assigns ItemsSource itself. Releasing it on Unloaded then cost the selection: a ListView
+    # drops SelectedItem when its items go away, and SelectedItem was a TwoWay binding, so the null
+    # went straight into the app-lifetime ViewModel.
+    #
+    # Measured across a real scan before this was written: 30 rows before leaving the room and 0 on
+    # return, against 30 on the build without the release. The round trip is therefore the assertion
+    # that matters -- picking alone passed throughout.
+    #
+    # Rows are counted as ListItems rather than by AutomationId. ReclaimPage is the one room with no
+    # ContainerContentChanging hook, so ReclaimCategory_* and ReclaimRow_* never reach UIA at all;
+    # a test grepping for them would report PASS against an empty table.
+    Test-UI "Reclaim: a picked category fills the row table, and survives leaving the room" {
+        # Slugs are generated per inspect and are not stable, so discovery and invocation have to be
+        # adjacent -- a slug from an earlier inspect resolves to nothing.
+        $categories = winapp ui inspect "ReclaimCategoryList" --depth 1 -a $AppPid 2>$null |
+            Select-String -Pattern '^\s*(itm-\S+)' -AllMatches |
+            ForEach-Object { $_.Matches[0].Groups[1].Value }
+        if (-not $categories) { throw "the scan produced no categories to pick from" }
+
+        # Some categories legitimately find nothing on a given machine, so prove the table follows
+        # the selection rather than demanding that the first pick be populated.
+        $before = 0
+        foreach ($c in $categories) {
+            winapp ui invoke $c -a $AppPid 2>$null | Out-Null
+            Start-Sleep -Milliseconds 700
+            $before = Get-RowCount "ReclaimRowList"
+            if ($before -gt 0) { break }
+        }
+        if ($before -eq 0) {
+            throw "no category filled the row table, across all $($categories.Count) of them"
+        }
+
+        Goto "NavSpace" "SpaceItemsList"
+        Goto "NavReclaim" "ReclaimCategoryList"
+        Start-Sleep -Milliseconds 800
+
+        $after = Get-RowCount "ReclaimRowList"
+        if ($after -ne $before) {
+            throw "the room lost its candidates on the way out and back: $before rows -> $after"
+        }
     }
     winapp ui screenshot -a $AppPid -o "screenshots\01b-reclaim-scanned.png" 2>$null | Out-Null
 
