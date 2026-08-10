@@ -780,6 +780,47 @@ if ($IncludeSlowScans) {
         Start-Sleep -Milliseconds 500
     }
     winapp ui screenshot -a $AppPid -o "screenshots\01b-reclaim-scanned.png" 2>$null | Out-Null
+
+    # The Space room's scope trail lives on a SHARED ViewModel, and this is the property that makes
+    # that architecture visible: leave the room mid-scan, come back, and your place is still there.
+    # It regressed once already — a page that built its own ViewModel lost a finished scan on every
+    # navigation, because NavigationCacheMode is Disabled and WinUI rebuilds the page each visit.
+    #
+    # It does NOT guard SpacePage's ItemsSource restore. That was checked rather than assumed: with
+    # the restore deliberately removed this assertion still passed, because a freshly constructed
+    # page gets a fresh x:Bind assignment anyway. The restore only matters if WinUI ever reloads a
+    # page it did not reconstruct, which no navigation here can provoke.
+    #
+    # Only a populated bar can tell surviving from re-created, which is why this sits behind the
+    # slow lane — at rest the breadcrumbs are legitimately empty and the check would prove nothing.
+    Test-UI "Space: the scope trail survives leaving the room and coming back" {
+        Goto "NavSpace" "SpaceBreadcrumb"
+        winapp ui invoke "ScanBarScanButton" -a $AppPid 2>$null | Out-Null
+
+        $deadline = (Get-Date).AddMinutes(2)
+        $before = @()
+        while ((Get-Date) -lt $deadline -and $before.Count -eq 0) {
+            Start-Sleep -Seconds 2
+            $before = @(winapp ui inspect "SpaceBreadcrumb" -a $AppPid --depth 4 2>$null |
+                Select-String -Pattern '\bText\b')
+        }
+        if ($before.Count -eq 0) { throw "no crumb ever appeared, so the round trip proves nothing" }
+
+        if (Test-Present "ScanBarCancelButton" 1000) {
+            winapp ui invoke "ScanBarCancelButton" -a $AppPid 2>$null | Out-Null
+            Start-Sleep -Milliseconds 800
+        }
+
+        Goto "NavDashboard" "NavSpace"
+        Goto "NavSpace" "SpaceBreadcrumb"
+        Start-Sleep -Milliseconds 800
+
+        $after = @(winapp ui inspect "SpaceBreadcrumb" -a $AppPid --depth 4 2>$null |
+            Select-String -Pattern '\bText\b')
+        if ($after.Count -eq 0) {
+            throw "the room forgot where it was: the scope trail did not survive navigation"
+        }
+    }
 }
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -1,3 +1,4 @@
+using System.Collections.Specialized;
 using DevDriveStorage;
 
 namespace DevDriveStorage.Tests;
@@ -5,6 +6,86 @@ namespace DevDriveStorage.Tests;
 [TestClass]
 public sealed class StorageExplorerViewModelTests
 {
+    /// <summary>
+    /// Emptying this collection must not raise a Reset. Two crash dumps from live runs put the
+    /// fault inside the native BreadcrumbBar handling a change to it, reached through a WinRT
+    /// delegate, where no try/catch and no Application.UnhandledException can follow.
+    /// </summary>
+    /// <remarks>
+    /// The cause of those crashes was a leaked subscription, not this notification — one dump held
+    /// a CollectionChanged chain seven handlers deep against a single shared ViewModel, and that is
+    /// fixed in SpacePage. This is the belt to that pair of braces: both dumps were raising a
+    /// Reset, the cheapest possible hedge is not to send one, and there is no behaviour to trade
+    /// away for it.
+    /// <para>
+    /// It guards the notification, not the outcome. Asserting the collection ends up empty would
+    /// pass just as happily with the Clear() that was on the stack in both dumps, because both
+    /// spellings leave it empty — the difference is invisible in the final state and only shows up
+    /// in what crossed the boundary on the way there.
+    /// </para>
+    /// </remarks>
+    [TestMethod]
+    public async Task SwitchingScenarioEmptiesTheBreadcrumbsWithoutEverRaisingAReset()
+    {
+        var viewModel = new StorageExplorerViewModel(new SequenceSource(StorageTestBuilder.Snapshot()));
+        await viewModel.LoadScenarioAsync("first");
+        viewModel.NavigateTo(StorageTestBuilder.FolderId);
+        Assert.IsGreaterThan(1, viewModel.Breadcrumbs.Count, "the bar must be populated to be a real test");
+
+        List<NotifyCollectionChangedAction> actions = [];
+        viewModel.Breadcrumbs.CollectionChanged += (_, args) => actions.Add(args.Action);
+
+        await viewModel.LoadScenarioAsync("second");
+
+        CollectionAssert.DoesNotContain(
+            actions,
+            NotifyCollectionChangedAction.Reset,
+            "emptying the breadcrumbs must not send a Reset into the BreadcrumbBar");
+    }
+
+    /// <summary>
+    /// The same rule on the path that runs hundreds of times per scan. Every partial result
+    /// rebuilds the breadcrumbs, so a Reset here is the same crash with more chances to fire.
+    /// </summary>
+    [TestMethod]
+    public async Task RebuildingTheBreadcrumbsWhileNavigatingNeverRaisesAReset()
+    {
+        var viewModel = new StorageExplorerViewModel(new SequenceSource(StorageTestBuilder.Snapshot()));
+        await viewModel.LoadScenarioAsync("test");
+
+        List<NotifyCollectionChangedAction> actions = [];
+        viewModel.Breadcrumbs.CollectionChanged += (_, args) => actions.Add(args.Action);
+
+        viewModel.NavigateTo(StorageTestBuilder.FolderId);
+        viewModel.NavigateUp();
+
+        CollectionAssert.DoesNotContain(actions, NotifyCollectionChangedAction.Reset);
+        Assert.IsGreaterThan(0, actions.Count, "navigating must still tell the bar something changed");
+    }
+
+    /// <summary>
+    /// The behaviour the Reset-free spelling has to keep: a scenario switch still drops the
+    /// previous drive's trail, so a scan that fails before its first partial cannot leave the old
+    /// volume's path sitting above an error card about a different one.
+    /// </summary>
+    [TestMethod]
+    public async Task ASwitchToAScenarioThatCannotScanLeavesNoTrailFromTheOldOne()
+    {
+        var source = new ControllableSource(StorageTestBuilder.Snapshot());
+        var viewModel = new StorageExplorerViewModel(source);
+        Task first = viewModel.LoadScenarioAsync("first");
+        source.Release();
+        await first;
+        viewModel.NavigateTo(StorageTestBuilder.FolderId);
+        Assert.IsGreaterThan(1, viewModel.Breadcrumbs.Count);
+
+        source.ShouldFail = true;
+        await viewModel.LoadScenarioAsync("second");
+
+        Assert.IsEmpty(viewModel.Breadcrumbs);
+        Assert.AreEqual(ExplorerScanState.Failed, viewModel.ScanState);
+    }
+
     [TestMethod]
     public async Task LoadBuildsTreeBreadcrumbAndFolderProjection()
     {

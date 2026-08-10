@@ -412,6 +412,14 @@ public sealed class StorageExplorerViewModel : ObservableObject
         private set => SetProperty(ref _projectionRevision, value);
     }
 
+    /// <summary>
+    /// The ancestor chain of <see cref="CurrentScope"/>, bound to a BreadcrumbBar.
+    /// </summary>
+    /// <remarks>
+    /// Empty this with <c>EmptyBreadcrumbs()</c>, never <c>Clear()</c>. Anything bound to this
+    /// collection is a native control reached across the WinRT boundary, where a fail-fast cannot
+    /// be caught; see that method for the two dumps and what they actually blamed.
+    /// </remarks>
     public ObservableCollection<StorageNode> Breadcrumbs { get; } = [];
 
     public IAsyncRelayCommand RefreshCommand { get; }
@@ -673,7 +681,7 @@ public sealed class StorageExplorerViewModel : ObservableObject
         // three alone pinned the entire previous volume's node graph, the largest thing this app
         // allocates, behind a room that shows an error card and has no way back to it.
         Snapshot = null;
-        Breadcrumbs.Clear();
+        EmptyBreadcrumbs();
         VisibleItems.Clear();
 
         _searchText = string.Empty;
@@ -1047,9 +1055,41 @@ public sealed class StorageExplorerViewModel : ObservableObject
         }
     }
 
+    /// <summary>
+    /// Empties <see cref="Breadcrumbs"/> one item at a time, from the end. Never <c>Clear()</c>.
+    /// </summary>
+    /// <remarks>
+    /// Two crash dumps from live runs put the fault in the same place: a change to this collection
+    /// being dispatched through a WinRT delegate into the native BreadcrumbBar, which fail-fasted
+    /// the process. Nothing on the far side of that boundary can be caught — not by a try/catch
+    /// here, not by Application.UnhandledException.
+    /// <para>
+    /// The cause is not this method. It is a page that leaves its BreadcrumbBar subscribed to this
+    /// collection after navigating away, so a notification is delivered to controls that have been
+    /// torn down; one dump held seven live SpacePage instances against a single shared ViewModel.
+    /// That is fixed where it belongs, in the page.
+    /// </para>
+    /// <para>
+    /// This method is the second line rather than the first. Both dumps were raising
+    /// <see cref="NotifyCollectionChangedAction.Reset"/>, which asks a control to discard and
+    /// rebuild everything it has; removing from the tail asks for the one thing it already does
+    /// whenever the user navigates up a level. That a <c>Remove</c> is safer is inference, not
+    /// something either dump proves — but this collection is small, the cost is nil, and a control
+    /// that mirrors a bound collection into its own native tree has already been caught in this
+    /// codebase implementing some notification actions and silently ignoring others.
+    /// </para>
+    /// </remarks>
+    private void EmptyBreadcrumbs()
+    {
+        for (int i = Breadcrumbs.Count - 1; i >= 0; i--)
+        {
+            Breadcrumbs.RemoveAt(i);
+        }
+    }
+
     private void RebuildBreadcrumbs()
     {
-        Breadcrumbs.Clear();
+        EmptyBreadcrumbs();
         if (Snapshot is null || CurrentScope is null)
         {
             return;

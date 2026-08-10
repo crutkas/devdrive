@@ -101,6 +101,17 @@ public sealed partial class SpacePage : Page, INotifyPropertyChanged
         {
             ViewModel.PropertyChanged -= ViewModel_PropertyChanged;
             WatchSelectedRow(null);
+
+            // Same rule, but for the one subscription XAML makes on our behalf. ItemsSource binds
+            // the BreadcrumbBar to a collection on the shared ViewModel, and that subscription is
+            // native: it outlives this page, so every visit to the room leaves another unloaded
+            // bar listening to a collection that is still very much alive. Two crash dumps caught
+            // a collection change being dispatched across that boundary and fail-fasting the
+            // process, which nothing on this side can catch; one held seven live SpacePage
+            // instances and a CollectionChanged chain seven handlers deep. Dropping the source
+            // here is what makes the page's own stated rule true of the bindings as well as the
+            // handlers, and takes that chain back to one.
+            ScopeBreadcrumbBar.ItemsSource = null;
         };
     }
 
@@ -109,6 +120,14 @@ public sealed partial class SpacePage : Page, INotifyPropertyChanged
         ViewModel.PropertyChanged -= ViewModel_PropertyChanged;
         ViewModel.PropertyChanged += ViewModel_PropertyChanged;
         WatchSelectedRow(ViewModel.SelectedRow);
+
+        // Puts back what Unloaded dropped. This is belt and braces rather than the thing that makes
+        // navigation work: NavigationCacheMode is Disabled, so WinUI builds a new page on every
+        // visit and x:Bind assigns ItemsSource in the constructor anyway — verified by removing
+        // this line and watching the bar come back populated regardless. It earns its place for the
+        // case that assignment does not cover, a page WinUI reloads without reconstructing, where
+        // without it the bar would return empty and stay that way.
+        ScopeBreadcrumbBar.ItemsSource = ViewModel.Breadcrumbs;
     }
 
     /// <summary>
