@@ -23,6 +23,9 @@ public sealed partial class MainWindow : Window
         InitializeComponent();
 
         ExtendsContentIntoTitleBar = true;
+        AppWindow.TitleBar.PreferredHeightOption = TitleBarHeightOption.Tall;
+        // Tall caption buttons use 48 DIPs. The native TitleBar matches that drag region and owns
+        // the system caption-button insets; do not add a second hard-coded right padding.
         SetTitleBar(AppTitleBar);
 
         AppWindow.SetIcon("Assets/AppIcon.ico");
@@ -51,7 +54,8 @@ public sealed partial class MainWindow : Window
         // Navigate the root frame to the navigation shell on startup.
         RootFrame.Navigate(typeof(ShellPage));
 
-        // Apply the persisted theme override (System / Light / Dark) to the live content root.
-        RootFrame.RequestedTheme = DevDriveManager.Services.ThemeService.Mode;
+        // Use the same root for startup and live changes. A local override on RootFrame would
+        // pin the shell to the startup theme even when ThemeService changes the outer root.
+        ((FrameworkElement)Content).RequestedTheme = DevDriveManager.Services.ThemeService.Mode;
     }
 }

@@ -293,6 +293,110 @@ public sealed class StorageExplorerViewModelTests
         Assert.IsFalse(viewModel.CanNavigateUp);
     }
 
+    [TestMethod]
+    public async Task UpNavigationReselectsEachAncestorAndUpdatesTheVisibleScope()
+    {
+        Guid nestedId = Guid.Parse("10000000-0000-0000-0000-000000000005");
+        StorageSnapshot snapshot = StorageTestBuilder.Snapshot(nodes:
+        [
+            StorageTestBuilder.Node(StorageTestBuilder.RootId, null, "Mock drive (M:)", @"M:\",
+                StorageNodeKind.Folder, 1000, 3),
+            StorageTestBuilder.Node(StorageTestBuilder.FolderId, StorageTestBuilder.RootId, "src",
+                @"M:\src", StorageNodeKind.Folder, 1000, 2),
+            StorageTestBuilder.Node(nestedId, StorageTestBuilder.FolderId, "nested",
+                @"M:\src\nested", StorageNodeKind.Folder, 1000, 1),
+            StorageTestBuilder.Node(StorageTestBuilder.FileId, nestedId, "app.bin",
+                @"M:\src\nested\app.bin", StorageNodeKind.File, 1000),
+        ]);
+        var viewModel = new StorageExplorerViewModel(new SequenceSource(snapshot));
+        Assert.IsFalse(viewModel.CanNavigateUp, "There is no parent before a scan.");
+        viewModel.NavigateUp();
+        Assert.IsNull(viewModel.CurrentScope);
+
+        await viewModel.LoadScenarioAsync("test");
+        Assert.IsFalse(viewModel.CanNavigateUp, "The root has no parent.");
+        List<bool> upAvailability = [];
+        viewModel.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName == nameof(viewModel.CanNavigateUp))
+            {
+                upAvailability.Add(viewModel.CanNavigateUp);
+            }
+        };
+
+        viewModel.NavigateTreeItem(nestedId);
+        Assert.IsTrue(viewModel.CanNavigateUp);
+        Assert.AreEqual(nestedId, viewModel.CurrentScope?.Id);
+        Assert.AreEqual(nestedId, viewModel.SelectedRow?.Id);
+        Assert.AreSame(viewModel.RevealTreeItem(nestedId),
+            viewModel.RevealTreeItem(viewModel.SelectedRow!.Id));
+        Assert.AreEqual(StorageTestBuilder.FileId, viewModel.VisibleItems.Single().Id);
+
+        viewModel.NavigateTreeItem(StorageTestBuilder.FileId);
+        Assert.AreEqual(nestedId, viewModel.CurrentScope?.Id,
+            "Selecting a file in the tree does not change the scope.");
+        Assert.AreSame(viewModel.VisibleItems.Single(), viewModel.SelectedRow);
+
+        viewModel.NavigateUp();
+        Assert.AreEqual(StorageTestBuilder.FolderId, viewModel.CurrentScope?.Id);
+        Assert.IsTrue(viewModel.CanNavigateUp);
+        Assert.AreEqual(StorageTestBuilder.FolderId, viewModel.SelectedRow?.Id,
+            "Up must select the parent, not leave an off-scope file selected.");
+        Assert.AreSame(viewModel.RevealTreeItem(StorageTestBuilder.FolderId),
+            viewModel.RevealTreeItem(viewModel.SelectedRow!.Id));
+        Assert.AreEqual(nestedId, viewModel.VisibleItems.Single().Id);
+
+        viewModel.NavigateUp();
+        Assert.AreEqual(StorageTestBuilder.RootId, viewModel.CurrentScope?.Id);
+        Assert.IsFalse(viewModel.CanNavigateUp);
+        Assert.AreEqual(StorageTestBuilder.RootId, viewModel.SelectedRow?.Id);
+        Assert.AreSame(viewModel.TreeRoots.Single(), viewModel.RevealTreeItem(viewModel.SelectedRow!.Id));
+        Assert.AreEqual(StorageTestBuilder.FolderId, viewModel.VisibleItems.Single().Id);
+        Assert.HasCount(1, viewModel.Breadcrumbs);
+
+        viewModel.NavigateUp();
+        Assert.AreEqual(StorageTestBuilder.RootId, viewModel.CurrentScope?.Id,
+            "At the root, Up is a no-op even when invoked programmatically.");
+        CollectionAssert.AreEqual(new[] { true, true, false }, upAvailability);
+    }
+
+    [TestMethod]
+    public async Task SwitchingScenariosDisablesUpUntilTheNewRootIsAvailable()
+    {
+        var source = new GatedSource(StorageTestBuilder.Snapshot());
+        var viewModel = new StorageExplorerViewModel(source);
+
+        Task first = viewModel.LoadScenarioAsync("first");
+        await source.Entered(0);
+        source.Release(0);
+        await first;
+        viewModel.NavigateTo(StorageTestBuilder.FolderId);
+        Assert.IsTrue(viewModel.CanNavigateUp);
+
+        List<bool> upAvailability = [];
+        viewModel.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName == nameof(viewModel.CanNavigateUp))
+            {
+                upAvailability.Add(viewModel.CanNavigateUp);
+            }
+        };
+
+        Task second = viewModel.LoadScenarioAsync("second");
+        await source.Entered(1);
+        Assert.IsFalse(viewModel.CanNavigateUp, "The old drive must not remain navigable while loading.");
+        Assert.IsNull(viewModel.CurrentScope);
+        viewModel.NavigateUp();
+        Assert.IsNull(viewModel.CurrentScope);
+
+        source.Release(1);
+        await second;
+        Assert.AreEqual(StorageTestBuilder.RootId, viewModel.CurrentScope?.Id);
+        Assert.IsFalse(viewModel.CanNavigateUp);
+        CollectionAssert.AreEqual(new[] { false, false }, upAvailability,
+            "The bound Up button must be notified on both scope transitions.");
+    }
+
     /// <summary>
     /// The live scanner walks the tree on a thread-pool thread, so its progress reports arrive off
     /// the thread that started the scan. Applying them there would raise property change

@@ -202,6 +202,8 @@ public sealed partial class RoomScanBar : UserControl
 
         PartScanButton.Content = ScanLabel;
         PartScanButton.IsEnabled = CanScan && !IsScanning;
+        PartStrip.Visibility = SelectionMode == VolumeStripSelection.Single
+            ? Visibility.Visible : Visibility.Collapsed;
 
         AutomationProperties.SetAutomationId(PartStrip, StripAutomationId);
         AutomationProperties.SetName(PartStrip, StripAutomationName);

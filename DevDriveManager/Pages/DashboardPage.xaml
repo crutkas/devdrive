@@ -33,10 +33,7 @@
             IsScanning="{x:Bind Reclaim.IsScanning, Mode=OneWay}"
             ScanLabel="Scan this PC"
             ScanRequested="ScanBar_ScanRequested"
-            SelectionMode="None"
-            StripAutomationId="OverviewVolumeStrip"
-            StripAutomationName="Volumes on this machine"
-            Volumes="{x:Bind VolumeStripEntries}" />
+            SelectionMode="None" />
 
         <Grid
             Grid.Row="1"

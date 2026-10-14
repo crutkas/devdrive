@@ -10,14 +10,12 @@ using DevDriveManager.Services;
 namespace DevDriveManager.ViewModels;
 
 /// <summary>
-/// Drives the "Package caches" section. Detection and sizing are REAL (resolved from environment
-/// variables + a bounded directory scan). Moving is GATED: both "Move" (per row) and "Move all" open
-/// a SAFE inline confirm and change nothing.
+/// Drives the "Package caches" section. Detection and sizing are read-only; moving is gated behind
+/// a confirmation request for either a single cache or the whole eligible inventory.
 /// </summary>
 /// <remarks>
-/// Moving is GATED behind a SAFE inline confirm that changes nothing. Detection now runs off the UI
-/// thread (npm cache-path resolution can spawn a short-lived process). Speed <em>testing</em> lives in
-/// the unified Performance test suite, not here.
+/// Detection runs off the UI thread (npm cache-path resolution can spawn a short-lived process).
+/// Speed <em>testing</em> lives in the unified Performance test suite, not here.
 /// </remarks>
 public partial class PackageCachesViewModel : ObservableObject
 {
@@ -108,20 +106,23 @@ public partial class PackageCachesViewModel : ObservableObject
     [ObservableProperty]
     public partial string MoveAllButtonText { get; set; } = "Move all";
 
-    // ---- Inline "Move all" confirm (replaces the old preview ContentDialog) -----------------------
+    // ---- Move-all confirmation and result ---------------------------------------------------------
 
-    /// <summary>True while the inline "Move all" confirm panel is open.</summary>
+    /// <summary>True while a "Move all" confirmation is pending.</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ShowMoveAllButton))]
     [NotifyCanExecuteChangedFor(nameof(MoveAllCommand))]
     [NotifyCanExecuteChangedFor(nameof(ConfirmMoveAllCommand))]
     public partial bool IsConfirmingMoveAll { get; set; }
 
-    /// <summary>True once the user confirmed — shows the safe, preview-only "nothing changed" result.</summary>
+    /// <summary>True once a move-all sweep has produced a result.</summary>
     [ObservableProperty]
     public partial bool ShowMoveAllResult { get; set; }
 
-    /// <summary>The inline-confirm body copy (built from the SAFE move plans).</summary>
+    [ObservableProperty]
+    public partial bool MoveAllHasFailures { get; set; }
+
+    /// <summary>The confirmation copy for the eligible caches.</summary>
     [ObservableProperty]
     public partial string MoveAllConfirmBodyText { get; set; } = string.Empty;
 
@@ -129,7 +130,7 @@ public partial class PackageCachesViewModel : ObservableObject
     [ObservableProperty]
     public partial string MoveAllResultText { get; set; } = string.Empty;
 
-    /// <summary>Show the "Move all" button when there is something to move and its confirm panel is closed.</summary>
+    /// <summary>Show the "Move all" button when there is something to move and no confirmation is pending.</summary>
     public bool ShowMoveAllButton => HasDevDrive && HasCachesOnSystemDrive && !IsConfirmingMoveAll;
 
     /// <summary>Shows neutral guidance instead of a false Dev Drive all-clear state.</summary>
@@ -370,6 +371,7 @@ public partial class PackageCachesViewModel : ObservableObject
         _moveAllConfirmationGeneration = -1;
         IsConfirmingMoveAll = false;
         ShowMoveAllResult = false;
+        MoveAllHasFailures = false;
         MoveAllConfirmBodyText = string.Empty;
         MoveAllResultText = string.Empty;
         IsCalculating = false;
@@ -396,7 +398,7 @@ public partial class PackageCachesViewModel : ObservableObject
     }
 
     /// <summary>
-    /// "Map path" request for an undetected tool: open the inline confirm describing a no-copy repoint of
+    /// "Map path" request for an undetected tool: confirm a no-copy repoint of
     /// the per-user variable at the user-chosen <see cref="PackageCacheRowViewModel.MapPath"/>.
     /// </summary>
     private void OnMapRequested(PackageCacheRowViewModel row)
@@ -409,7 +411,7 @@ public partial class PackageCachesViewModel : ObservableObject
     }
 
     /// <summary>
-    /// "Move &amp; remap" request for an undetected tool: open the inline confirm describing a real move of
+    /// "Move &amp; remap" request for an undetected tool: confirm a real move of
     /// the user-chosen folder to the Dev Drive AND the repoint of the per-user variable (reuses the move engine).
     /// </summary>
     private void OnRemapRequested(PackageCacheRowViewModel row)
@@ -582,11 +584,13 @@ public partial class PackageCachesViewModel : ObservableObject
         }
 
         string sumText = ByteSizeFormatter.Format(sum);
+        string cacheNoun = onSystem.Count == 1 ? "package cache" : "package caches";
         MoveAllConfirmBodyText =
-            $"Copies {onSystem.Count} package cache(s) ({sumText}) to {_devLetter}:\\ (hash-verified) and sets each " +
+            $"Copies {onSystem.Count} {cacheNoun} ({sumText}) to {_devLetter}:\\ (hash-verified) and sets each " +
             "tool's per-user variable. Originals are kept in place, so every move is reversible. Runs one at a " +
             "time in the background; one failure won't stop the rest.";
         ShowMoveAllResult = false;
+        MoveAllHasFailures = false;
         _moveAllConfirmationGeneration = _loadGeneration;
         IsConfirmingMoveAll = true;
     }
@@ -680,12 +684,13 @@ public partial class PackageCachesViewModel : ObservableObject
 
         CacheMoveAllOutcome combined = CacheMoveAllOutcome.From(outcomes);
         MoveAllResultText = combined.CombinedText;
+        MoveAllHasFailures = combined.HasFailures;
         ShowMoveAllResult = true;
         _moveAllConfirmationGeneration = -1;
         UpdateWarning();
     }
 
-    /// <summary>Cancel closes the prompt and changes nothing.</summary>
+    /// <summary>Dismisses a pending confirmation without moving anything.</summary>
     [RelayCommand]
     private void CancelMoveAll()
     {

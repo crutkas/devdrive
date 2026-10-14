@@ -221,7 +221,7 @@ Test-UI "Nav: Create Dev Drive present"     { winapp ui wait-for "NavCreate"    
 #      about any particular finding — which findings appear depends entirely on the test machine.
 # ─────────────────────────────────────────────────────────────────────────────
 Test-UI "Navigate to Overview"               { Goto "NavDashboard" "SignalsSubtitle" }
-Test-UI "Overview: volume strip"             { winapp ui wait-for "OverviewVolumeStrip"   -a $AppPid -t 3000 }
+Test-UI "Overview: no display-only volume strip" { winapp ui wait-for "OverviewVolumeStrip" -a $AppPid --gone -t 3000 }
 Test-UI "Overview: scan action"              { winapp ui wait-for "ScanBarScanButton"     -a $AppPid -t 3000 }
 Test-UI "Overview: last-scan chip"           { winapp ui wait-for "LastScanChip"          -a $AppPid -t 3000 }
 Test-UI "Overview: free-space chart card"    { winapp ui wait-for "TrendSubtitle"         -a $AppPid -t 3000 }
@@ -325,32 +325,39 @@ winapp ui screenshot -a $AppPid -o "screenshots\01b-reclaim.png" 2>$null | Out-N
 #       the whole reason the unmeasured plumbing exists, and until now no UI test covered this room
 #       at all — it appeared in the suite only as a page the accessibility audit walked past.
 # ─────────────────────────────────────────────────────────────────────────────
-Test-UI "Navigate to Space"                  { Goto "NavSpace" "SpaceItemsList" }
-Test-UI "Space: volume strip"                { winapp ui wait-for "SpaceVolumeStrip"     -a $AppPid -t 3000 }
+Test-UI "Navigate to Space"                  { Goto "NavSpace" "SpaceFolderTree" }
+Test-UI "Space: volume ComboBox"             { winapp ui wait-for "SpaceVolumeStrip"     -a $AppPid -t 3000 }
 Test-UI "Space: folder tree"                 { winapp ui wait-for "SpaceFolderTree"      -a $AppPid -t 3000 }
 Test-UI "Space: treemap"                     { winapp ui wait-for "SpaceTreemap"         -a $AppPid -t 3000 }
-Test-UI "Space: breadcrumb"                  { winapp ui wait-for "SpaceBreadcrumb"      -a $AppPid -t 3000 }
-Test-UI "Space: inspector title"             { winapp ui wait-for "SpaceInspectorTitle"  -a $AppPid -t 3000 }
-Test-UI "Space: status bar"                  { winapp ui wait-for "SpaceStatusBar"       -a $AppPid -t 3000 }
-Test-UI "Space: rescan is offered, not running" {
-    Assert-Present @("ScanBarScanButton", "SpaceViewMode", "SpaceModeFolders", "SpaceModeLargestFiles")
-    if (Test-Present "ScanBarCancelButton") { throw "Cancel is offered while no scan is running" }
-    if (Test-Present "ScanBarProgress")     { throw "a progress bar is shown while no scan is running" }
-}
-# The room acts on one volume, so it opens with one chosen — and the button says which. A room whose
-# one verb is greyed out on arrival states that it cannot be used. The label is the assertion because
-# it is derived from the selection: "Scan" with no letter is exactly what a null scope produces.
-Test-UI "Space: opens with a scope chosen, and the button names it" {
-    $label = Get-Name "ScanBarScanButton"
-    if ($label -notmatch '^Scan [A-Z]:$') {
-        throw "expected the scan button to name a volume, got '$label'"
+Test-UI "Space: treemap scope label removed" { winapp ui wait-for "SpaceBreadcrumb" -a $AppPid --gone -t 1000 }
+Test-UI "Space: duplicate table, selector and tree header removed" {
+    foreach ($id in @("SpaceInspectorTitle", "SpaceInspectorPath", "SpaceItemsList",
+                      "SpaceViewMode", "SpaceModeFolders", "SpaceModeLargestFiles", "SpaceRootName")) {
+        if (Test-Present $id) { throw "'$id' should not be present on Space." }
     }
-    if ($label -match 'Rescan') { throw "a button does not become a different button because it was pressed" }
+}
+Test-UI "Space: bottom bar hidden while idle" {
+    if (Test-Present "SpaceStatusBar") { throw "Idle scan bar must be hidden" }
+}
+Test-UI "Space: rescan is offered, not running" {
+    Assert-Present @("ScanBarScanButton", "SpaceFolderTree")
+    if (Test-Present "SpaceCancelScan") { throw "Cancel is offered while no scan is running" }
+    if (Test-Present "SpaceScanProgress") { throw "a progress bar is shown while no scan is running" }
+}
+# The ComboBox owns the selected scope; the adjacent action keeps its fixed Scan label.
+Test-UI "Space: picker owns scope and scan button has a fixed label" {
+    $label = Get-Name "ScanBarScanButton"
+    if ($label -ne 'Scan') {
+        throw "expected fixed Scan label, got '$label'"
+    }
+    if ((Get-UiaProperty "SpaceVolumeStrip" "ClassName") -ne "ComboBox") {
+        throw "Volume selection must use a native ComboBox"
+    }
 }
 # The unmeasured contract, asserted where a user would actually read it. An unscanned root reports its
 # size as an em dash; "0 bytes" would be a claim we measured it and found nothing there.
 Test-UI "Space: an unmeasured size reads as a dash, not zero" {
-    $detail = Get-Name "SpaceCoverageDetail"
+    $detail = @(winapp ui inspect "SpaceFolderTree" -a $AppPid --depth 3 2>$null) -join "`n"
     if ($detail -match '\b0 bytes\b') { throw "unmeasured coverage reported '0 bytes' instead of '—': '$detail'" }
 }
 winapp ui screenshot -a $AppPid -o "screenshots\01c-space.png" 2>$null | Out-Null
@@ -360,13 +367,11 @@ winapp ui screenshot -a $AppPid -o "screenshots\01c-space.png" 2>$null | Out-Nul
 #
 #  Overview, Reclaim and Space each used to invent their own scan affordance: three different labels,
 #  three different enablement rules, and — on Space alone — a volume chip that silently started a full
-#  volume scan when clicked. Same app, same gesture, three answers. They now share RoomScanBar, and
-#  these assert the grammar it exists to enforce rather than any one room's strings:
+#  volume scan when clicked. These assert the common interaction contract:
 #
 #    · Rooms that do the identical thing say the identical thing.
-#    · The label names the scope and never becomes "Rescan" — a button does not turn into a different
-#      button because it has been pressed.
-#    · Chips select scope; only the button starts work.
+#    · Whole-machine actions name their scope; Space's ComboBox names its scope beside Scan.
+#    · Selection never starts work; only the button does.
 # ─────────────────────────────────────────────────────────────────────────────
 Test-UI "Scan grammar: whole-machine rooms use one label" {
     Goto "NavDashboard" "SignalsSubtitle"
@@ -393,26 +398,28 @@ Test-UI "Scan grammar: an inert chip is not a tab stop" {
     }
 }
 # ...and where the chip IS the scope control, it is reachable from the keyboard.
-Test-UI "Scan grammar: a chip that picks scope is a tab stop" {
-    Goto "NavSpace" "SpaceItemsList"
-    if ((Get-UiaProperty "VolumeCard_C" "IsKeyboardFocusable") -ne "True") {
-        throw "the scope chip cannot be reached from the keyboard"
+Test-UI "Scan grammar: the volume picker is a tab stop" {
+    Goto "NavSpace" "SpaceFolderTree"
+    if ((Get-UiaProperty "SpaceVolumeStrip" "IsKeyboardFocusable") -ne "True") {
+        throw "the scope picker cannot be reached from the keyboard"
     }
 }
 # Picking a scope is not the same request as "scan it". Space used to conflate them, so a click meant
 # to change what you were looking at started minutes of I/O with no confirmation.
 Test-UI "Scan grammar: picking a scope does not start a scan" {
-    Goto "NavSpace" "SpaceItemsList"
-    winapp ui invoke "VolumeCard_C" -a $AppPid 2>$null | Out-Null
+    Goto "NavSpace" "SpaceFolderTree"
+    winapp ui invoke "SpaceVolumeStrip" -a $AppPid 2>$null | Out-Null
+    winapp ui send-keys "down enter" --target "SpaceVolumeStrip" -a $AppPid 2>$null | Out-Null
     Start-Sleep -Milliseconds 900
-    if (Test-Present "ScanBarCancelButton") { throw "choosing a volume started a scan" }
-    if ((Get-Name "ScanBarScanButton") -ne "Scan C:") { throw "the label did not follow the chosen scope" }
+    if (Test-Present "SpaceCancelScan") { throw "choosing a volume started a scan" }
+    if ((Get-Name "ScanBarScanButton") -ne "Scan") { throw "the scan label changed with the chosen scope" }
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  (3) Package caches — two tabs over one table: Detected, then Not installed.
 # ─────────────────────────────────────────────────────────────────────────────
 Test-UI "Navigate to Package caches"         { Goto "NavPackageCaches" "PackageCachesScrollViewer" }
+Test-UI "Caches: page owns its title"          { winapp ui wait-for "PageTitle" -a $AppPid -t 3000 }
 # The Detected tab is where the room opens. Which ecosystems are installed, and which volume each cache
 # sits on, are facts about THIS PC — so both assertions below discover the set and check the rule.
 # They used to name Cargo and npm, which is the same scar that took MapPathInput_uv red (see below).
@@ -473,7 +480,43 @@ Test-UI "Caches: back to Detected" {
     if ((Find-Ids 'PackageCacheCard_[A-Za-z0-9]+').Count -eq 0) { throw "Detected tab did not come back" }
 }
 Test-UI "Caches: Move all present"           { winapp ui wait-for "MoveAllButton"     -a $AppPid -t 3000 }
-Test-UI "Caches: 'Learn what this does' link"{ winapp ui wait-for "LearnWhatThisDoes" -a $AppPid -t 3000 }
+Test-UI "Caches: cache-move guide link"      { winapp ui wait-for "LearnWhatThisDoes" -a $AppPid -t 3000 }
+Test-UI "Caches: no inspector or footer" {
+    winapp ui wait-for "CachesInspectorName" -a $AppPid --gone -t 1000
+    winapp ui wait-for "CachesStatusBar"     -a $AppPid --gone -t 1000
+}
+Test-UI "Caches: Move all opens a dialog; Cancel preserves the list" {
+    $before = @(Find-Ids 'MoveCache_[A-Za-z0-9]+' 1500).Count
+    winapp ui invoke "MoveAllButton" -a $AppPid
+    try {
+        winapp ui wait-for "MoveAllConfirmDialog" -a $AppPid -t 3000
+        winapp ui wait-for "MoveAllConfirmPanel"  -a $AppPid --gone -t 1000
+    }
+    finally {
+        if (Test-Present "MoveAllConfirmDialog") {
+            winapp ui invoke "CloseButton" -a $AppPid 2>$null | Out-Null
+        }
+    }
+    winapp ui wait-for "MoveAllButton" -a $AppPid -t 3000
+    if (@(Find-Ids 'MoveCache_[A-Za-z0-9]+' 1500).Count -ne $before) {
+        throw "Cancelling Move all changed the available cache moves"
+    }
+}
+Test-UI "Caches: an individual move also opens a dialog" {
+    $move = @(Find-Ids 'MoveCache_[A-Za-z0-9]+' 1500 | Select-Object -First 1)
+    if ($move.Count -eq 0) { throw "No movable cache was found for the confirmation test" }
+    $dialogId = $move[0] -replace '^MoveCache_', 'MoveConfirm_'
+    winapp ui invoke $move[0] -a $AppPid
+    try {
+        winapp ui wait-for $dialogId -a $AppPid -t 3000
+    }
+    finally {
+        if (Test-Present $dialogId) {
+            winapp ui invoke "CloseButton" -a $AppPid 2>$null | Out-Null
+        }
+    }
+    winapp ui wait-for $move[0] -a $AppPid -t 3000
+}
 winapp ui screenshot -a $AppPid -o "screenshots\02-caches.png" 2>$null | Out-Null
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -647,23 +690,43 @@ Test-UI "Create: the done card offers the two next rooms" {
 winapp ui screenshot -a $AppPid -o "screenshots\08-create-complete.png" 2>$null | Out-Null
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  (7) Settings — two cards of preferences, every one of which reaches a real decision.
+#  (7) Settings — native cards and expanders, every preference reaches a real decision.
 #      The suite changes each preference, asserts the control reflects it, then puts it back, so a
 #      run leaves the machine and the app exactly as it found them.
 # ─────────────────────────────────────────────────────────────────────────────
+function Expand-SettingsGroup([string]$id) {
+    $tree = winapp ui inspect $id -a $AppPid --json --depth 2 | Out-String | ConvertFrom-Json
+    $header = $tree.windows[0].elements[0].children |
+        Where-Object className -eq 'Microsoft.UI.Xaml.Controls.Expander' | Select-Object -First 1
+    if (-not $header) { throw "No native Expander peer for $id." }
+    if ($header.expandState -ne 'expanded') {
+        winapp ui invoke $header.selector -a $AppPid | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Could not expand $id." }
+    }
+}
+
 Test-UI "Navigate to Settings" {
     winapp ui invoke "SettingsItem" -a $AppPid 2>$null | Out-Null
     Start-Sleep -Milliseconds 500
     winapp ui wait-for "ThemeSelector" -a $AppPid -t 5000 | Out-Null
 }
-Test-UI "Settings: Rescan present"           { winapp ui wait-for "RescanButton"          -a $AppPid -t 3000 }
-Test-UI "Settings: Create present"           { winapp ui wait-for "SettingsCreateButton"  -a $AppPid -t 3000 }
-Test-UI "Settings: Windows Security present" { winapp ui wait-for "SettingsOpenWindowsSecurityButton" -a $AppPid -t 3000 }
-Test-UI "Settings: two cards"                {
+Test-UI "Settings: machine action shortcuts removed" {
+    foreach ($id in @("RescanButton", "SettingsCreateButton", "SettingsManageInStorageButton", "SettingsOpenWindowsSecurityButton")) {
+        if (Test-Present $id) { throw "'$id' should not be present in Settings." }
+    }
+}
+Test-UI "Settings: grouped sections"         {
     if (-not (Test-Present "SignalSettingsHead")) { throw "Overview-and-signals card head missing" }
     winapp ui wait-for "MachineSettingsHead" -a $AppPid -t 3000
 }
-Test-UI "Settings: status bar"               { winapp ui wait-for "SettingsStatusBar"     -a $AppPid -t 3000 }
+Test-UI "Settings: obsolete content removed" {
+    winapp ui wait-for "SettingsStatusBar" -a $AppPid --gone -t 3000
+    winapp ui wait-for "WriteSurfaceHead" -a $AppPid --gone -t 3000
+}
+Test-UI "Settings: expand preference groups" {
+    Expand-SettingsGroup CacheSignalsExpander
+    Expand-SettingsGroup HistorySettingsExpander
+}
 Test-UI "Settings: reset present"            { winapp ui wait-for "ResetPreferencesButton" -a $AppPid -t 3000 }
 winapp ui screenshot -a $AppPid -o "screenshots\09-settings.png" 2>$null | Out-Null
 
@@ -678,16 +741,14 @@ foreach ($pref in @("WatchCachesToggle", "LowFreeCombo", "RollupCombo",
 # Round-trip one combo of each kind. The threshold reaches AttentionSignalBuilder and the method
 # reaches the Create room, so proving the control moves is proving the preference moves.
 Select-Combo "LowFreeCombo" "LowFree25"
-# Traced THROUGH to the status bar, not just back off the ComboBox. A control that reflects its own
-# click proves only that the click landed; the status bar reading "Warns below 25% free" is what proves
-# the preference reached a consumer. (This assertion used to sit in its own test named
-# "status bar reports the threshold" which never looked at the threshold — it checked only that the bar
-# exposed *some* facts, and so would have passed with the number wrong or the wiring cut.)
-Test-UI "Preference: low-free threshold -> 25%, and the status bar follows" {
+# Recreate the page to verify the preference reached the store, not only the ComboBox.
+Test-UI "Preference: low-free threshold -> 25%, retained across navigation" {
+    winapp ui invoke "NavDrives" -a $AppPid | Out-Null
+    winapp ui wait-for "VolumesList" -a $AppPid -t 3000 | Out-Null
+    winapp ui invoke "SettingsItem" -a $AppPid | Out-Null
     winapp ui wait-for "LowFreeCombo" -a $AppPid --value "25%" -t 3000
-    $facts = (winapp ui inspect "SettingsStatusBar" -a $AppPid --json --depth 20 2>$null | Out-String)
-    $global:LASTEXITCODE = 0
-    if ($facts -notmatch 'Warns below 25% free') { throw "status bar did not follow the threshold to 25%" }
+    Expand-SettingsGroup CacheSignalsExpander
+    Expand-SettingsGroup HistorySettingsExpander
 }
 Select-Combo "LowFreeCombo" "LowFree15"
 Test-UI "Preference: low-free threshold restored" {
@@ -832,7 +893,7 @@ if ($IncludeSlowScans) {
             throw "no category filled the row table, across all $($categories.Count) of them"
         }
 
-        Goto "NavSpace" "SpaceItemsList"
+        Goto "NavSpace" "SpaceFolderTree"
         Goto "NavReclaim" "ReclaimCategoryList"
         Start-Sleep -Milliseconds 800
 
@@ -843,44 +904,33 @@ if ($IncludeSlowScans) {
     }
     winapp ui screenshot -a $AppPid -o "screenshots\01b-reclaim-scanned.png" 2>$null | Out-Null
 
-    # The Space room's scope trail lives on a SHARED ViewModel, and this is the property that makes
-    # that architecture visible: leave the room mid-scan, come back, and your place is still there.
-    # It regressed once already — a page that built its own ViewModel lost a finished scan on every
-    # navigation, because NavigationCacheMode is Disabled and WinUI rebuilds the page each visit.
-    #
-    # It does NOT guard SpacePage's ItemsSource restore. That was checked rather than assumed: with
-    # the restore deliberately removed this assertion still passed, because a freshly constructed
-    # page gets a fresh x:Bind assignment anyway. The restore only matters if WinUI ever reloads a
-    # page it did not reconstruct, which no navigation here can provoke.
-    #
-    # Only a populated bar can tell surviving from re-created, which is why this sits behind the
-    # slow lane — at rest the breadcrumbs are legitimately empty and the check would prove nothing.
-    Test-UI "Space: the scope trail survives leaving the room and coming back" {
-        Goto "NavSpace" "SpaceBreadcrumb"
+    # A populated shared hierarchy survives navigation even though the visible breadcrumb is gone.
+    Test-UI "Space: the hierarchy survives leaving the room and coming back" {
+        Goto "NavSpace" "SpaceFolderTree"
         winapp ui invoke "ScanBarScanButton" -a $AppPid 2>$null | Out-Null
 
         $deadline = (Get-Date).AddMinutes(2)
         $before = @()
         while ((Get-Date) -lt $deadline -and $before.Count -eq 0) {
             Start-Sleep -Seconds 2
-            $before = @(winapp ui inspect "SpaceBreadcrumb" -a $AppPid --depth 4 2>$null |
-                Select-String -Pattern '\bText\b')
+            $before = @(winapp ui inspect "SpaceFolderTree" -a $AppPid --depth 4 2>$null |
+                Select-String -Pattern 'FolderTreeItem_')
         }
-        if ($before.Count -eq 0) { throw "no crumb ever appeared, so the round trip proves nothing" }
+        if ($before.Count -eq 0) { throw "no tree item appeared, so the round trip proves nothing" }
 
-        if (Test-Present "ScanBarCancelButton" 1000) {
-            winapp ui invoke "ScanBarCancelButton" -a $AppPid 2>$null | Out-Null
+        if (Test-Present "SpaceCancelScan" 1000) {
+            winapp ui invoke "SpaceCancelScan" -a $AppPid 2>$null | Out-Null
             Start-Sleep -Milliseconds 800
         }
 
         Goto "NavDashboard" "NavSpace"
-        Goto "NavSpace" "SpaceBreadcrumb"
+        Goto "NavSpace" "SpaceFolderTree"
         Start-Sleep -Milliseconds 800
 
-        $after = @(winapp ui inspect "SpaceBreadcrumb" -a $AppPid --depth 4 2>$null |
-            Select-String -Pattern '\bText\b')
+        $after = @(winapp ui inspect "SpaceFolderTree" -a $AppPid --depth 4 2>$null |
+            Select-String -Pattern 'FolderTreeItem_')
         if ($after.Count -eq 0) {
-            throw "the room forgot where it was: the scope trail did not survive navigation"
+            throw "the shared hierarchy did not survive navigation"
         }
     }
 }
@@ -901,7 +951,7 @@ if ($IncludeSlowScans) {
 $auditPages = @(
     @{ nav = "NavDashboard";     anchor = "SignalsSubtitle" },
     @{ nav = "NavReclaim";       anchor = "ReclaimCategoryList" },
-    @{ nav = "NavSpace";         anchor = "SpaceItemsList" },
+    @{ nav = "NavSpace";         anchor = "SpaceFolderTree" },
     @{ nav = "NavPackageCaches"; anchor = "PackageCachesScrollViewer" },
     @{ nav = "NavBenchmarks";    anchor = "WorkloadsList" },
     @{ nav = "NavDrives";        anchor = "VolumesList" },
