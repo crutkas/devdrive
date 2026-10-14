@@ -64,6 +64,8 @@ public sealed partial class CreateDevDrivePage : Page, INotifyPropertyChanged
     /// </remarks>
     public CreateDevDriveViewModel ViewModel => App.SharedCreate;
 
+    public string PageTitle => RoomRegistry.Find("create")!.Title;
+
     /// <summary>The volumes this room is about to change. Same strip as every other room.</summary>
     public IReadOnlyList<VolumeStripEntry> VolumeStripEntries => _volumeStripEntries;
 
