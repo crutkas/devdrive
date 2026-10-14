@@ -152,8 +152,8 @@ public sealed partial class ShellPage : Page
         if (target is not null && ContentFrame.CurrentSourcePageType != target)
         {
             PageTitle.Text = tag == "settings" ? "Settings" : RoomRegistry.Find(tag)!.Title;
-            // Package caches owns its title/action rows so the controls can wrap at narrow widths.
-            bool pageOwnsHeader = target == typeof(PackageCachesPage);
+            // These pages own their title/action rows so the controls can wrap at narrow widths.
+            bool pageOwnsHeader = target == typeof(SpacePage) || target == typeof(PackageCachesPage);
             PageTitle.Visibility = pageOwnsHeader ? Visibility.Collapsed : Visibility.Visible;
             AutomationProperties.SetAutomationId(PageTitle,
                 pageOwnsHeader ? "ShellPageTitle" : tag == "settings" ? "SettingsTitle" : "PageTitle");

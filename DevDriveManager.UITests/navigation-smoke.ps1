@@ -103,6 +103,71 @@ foreach ($route in $routes) {
         }
     }
 }
+Test-Navigation 'Space: one native hierarchy beside the treemap' {
+    Go-To 'NavSpace' 'SpaceFolderTree'
+    foreach ($removed in @('SpaceItemsList', 'SpaceViewMode', 'SpaceModeFolders',
+                           'SpaceModeLargestFiles', 'SpaceRootName', 'SpaceInspectorTitle', 'SpaceBreadcrumb')) {
+        Invoke-Ui wait-for $removed --gone -t 1000 | Out-Null
+    }
+    foreach ($remaining in @('SpaceTreemap', 'SpaceVolumeStrip', 'ScanBarScanButton')) {
+        Invoke-Ui wait-for $remaining -t 3000 | Out-Null
+    }
+    foreach ($hidden in @('SpaceStatusBar', 'SpaceScanProgress', 'SpaceCancelScan')) {
+        Invoke-Ui wait-for $hidden --gone -t 1000 | Out-Null
+    }
+    Assert-Property 'SpaceVolumeStrip' 'ClassName' 'ComboBox'
+    Assert-Property 'ScanBarScanButton' 'Name' 'Scan'
+    [xml]$space = Get-Content (Join-Path $PSScriptRoot '..\DevDriveManager\Pages\SpacePage.xaml')
+    $picker = $space.SelectSingleNode("//*[local-name()='ComboBox']")
+    $scan = $space.SelectSingleNode("//*[local-name()='Button' and @*[local-name()='Name']='ScanButton']")
+    if ($picker.GetAttribute('Height') -ne '48' -or $scan.GetAttribute('Height') -ne '48' -or
+        -not $picker.SelectSingleNode(".//*[local-name()='Grid' and @RowSpacing='7']")) {
+        throw 'Volume picker and Scan must share a 48-DIP height with a clear text/indicator gap.'
+    }
+    if (-not $picker.SelectSingleNode(".//*[local-name()='TextBlock' and @FontWeight='SemiBold']") -or
+        -not $picker.SelectSingleNode(".//*[local-name()='TextBlock' and @*[local-name()='Grid.Column']='1']") -or
+        -not $picker.SelectSingleNode(".//*[local-name()='ProgressBar' and @Height='2']")) {
+        throw 'Picker needs a semibold name, inline free space and a minimal capacity bar.'
+    }
+    $toolbar = $space.SelectSingleNode("//*[local-name()='Grid' and @*[local-name()='Name']='ScanToolbar']")
+    if ($toolbar.GetAttribute('HorizontalAlignment') -ne 'Right' -or
+        -not $toolbar.ParentNode.SelectSingleNode("*[local-name()='TextBlock' and @Style='{StaticResource TitleTextBlockStyle}']")) {
+        throw 'Space title and right-aligned scan actions must share one responsive header.'
+    }
+    $tree = $space.SelectSingleNode("//*[local-name()='TreeView']")
+    $map = $space.SelectSingleNode("//*[local-name()='TreemapPane']")
+    if ($tree.ParentNode -ne $map.ParentNode.ParentNode -or $map.ParentNode.GetAttribute('Grid.Column') -ne '1') {
+        throw 'The hierarchy and treemap must be siblings in left/right columns.'
+    }
+    if ($space.OuterXml -match 'SmCard|PHYSICAL TREE|SelectorBar|ListView') {
+        throw 'Space must not restore custom cards, headers or the duplicate table.'
+    }
+    if ($tree.ParentNode.GetAttribute('Background') -ne '{ThemeResource CardBackgroundFillColorDefaultBrush}' -or
+        $tree.ParentNode.GetAttribute('BorderBrush') -ne '{ThemeResource CardStrokeColorDefaultBrush}') {
+        throw 'Tree and treemap must share one native card.'
+    }
+    if (-not $tree.SelectSingleNode(".//*[local-name()='Grid' and @Margin='0,0,20,0']") -or
+        -not $tree.SelectSingleNode(".//*[local-name()='FontIcon' and @Glyph='{x:Bind local:SpacePage.NodeGlyph(IsFolder)}']")) {
+        throw 'Tree icons must distinguish folders/files and retain the scrollbar gutter.'
+    }
+    foreach ($animation in @('Implicit.ShowAnimations', 'Implicit.HideAnimations')) {
+        if (-not $space.SelectSingleNode("//*[local-name()='$animation']")) {
+            throw "Toolkit $animation missing."
+        }
+        $bar = $space.SelectSingleNode("//*[local-name()='Border' and @*[local-name()='Name']='SpaceStatusBar']")
+        if ($bar.GetAttribute('Grid.Row') -ne $tree.ParentNode.GetAttribute('Grid.Row') -or
+            $bar.GetAttribute('HorizontalAlignment') -ne 'Center' -or $bar.GetAttribute('MaxWidth') -ne '560') {
+            throw 'Scan progress must float centered over the content, not reserve a footer row.'
+        }
+        if (-not $bar.SelectSingleNode(".//*[local-name()='TextBlock' and @FontSize='12']") -or
+            -not $bar.SelectSingleNode(".//*[local-name()='Button' and @Content='Cancel' and @*[local-name()='Grid.Column']='2']")) {
+            throw 'Floating progress needs 12-DIP status text and an inline Cancel button.'
+        }
+    }
+    foreach ($binding in @('MaterializedChildren', 'HasUnrealizedChildren', 'PaletteBrush(ColorIndex)', 'SizeDisplay')) {
+        if (-not $tree.OuterXml.Contains($binding)) { throw "Tree binding missing: $binding" }
+    }
+}
 Test-Navigation 'Settings: native layout, preserved inputs and removed table/footer' {
     Go-To 'SettingsItem' 'ThemeSelector'
     [xml]$settings = Get-Content (Join-Path $PSScriptRoot '../DevDriveManager/Pages/SettingsPage.xaml')
