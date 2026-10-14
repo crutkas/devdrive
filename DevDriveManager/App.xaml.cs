@@ -65,6 +65,38 @@ public partial class App : Application
         new(new LiveStorageSnapshotSource());
 
     /// <summary>
+    /// The one Scan. Overview, Reclaim and Space each have a Scan button, and they used to start
+    /// different scans — Overview and Reclaim the reclaim scan, Space the volume walk — so seeing
+    /// the whole picture took two clicks in two rooms. Every button now starts both.
+    /// </summary>
+    /// <param name="spaceRoot">
+    /// The volume Space should walk. When null, Space re-walks whatever it last scanned, or the
+    /// system drive if it has never scanned; a Space walk already in progress is left alone.
+    /// </param>
+    public static void ScanEverything(string? spaceRoot = null)
+    {
+        if (SharedReclaim.ScanCommand.CanExecute(null))
+        {
+            SharedReclaim.ScanCommand.Execute(null);
+        }
+
+        if (spaceRoot is null && SharedSpace.IsScanning)
+        {
+            return;
+        }
+
+        string root = spaceRoot
+            ?? (SharedSpace.Snapshot is not null
+                ? SharedSpace.ScenarioId
+                : Path.GetPathRoot(Environment.SystemDirectory) ?? @"C:\");
+
+        _ = SharedSpace.Snapshot is not null &&
+            string.Equals(SharedSpace.ScenarioId, root, StringComparison.OrdinalIgnoreCase)
+                ? SharedSpace.RefreshAsync()
+                : SharedSpace.LoadScenarioAsync(root);
+    }
+
+    /// <summary>
     /// The shared Create room state. A half-filled create form is exactly the kind of state a user
     /// expects to find where they left it, and WinUI rebuilds a page on every navigation to it — so a
     /// page-owned view model would silently reset the size, letter and label the moment someone

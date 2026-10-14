@@ -608,11 +608,7 @@ public sealed partial class SpacePage : Page, INotifyPropertyChanged
         }
 
         _pendingVolumeLabel = volume.DisplayName;
-
-        _ = ViewModel.Snapshot is not null &&
-            string.Equals(ViewModel.ScenarioId, volume.RootPath, StringComparison.OrdinalIgnoreCase)
-                ? ViewModel.RefreshAsync()
-                : ViewModel.LoadScenarioAsync(volume.RootPath);
+        App.ScanEverything(volume.RootPath);
     }
 
     /// <summary>

@@ -309,13 +309,7 @@ public sealed partial class ReclaimPage : Page, INotifyPropertyChanged
         UpdateStatusBar();
     }
 
-    private void ScanBar_ScanRequested(object? sender, EventArgs e)
-    {
-        if (ViewModel.ScanCommand.CanExecute(null))
-        {
-            ViewModel.ScanCommand.Execute(null);
-        }
-    }
+    private void ScanBar_ScanRequested(object? sender, EventArgs e) => App.ScanEverything();
 
     private void ScanBar_CancelRequested(object? sender, EventArgs e)
     {

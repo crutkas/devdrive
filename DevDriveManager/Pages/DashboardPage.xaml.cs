@@ -386,16 +386,10 @@ public sealed partial class DashboardPage : Page, INotifyPropertyChanged
     }
 
     /// <summary>
-    /// Overview scans the whole machine, which is the same act Reclaim performs, so it runs the
-    /// same command rather than a parallel copy of it.
+    /// Overview's Scan is the app's one Scan: it runs the reclaim scan and the Space volume walk
+    /// together, exactly as the buttons in those rooms do.
     /// </summary>
-    private void ScanBar_ScanRequested(object? sender, EventArgs e)
-    {
-        if (Reclaim.ScanCommand.CanExecute(null))
-        {
-            Reclaim.ScanCommand.Execute(null);
-        }
-    }
+    private void ScanBar_ScanRequested(object? sender, EventArgs e) => App.ScanEverything();
 
     /// <summary>
     /// Opens the room a signal belongs to. Selecting a row explains it; this is the separate gesture
