@@ -389,7 +389,7 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
             string path = Path.Combine(folder.Path, row.Leaf.Name);
             if (seenPaths.Add(path))
             {
-                nodes.Add(LeafNode(row.Leaf, path, folderId, correlateProviders));
+                nodes.Add(LeafNode(row.Leaf, folder.Path, path, folderId, correlateProviders));
             }
         }
 
@@ -486,7 +486,12 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
         };
     }
 
-    private static StorageNode LeafNode(ScanLeaf leaf, string path, Guid parentId, bool correlateProviders)
+    private static StorageNode LeafNode(
+        ScanLeaf leaf,
+        string folderPath,
+        string path,
+        Guid parentId,
+        bool correlateProviders)
     {
         // AllocationSize normally rounds *up* past the apparent length (cluster slack), so
         // allocated >= apparent is the common, uninteresting case and must stay hidden. Only
@@ -495,17 +500,15 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
         // surfacing, so LogicalBytes is populated only then.
         StorageNodeKind kind = leaf.IsDirectory ? StorageNodeKind.Folder : StorageNodeKind.File;
         DateTimeOffset modified = ToTime(leaf.LastWriteTicks);
-        return new StorageNode(
-            StableId(path),
-            parentId,
-            string.IsNullOrWhiteSpace(leaf.Name) ? path : leaf.Name,
-            path,
-            kind,
-            leaf.Allocated,
-            0,
-            modified,
-            correlateProviders ? LiveProviderCorrelator.Correlate(leaf.Name, path, kind, modified) : null,
-            leaf.Logical > leaf.Allocated ? leaf.Logical : null);
+        StorageProviderContext? provider =
+            correlateProviders ? LiveProviderCorrelator.Correlate(leaf.Name, path, kind, modified) : null;
+        long? logical = leaf.Logical > leaf.Allocated ? leaf.Logical : null;
+
+        // Files are nine in ten nodes, so a file keeps its folder's shared path instead of its own
+        // copy; `path` is only built here for the id and the provider match, then let go.
+        return string.IsNullOrWhiteSpace(leaf.Name)
+            ? new StorageNode(StableId(path), parentId, path, path, kind, leaf.Allocated, 0, modified, provider, logical)
+            : StorageNode.InFolder(StableId(path), parentId, leaf.Name, folderPath, kind, leaf.Allocated, modified, provider, logical);
     }
 
     private static DateTimeOffset ToTime(long ticks) =>

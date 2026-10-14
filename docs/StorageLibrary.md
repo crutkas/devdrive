@@ -169,6 +169,14 @@ third of scan time at any tree size without a machine-specific threshold.
   20-core machine but held roughly 50% more memory, so it stays off (see
   `DevDriveManager.csproj`, and SH-016 in `KnownIssues.md` for a GC/XAML
   deadlock first seen under server GC).
+- **A file node does not store its full path.** It keeps a reference to its
+  folder's path string (one instance per folder) and `PhysicalPath` joins the
+  name on read; ids are still hashed from the full path at emit, so they stay
+  stable across partials. Apparent size and provider context, set on a few
+  percent of nodes, sit behind one optional reference, and the date is stored as
+  ticks. On a 1.15M-node C: scan this took the retained snapshot from 645 MB to
+  301 MB. Because paths are not stored, the snapshot checks for duplicate names
+  within a folder rather than duplicate paths across the volume.
 
 The finished snapshot's `ScanCoverage.Statistics` carries the headline numbers
 (files, hard-link duplicates, folders, unreadable folders, size on disk, the
