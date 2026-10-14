@@ -164,13 +164,17 @@ third of scan time at any tree size without a machine-specific threshold.
   roll totals up (milliseconds), then emits while the walk continues, reading
   only what that rollup captured. A folder unfinished at the rollup is emitted as
   unmeasured with no children.
-- **The app runs server GC.** A full system-drive scan allocates over a million
-  nodes; workstation GC spent about a second of it in gen0/gen1 pauses.
+- **The app runs workstation GC.** A full system-drive scan allocates over a
+  million nodes. Server GC saved about two seconds of gen0/gen1 pauses on a
+  20-core machine but held roughly 50% more memory, so it stays off (see
+  `DevDriveManager.csproj`, and SH-016 in `KnownIssues.md` for a GC/XAML
+  deadlock first seen under server GC).
 
 The finished snapshot's `ScanCoverage.Statistics` carries the headline numbers
 (files, hard-link duplicates, folders, unreadable folders, size on disk, the
-drive's used space, cloud-only bytes, query and total time), shown in the Space
-room's coverage block.
+drive's used space, cloud-only bytes, query and total time). The redesigned
+Space room does not display them yet; `StorageExplorerViewModel.ScanStatisticsSummary`
+still exposes them.
 
 ## Swapping a source
 

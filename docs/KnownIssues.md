@@ -166,6 +166,21 @@ An uncertain-state outcome therefore still sends the user to Disk Management.
 operations, previews detach/delete, requires confirmation and UAC, and removes a receipt only after
 verified cleanup.
 
+### SH-016: The GC and XAML can deadlock during a scan
+
+**Severity:** Warning
+**Evidence:** native stacks from a hang dump of `DevDriveManager.exe` under server GC
+
+During a Space scan with room switching, a GC thread blocked in XAML's
+`ReferenceTrackerManager::ReferenceTrackingStarted` waiting for a lock, while the UI thread held it,
+tearing down a binding, and waited in `TryInvokeICustomQueryInterface` for that GC to finish. Seen once
+under server GC. The app now runs workstation GC for memory reasons, and a five-minute stress run on it
+did not hang, but the lock ordering is a XAML/.NET interaction, so any GC started from a background
+thread, such as the scanner's, can in principle reach it.
+
+**Next:** reproduce on workstation GC with a longer stress run, report the stacks to WinUI, and reduce
+GCs during scans (fewer allocations per node).
+
 ## Resolved in the self-hosting readiness branch
 
 | Item | Resolution |
