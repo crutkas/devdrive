@@ -47,6 +47,13 @@ internal sealed class ScanFolder(ScanFolder? parent, string path, string name)
 
     public bool IsMeasured;
 
+    /// <summary>
+    /// <see cref="IsMeasured"/> as of the last rollup. Snapshots read this, never the live flag: a
+    /// partial is emitted while workers keep walking, and only a folder that was finished when the
+    /// walk was frozen has lists that can no longer change underneath the emitter.
+    /// </summary>
+    public bool RolledMeasured;
+
     // Rolled-up values. Recomputed from the Self* fields by Rollup, so it is safe to repeat.
     public long Allocated;
 
@@ -269,7 +276,7 @@ internal sealed class ParallelVolumeScanner
             : [];
     }
 
-    /// <summary>Held shared by workers while they mutate a folder, and exclusively to freeze one.</summary>
+    /// <summary>Held shared by workers while they mutate a folder, and exclusively for a rollup.</summary>
     public ReaderWriterLockSlim? FreezeGate { get; init; }
 
     /// <summary>Raised on the worker thread after each folder completes, outside the freeze gate.</summary>
@@ -354,6 +361,7 @@ internal sealed class ParallelVolumeScanner
     {
         foreach (ScanFolder folder in folders)
         {
+            folder.RolledMeasured = folder.IsMeasured;
             folder.Allocated = folder.SelfAllocated;
             folder.Logical = folder.SelfLogical;
             folder.ItemCount = folder.SelfItemCount;

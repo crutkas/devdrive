@@ -23,6 +23,12 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <!--
+      Server GC (with DATAS, the default on .NET 9+, so the heap still adapts to a desktop app).
+      A Space scan of a system drive allocates over a million nodes; workstation GC spent ~1 s of
+      that scan in ~300 gen0/gen1 pauses, server GC about 0.3 s.
+    -->
+    <ServerGarbageCollection>true</ServerGarbageCollection>
+    <!--
       WUI2010 (nested x:Bind path may crash on a null segment) is suppressed *intentionally*.
       Pages bind to section sub-ViewModels (ViewModel.Suite/PackageCaches/DriveHealth.*). Every
       sub-VM is a get-only property assigned once in the MainPageViewModel constructor and never

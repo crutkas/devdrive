@@ -229,16 +229,27 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
             return;
         }
 
+        // Freeze only for the rollup: it is O(folders) arithmetic, a few milliseconds even on a
+        // full volume. Emitting and indexing the partial is far more expensive and runs while the
+        // walk continues, reading only what the rollup captured.
         freezeGate.EnterWriteLock();
         try
         {
-            context.PublishPartial(
-                () => BuildPartial(request, scanner, context, referenceTotalBytes),
-                scanner.ProcessedBytes);
+            ParallelVolumeScanner.Rollup(scanner.Folders);
         }
         finally
         {
             freezeGate.ExitWriteLock();
+        }
+
+        try
+        {
+            context.PublishPartial(
+                () => BuildPartial(request, scanner, referenceTotalBytes),
+                scanner.ProcessedBytes);
+        }
+        finally
+        {
             context.ReleasePartialClaim();
         }
     }
@@ -246,14 +257,13 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
     /// <summary>
     /// Freezes the walk so far into a usable snapshot. Always <see cref="SnapshotCompletion.Partial"/>
     /// — by construction there is more to come — so nothing downstream can mistake it for a result.
+    /// Reads the values of the last rollup only, so it is safe to run while workers keep walking.
     /// </summary>
     private StorageSnapshot BuildPartial(
         StorageSnapshotRequest request,
         ParallelVolumeScanner scanner,
-        ScanContext context,
         long? referenceTotalBytes)
     {
-        ParallelVolumeScanner.Rollup(scanner.Folders);
         ScanFolder root = scanner.Root!;
         ImmutableArray<StorageNode> nodes = Emit(root, correlateProviders: false, foldersOnly: true);
         long covered = root.Allocated;
@@ -423,6 +433,13 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
     private static void CollectCandidates(ScanFolder folder, bool foldersOnly, List<Row> candidates)
     {
         candidates.Clear();
+
+        // A folder that was not finished at the last rollup may still be gaining children.
+        if (!folder.RolledMeasured)
+        {
+            return;
+        }
+
         if (folder.Subfolders is { } subfolders)
         {
             foreach (ScanFolder child in subfolders)
@@ -465,7 +482,7 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
                 : null,
             folder.Logical > folder.Allocated ? folder.Logical : null)
         {
-            IsMeasured = folder.IsMeasured,
+            IsMeasured = folder.RolledMeasured,
         };
     }
 

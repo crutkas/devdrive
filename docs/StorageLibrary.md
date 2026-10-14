@@ -84,9 +84,13 @@ third of scan time at any tree size without a machine-specific threshold.
   only allocated when a file enters that heap. Folder ids are assigned at
   discovery, so a child always follows its parent and the rollup is one
   backward pass.
-- **Partials freeze the walk.** Workers hold a shared lock while they mutate a
-  folder; building a partial takes it exclusively, so every partial is a
-  consistent tree.
+- **Partials freeze the walk only for the rollup.** Workers hold a shared lock
+  while they mutate a folder; a partial takes it exclusively just long enough to
+  roll totals up (milliseconds), then emits while the walk continues, reading
+  only what that rollup captured. A folder unfinished at the rollup is emitted as
+  unmeasured with no children.
+- **The app runs server GC.** A full system-drive scan allocates over a million
+  nodes; workstation GC spent about a second of it in gen0/gen1 pauses.
 
 The finished snapshot's `ScanCoverage.Statistics` carries the headline numbers
 (files, hard-link duplicates, folders, unreadable folders, size on disk, the
