@@ -23,11 +23,12 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <!--
-      Server GC (with DATAS, the default on .NET 9+, so the heap still adapts to a desktop app).
-      A Space scan of a system drive allocates over a million nodes; workstation GC spent ~1 s of
-      that scan in ~300 gen0/gen1 pauses, server GC about 0.3 s.
+      Workstation GC, deliberately. Server GC (one heap per core) cut a C: scan from ~7.3 s to ~5 s
+      on a 20-core machine, but held 2.0 GB after three scans against 1.3 GB and climbed to 2.5-3 GB
+      under repeated scans. Capping GCHeapCount at 4 was worse still (2.2 GB) because it disables
+      DATAS. A GC/XAML deadlock was also seen under server GC; see SH-016 in docs/KnownIssues.md.
     -->
-    <ServerGarbageCollection>true</ServerGarbageCollection>
+    <ServerGarbageCollection>false</ServerGarbageCollection>
     <!--
       WUI2010 (nested x:Bind path may crash on a null segment) is suppressed *intentionally*.
       Pages bind to section sub-ViewModels (ViewModel.Suite/PackageCaches/DriveHealth.*). Every
@@ -105,6 +106,7 @@
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.2.0" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
     <PackageReference Include="CommunityToolkit.WinUI.Controls.SettingsControls" Version="8.2.251219" />
+    <PackageReference Include="CommunityToolkit.WinUI.Animations" Version="8.2.251219" />
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools.WinApp" Version="0.3.2" />
   </ItemGroup>
 

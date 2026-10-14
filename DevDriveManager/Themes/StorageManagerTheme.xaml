@@ -69,13 +69,6 @@
             <SolidColorBrush x:Key="SmAccentTintBrush" Color="#1F60CDFF" />
             <SolidColorBrush x:Key="SmAccentEdgeBrush" Color="#7360CDFF" />
             <SolidColorBrush x:Key="SmMuteTintBrush" Color="Transparent" />
-
-            <!--
-                Treemap ink. The category brushes are light in the dark theme, so a treemap label
-                has to be dark to stay legible — this is the one place the ink inverts relative to
-                the rest of the theme, which is why it is a token rather than SmTextBrush.
-            -->
-            <SolidColorBrush x:Key="SmTreemapInkBrush" Color="#0B1018" />
         </ResourceDictionary>
 
         <ResourceDictionary x:Key="Light">
@@ -118,9 +111,6 @@
             <SolidColorBrush x:Key="SmAccentTintBrush" Color="#1F0F6CBD" />
             <SolidColorBrush x:Key="SmAccentEdgeBrush" Color="#730F6CBD" />
             <SolidColorBrush x:Key="SmMuteTintBrush" Color="Transparent" />
-
-            <!-- Light theme category brushes are saturated, so the label inverts the other way. -->
-            <SolidColorBrush x:Key="SmTreemapInkBrush" Color="#FFFFFF" />
         </ResourceDictionary>
 
         <!--
@@ -172,19 +162,10 @@
             <SolidColorBrush x:Key="SmAccentTintBrush" Color="Transparent" />
             <SolidColorBrush x:Key="SmAccentEdgeBrush" Color="{ThemeResource SystemColorHighlightColor}" />
             <SolidColorBrush x:Key="SmMuteTintBrush" Color="Transparent" />
-
-            <SolidColorBrush x:Key="SmTreemapInkBrush" Color="{ThemeResource SystemColorButtonTextColor}" />
         </ResourceDictionary>
 
     </ResourceDictionary.ThemeDictionaries>
 
-    <!--
-        Geometry. Stated as resources because the density is the design: the spec's rail is a 64px
-        column holding 56px buttons, and the status bar is 38px. Getting these wrong by a few pixels
-        is what made the first attempt at this room read as a different product.
-    -->
-    <x:Double x:Key="SmRailWidth">64</x:Double>
-    <x:Double x:Key="SmRailButtonWidth">56</x:Double>
     <x:Double x:Key="SmStatusBarHeight">38</x:Double>
     <x:Double x:Key="SmCapacityBarHeight">5</x:Double>
     <x:Double x:Key="SmVolumeTileSize">29</x:Double>
@@ -305,20 +286,6 @@
         TargetType="TextBlock">
         <Setter Property="FontWeight" Value="SemiBold" />
         <Setter Property="Foreground" Value="{ThemeResource SmBadBrush}" />
-    </Style>
-
-    <!--  The rail's section divider. A Style so the rule re-resolves when the theme changes.  -->
-    <Style x:Key="SmRailDividerStyle" TargetType="Rectangle">
-        <Setter Property="Width" Value="32" />
-        <Setter Property="Height" Value="1" />
-        <Setter Property="Fill" Value="{ThemeResource SmDividerBrush}" />
-    </Style>
-
-    <Style x:Key="SmRailSectionTextStyle" TargetType="TextBlock">
-        <Setter Property="FontSize" Value="10" />
-        <Setter Property="CharacterSpacing" Value="100" />
-        <Setter Property="FontWeight" Value="SemiBold" />
-        <Setter Property="Foreground" Value="{ThemeResource SmFaintBrush}" />
     </Style>
 
     <!--
@@ -714,163 +681,7 @@
         <Setter Property="Foreground" Value="{ThemeResource SmDimBrush}" />
     </Style>
 
-    <!--
-        The treemap rectangle. Content alignment is Stretch so the label sits top-left rather than
-        centred: a centred label in a tall thin rectangle collides with its neighbours' labels.
-    -->
-    <Style x:Key="SmTreemapCellStyle" TargetType="Button">
-        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-        <Setter Property="VerticalContentAlignment" Value="Stretch" />
-        <Setter Property="Padding" Value="9,7,9,7" />
-        <Setter Property="BorderBrush" Value="{ThemeResource SmCardBrush}" />
-        <Setter Property="BorderThickness" Value="1" />
-        <Setter Property="UseSystemFocusVisuals" Value="True" />
-        <Setter Property="Template">
-            <Setter.Value>
-                <ControlTemplate TargetType="Button">
-                    <Grid
-                        Background="{TemplateBinding Background}"
-                        BorderBrush="{TemplateBinding BorderBrush}"
-                        BorderThickness="{TemplateBinding BorderThickness}"
-                        CornerRadius="4">
-                        <ContentPresenter
-                            Margin="{TemplateBinding Padding}"
-                            HorizontalAlignment="Left"
-                            VerticalAlignment="Top"
-                            Content="{TemplateBinding Content}" />
-                        <Grid x:Name="HoverVeil" Opacity="0">
-                            <Rectangle Fill="{ThemeResource SmTextBrush}" Opacity="0.14" RadiusX="4" RadiusY="4" />
-                        </Grid>
-                        <VisualStateManager.VisualStateGroups>
-                            <VisualStateGroup x:Name="CommonStates">
-                                <VisualState x:Name="Normal" />
-                                <VisualState x:Name="PointerOver">
-                                    <Storyboard>
-                                        <DoubleAnimation
-                                            Storyboard.TargetName="HoverVeil"
-                                            Storyboard.TargetProperty="Opacity"
-                                            To="1"
-                                            Duration="0:0:0.09" />
-                                    </Storyboard>
-                                </VisualState>
-                                <VisualState x:Name="Pressed">
-                                    <Storyboard>
-                                        <DoubleAnimation
-                                            Storyboard.TargetName="HoverVeil"
-                                            Storyboard.TargetProperty="Opacity"
-                                            To="1"
-                                            Duration="0" />
-                                    </Storyboard>
-                                </VisualState>
-                            </VisualStateGroup>
-                        </VisualStateManager.VisualStateGroups>
-                    </Grid>
-                </ControlTemplate>
-            </Setter.Value>
-        </Setter>
-    </Style>
     <!--
-        The rail button. Spec: 56px wide inside a 64px column, 19px icon over a 9.5px label, dim
-        until hovered, and a 3px accent bar plus a selection tint when it is the current room.
-        Selection is carried by three things at once — bar, tint, and ink weight — so it survives
-        both high contrast and a user who cannot distinguish the accent hue.
-    -->
-    <Style x:Key="SmRailButtonStyle" TargetType="Button">
-        <Setter Property="Width" Value="{StaticResource SmRailButtonWidth}" />
-        <Setter Property="Padding" Value="0,6,0,5" />
-        <Setter Property="Margin" Value="0,1,0,0" />
-        <Setter Property="Background" Value="Transparent" />
-        <Setter Property="BorderThickness" Value="0" />
-        <Setter Property="Foreground" Value="{ThemeResource SmDimBrush}" />
-        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-        <Setter Property="UseSystemFocusVisuals" Value="True" />
-        <Setter Property="Template">
-            <Setter.Value>
-                <ControlTemplate TargetType="Button">
-                    <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="8" />
-                            <ColumnDefinition Width="*" />
-                        </Grid.ColumnDefinitions>
-
-                        <!--  The accent bar sits in the 8px gutter, outside the button's own fill.  -->
-                        <Rectangle
-                            x:Name="AccentBar"
-                            Grid.Column="0"
-                            Width="3"
-                            Margin="0,10"
-                            HorizontalAlignment="Left"
-                            Fill="{ThemeResource SmAccentBrush}"
-                            RadiusX="1.5"
-                            RadiusY="1.5"
-                            Visibility="Collapsed" />
-
-                        <Border
-                            x:Name="Fill"
-                            Grid.Column="1"
-                            Padding="{TemplateBinding Padding}"
-                            Background="Transparent"
-                            CornerRadius="6">
-                            <ContentPresenter
-                                x:Name="ContentHost"
-                                HorizontalAlignment="Stretch"
-                                Content="{TemplateBinding Content}"
-                                Foreground="{TemplateBinding Foreground}" />
-                        </Border>
-
-                        <VisualStateManager.VisualStateGroups>
-                            <VisualStateGroup x:Name="CommonStates">
-                                <VisualState x:Name="Normal" />
-                                <VisualState x:Name="PointerOver">
-                                    <VisualState.Setters>
-                                        <Setter Target="Fill.Background" Value="{ThemeResource SmHoverBrush}" />
-                                    </VisualState.Setters>
-                                </VisualState>
-                                <VisualState x:Name="Pressed">
-                                    <VisualState.Setters>
-                                        <Setter Target="Fill.Background" Value="{ThemeResource SmSelectionBrush}" />
-                                    </VisualState.Setters>
-                                </VisualState>
-                            </VisualStateGroup>
-
-                            <!--
-                                Selection is its own state group so hovering the current room does
-                                not read as leaving it.
-
-                                The selected room's ink is set here, not in code. Assigning
-                                Button.Foreground imperatively writes a local value that outranks the
-                                style AND never re-resolves, so the rail kept its dark ink when the
-                                theme flipped to light and every label went invisible. A VisualState
-                                setter with a {ThemeResource} value re-resolves on the theme change,
-                                and clears cleanly when the state is left.
-                            -->
-                            <VisualStateGroup x:Name="SelectionStates">
-                                <VisualState x:Name="Unselected" />
-                                <VisualState x:Name="Selected">
-                                    <VisualState.Setters>
-                                        <Setter Target="AccentBar.Visibility" Value="Visible" />
-                                        <Setter Target="Fill.Background" Value="{ThemeResource SmSelectionBrush}" />
-                                        <Setter Target="ContentHost.Foreground" Value="{ThemeResource SmTextBrush}" />
-                                    </VisualState.Setters>
-                                </VisualState>
-                            </VisualStateGroup>
-                        </VisualStateManager.VisualStateGroups>
-                    </Grid>
-                </ControlTemplate>
-            </Setter.Value>
-        </Setter>
-    </Style>
-
-    <!--  Rail section header. Spec: 8px, .12em tracking, uppercase, faint.  -->
-    <Style x:Key="SmRailSectionHeaderTextStyle" TargetType="TextBlock">
-        <Setter Property="FontSize" Value="8" />
-        <Setter Property="CharacterSpacing" Value="120" />
-        <Setter Property="FontWeight" Value="SemiBold" />
-        <Setter Property="Foreground" Value="{ThemeResource SmFaintBrush}" />
-        <Setter Property="HorizontalAlignment" Value="Center" />
-    </Style>
-
-    <!--
         Risk chips (Reclaim). Same reason as the status facts: a Style, not a converted Brush, so the
         chip re-inks on a theme switch. Border and text are separate styles because the chip's colour
         has to reach both the outline and the label, and a Border does not pass Foreground down.
@@ -1134,84 +945,6 @@
             </Setter.Value>
         </Setter>
     </Style>
-    <!--
-        ================= Settings rows =================
-
-        A setting row is a label, a one-line explanation, and one control, separated by a hairline.
-        Spec: 8px 14px padding, 13.5px label at weight 500, 11.5px dim sub, both at 1.4 line-height.
-
-        The divider is on the row rather than between rows so a card can hold any number of them
-        without the caller having to know which one is last — the final hairline lands on the card's
-        own edge and reads as the card border.
-    -->
-    <Style x:Key="SmSetRowStyle" TargetType="Border">
-        <Setter Property="Padding" Value="14,8" />
-        <Setter Property="BorderBrush" Value="{ThemeResource SmDividerBrush}" />
-        <Setter Property="BorderThickness" Value="0,0,0,1" />
-    </Style>
-
-    <Style x:Key="SmSetLabelTextStyle" TargetType="TextBlock">
-        <Setter Property="FontSize" Value="13.5" />
-        <Setter Property="FontWeight" Value="Medium" />
-        <Setter Property="LineHeight" Value="19" />
-        <Setter Property="Foreground" Value="{ThemeResource SmTextBrush}" />
-        <Setter Property="TextWrapping" Value="Wrap" />
-    </Style>
-
-    <Style x:Key="SmSetSubTextStyle" TargetType="TextBlock">
-        <Setter Property="FontSize" Value="11.5" />
-        <Setter Property="LineHeight" Value="16" />
-        <Setter Property="Foreground" Value="{ThemeResource SmDimBrush}" />
-        <Setter Property="TextWrapping" Value="Wrap" />
-    </Style>
-
-    <!--
-        The setting-row combo. Sized to the comp's .combo (12.5px, 4px 10px, 5px radius) rather than
-        the platform default, which is 32px tall and turns eleven rows into two screens.
-    -->
-    <Style
-        x:Key="SmSetComboStyle"
-        BasedOn="{StaticResource DefaultComboBoxStyle}"
-        TargetType="ComboBox">
-        <Setter Property="MinHeight" Value="0" />
-        <Setter Property="MinWidth" Value="0" />
-        <Setter Property="Padding" Value="10,3,6,4" />
-        <Setter Property="FontSize" Value="12.5" />
-        <Setter Property="CornerRadius" Value="5" />
-        <Setter Property="VerticalAlignment" Value="Center" />
-    </Style>
-
-    <!--
-        The setting-row switch. WinUI's ToggleSwitch reserves ~100px for on/off labels it is not
-        showing here; with the label to its left that reservation is dead space, so the width is
-        pinned to the knob.
-    -->
-    <Style
-        x:Key="SmSetToggleStyle"
-        BasedOn="{StaticResource DefaultToggleSwitchStyle}"
-        TargetType="ToggleSwitch">
-        <Setter Property="MinWidth" Value="0" />
-        <Setter Property="Width" Value="44" />
-        <Setter Property="VerticalAlignment" Value="Center" />
-    </Style>
-    <!--
-        The "way back" cell in the Settings write-surface table. Two styles rather than a brush from
-        a function binding: a Style is theme-independent, and its ThemeResource setters re-resolve
-        when the theme changes. The words carry the meaning on their own; the ink only reinforces it.
-    -->
-    <Style x:Key="SmReturnPathTextStyle" TargetType="TextBlock">
-        <Setter Property="FontSize" Value="12.5" />
-        <Setter Property="Foreground" Value="{ThemeResource SmTextBrush}" />
-        <Setter Property="TextTrimming" Value="CharacterEllipsis" />
-        <Setter Property="VerticalAlignment" Value="Center" />
-    </Style>
-
-    <Style x:Key="SmReturnNoneTextStyle" TargetType="TextBlock">
-        <Setter Property="FontSize" Value="12.5" />
-        <Setter Property="Foreground" Value="{ThemeResource SmDimBrush}" />
-        <Setter Property="TextTrimming" Value="CharacterEllipsis" />
-        <Setter Property="VerticalAlignment" Value="Center" />
-    </Style>
 
     <!--
         The track a benchmark bar is drawn in. Fixed width on purpose: PerfSuiteRowViewModel computes
@@ -1247,6 +980,34 @@
         BasedOn="{StaticResource SmKeyValueTextStyle}"
         TargetType="TextBlock">
         <Setter Property="Foreground" Value="{ThemeResource SmBadBrush}" />
+    </Style>
+
+    <!-- Compact form rows remain shared by the Create Dev Drive form, in every theme. -->
+    <Style x:Key="SmSetRowStyle" TargetType="Border">
+        <Setter Property="Padding" Value="14,8" />
+        <Setter Property="BorderBrush" Value="{ThemeResource SmDividerBrush}" />
+        <Setter Property="BorderThickness" Value="0,0,0,1" />
+    </Style>
+    <Style x:Key="SmSetLabelTextStyle" TargetType="TextBlock">
+        <Setter Property="FontSize" Value="13.5" />
+        <Setter Property="FontWeight" Value="Medium" />
+        <Setter Property="LineHeight" Value="19" />
+        <Setter Property="Foreground" Value="{ThemeResource SmTextBrush}" />
+        <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+    <Style x:Key="SmSetSubTextStyle" TargetType="TextBlock">
+        <Setter Property="FontSize" Value="11.5" />
+        <Setter Property="LineHeight" Value="16" />
+        <Setter Property="Foreground" Value="{ThemeResource SmDimBrush}" />
+        <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+    <Style x:Key="SmSetComboStyle" BasedOn="{StaticResource DefaultComboBoxStyle}" TargetType="ComboBox">
+        <Setter Property="MinHeight" Value="0" />
+        <Setter Property="MinWidth" Value="0" />
+        <Setter Property="Padding" Value="10,3,6,4" />
+        <Setter Property="FontSize" Value="12.5" />
+        <Setter Property="CornerRadius" Value="5" />
+        <Setter Property="VerticalAlignment" Value="Center" />
     </Style>
 
 </ResourceDictionary>
