@@ -56,10 +56,16 @@
                     Text="Safe-mutation test mode — nothing on this machine will actually change." />
             </Border>
 
-            <TextBlock x:Name="PageTitle" Grid.Row="1" Margin="18,24,18,16"
-                       Style="{StaticResource TitleTextBlockStyle}"
-                       AutomationProperties.AutomationId="PageTitle"
-                       AutomationProperties.HeadingLevel="Level1" />
+            <!--
+                48px is the header row every room shares: Space's picker and Scan, and Package caches'
+                Move all, are that tall, so a room titled here centres its title on the same line.
+            -->
+            <Grid x:Name="PageHeader" Grid.Row="1" Margin="18,24,18,16" MinHeight="48">
+                <TextBlock x:Name="PageTitle" VerticalAlignment="Center"
+                           Style="{StaticResource TitleTextBlockStyle}"
+                           AutomationProperties.AutomationId="PageTitle"
+                           AutomationProperties.HeadingLevel="Level1" />
+            </Grid>
 
             <Frame
                 x:Name="ContentFrame"

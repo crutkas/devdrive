@@ -202,8 +202,16 @@ public sealed partial class RoomScanBar : UserControl
 
         PartScanButton.Content = ScanLabel;
         PartScanButton.IsEnabled = CanScan && !IsScanning;
-        PartStrip.Visibility = SelectionMode == VolumeStripSelection.Single
-            ? Visibility.Visible : Visibility.Collapsed;
+        bool hasStrip = SelectionMode == VolumeStripSelection.Single;
+        PartStrip.Visibility = hasStrip ? Visibility.Visible : Visibility.Collapsed;
+
+        // Without a strip the bar is only the room's action, and the page puts it in its header on
+        // the title's row, so it drops the band's own padding and divider and takes the 48px
+        // height of Space's Scan and Package caches' Move all, which sets every header's row.
+        PartRoot.Padding = hasStrip ? new Thickness(18, 10, 18, 10) : new Thickness(0);
+        PartRoot.BorderThickness = hasStrip ? new Thickness(0, 0, 0, 1) : new Thickness(0);
+        PartScanButton.Height = hasStrip ? double.NaN : 48;
+        PartCancelButton.Height = hasStrip ? double.NaN : 48;
 
         AutomationProperties.SetAutomationId(PartStrip, StripAutomationId);
         AutomationProperties.SetName(PartStrip, StripAutomationName);

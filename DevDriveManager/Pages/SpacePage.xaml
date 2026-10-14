@@ -28,8 +28,8 @@
         </VisualStateManager.VisualStateGroups>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
         <Grid Margin="18,24,18,16" ColumnSpacing="16"
@@ -109,11 +109,12 @@
             </Grid>
         </Grid>
 
-        <InfoBar x:Name="CoverageNotice" Grid.Row="1" Margin="18,0,18,8"
+        <!--  Coverage is context for the finished map, not an alarm, so it sits under it.  -->
+        <InfoBar x:Name="CoverageNotice" Grid.Row="2" Margin="18,0,18,12"
                  AutomationProperties.AutomationId="SpaceCoverageNotice"
-                 IsClosable="False" />
+                 IsClosable="False" Severity="Informational" />
 
-        <Grid x:Name="SpaceExplorerCard" Grid.Row="2" Margin="18,0,18,12" Padding="12" ColumnSpacing="16"
+        <Grid x:Name="SpaceExplorerCard" Grid.Row="1" Margin="18,0,18,12" Padding="12" ColumnSpacing="16"
               Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
               BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1"
               CornerRadius="{ThemeResource ControlCornerRadius}">
@@ -221,7 +222,7 @@
 
         <Border
             x:Name="SpaceStatusBar"
-            Grid.Row="2" Padding="12,10" Margin="18,0,18,24" Visibility="Collapsed"
+            Grid.Row="1" Padding="12,10" Margin="18,0,18,24" Visibility="Collapsed"
             HorizontalAlignment="Center" VerticalAlignment="Bottom" MinWidth="320" MaxWidth="560"
             Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
             BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}" BorderThickness="1"

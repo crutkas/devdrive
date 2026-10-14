@@ -19,16 +19,32 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <!-- Scan commands; selection impact remains in the room's per-volume impact rows. -->
-        <controls:RoomScanBar
-            x:Name="ScanBar"
-            Grid.Row="0"
-            CanScan="{x:Bind ViewModel.CanScan, Mode=OneWay}"
-            CancelRequested="ScanBar_CancelRequested"
-            IsScanning="{x:Bind ViewModel.IsScanning, Mode=OneWay}"
-            ScanLabel="Scan this PC"
-            ScanRequested="ScanBar_ScanRequested"
-            SelectionMode="None" />
+        <!--
+            Same header grammar as Space: the title and the scan commands share a row. Selection
+            impact remains in the room's per-volume impact rows.
+        -->
+        <Grid Grid.Row="0" Margin="18,24,18,16" ColumnSpacing="16">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock
+                VerticalAlignment="Center"
+                AutomationProperties.AutomationId="PageTitle"
+                AutomationProperties.HeadingLevel="Level1"
+                Style="{StaticResource TitleTextBlockStyle}"
+                Text="{x:Bind PageTitle}" />
+            <controls:RoomScanBar
+                x:Name="ScanBar"
+                Grid.Column="1"
+                VerticalAlignment="Center"
+                CanScan="{x:Bind ViewModel.CanScan, Mode=OneWay}"
+                CancelRequested="ScanBar_CancelRequested"
+                IsScanning="{x:Bind ViewModel.IsScanning, Mode=OneWay}"
+                ScanLabel="Scan this PC"
+                ScanRequested="ScanBar_ScanRequested"
+                SelectionMode="None" />
+        </Grid>
 
         <!--
             The room. Same three-column grammar as Space, and deliberately so: the category rail
