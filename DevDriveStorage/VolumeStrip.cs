@@ -28,7 +28,14 @@ public sealed record VolumeStripEntry(
     StorageVolume Volume,
     bool IsSystemVolume,
     VolumeAccentRole AccentRole,
-    long ReclaimableBytes);
+    long ReclaimableBytes)
+{
+    public bool HasKnownCapacity => Volume.IsSizeKnown && Volume.CapacityBytes > 0;
+
+    public double UsedFraction => HasKnownCapacity ? 1 - VolumeCapacity.ForVolume(Volume).FreeFraction : 0;
+
+    public override string ToString() => Volume.DisplayName;
+}
 
 /// <summary>
 /// Assembles the volume context strip shared by every storage room.

@@ -3,622 +3,148 @@
     x:Class="DevDriveManager.Pages.SettingsPage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:controls="using:DevDriveManager.Controls"
-    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
-    xmlns:local="using:DevDriveManager"
-    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-    xmlns:vm="using:DevDriveManager.ViewModels"
-    mc:Ignorable="d">
-
+    xmlns:toolkit="using:CommunityToolkit.WinUI.Controls">
+    <Page.Resources>
+        <!-- WinUI Gallery Pages/SettingsPage.xaml: 4px cards, section margin 1,30,0,6. -->
+        <Style x:Key="SettingsSectionHeaderStyle" TargetType="TextBlock"
+               BasedOn="{StaticResource BodyStrongTextBlockStyle}">
+            <Setter Property="Margin" Value="1,30,0,6" />
+            <Setter Property="AutomationProperties.HeadingLevel" Value="Level2" />
+        </Style>
+    </Page.Resources>
     <Grid>
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="*" />
-            <RowDefinition Height="Auto" />
-        </Grid.RowDefinitions>
+        <VisualStateManager.VisualStateGroups>
+            <VisualStateGroup>
+                <VisualState>
+                    <VisualState.StateTriggers>
+                        <AdaptiveTrigger MinWindowWidth="900" />
+                    </VisualState.StateTriggers>
+                    <VisualState.Setters>
+                        <Setter Target="SettingsContent.Margin" Value="36,0,36,36" />
+                    </VisualState.Setters>
+                </VisualState>
+            </VisualStateGroup>
+        </VisualStateManager.VisualStateGroups>
+        <ScrollViewer AutomationProperties.AutomationId="SettingsScrollViewer"
+                      VerticalScrollBarVisibility="Auto" HorizontalScrollMode="Disabled">
+            <Border x:Name="SettingsContent" Margin="16,0,16,36">
+                <StackPanel MaxWidth="1000" HorizontalAlignment="Stretch" Spacing="4">
+                    <TextBlock Text="Appearance" Style="{StaticResource SettingsSectionHeaderStyle}" />
+                    <toolkit:SettingsCard Header="App theme" Description="Use the Windows theme or choose a light or dark appearance.">
+                        <toolkit:SettingsCard.HeaderIcon><FontIcon Glyph="&#xE790;" /></toolkit:SettingsCard.HeaderIcon>
+                        <ComboBox x:Name="ThemeSelector" MinWidth="160"
+                                  AutomationProperties.AutomationId="ThemeSelector" AutomationProperties.Name="App theme"
+                                  SelectionChanged="ThemeSelector_SelectionChanged">
+                            <ComboBoxItem AutomationProperties.AutomationId="ThemeOptionSystem" Content="System default" Tag="Default" />
+                            <ComboBoxItem AutomationProperties.AutomationId="ThemeOptionLight" Content="Light" Tag="Light" />
+                            <ComboBoxItem AutomationProperties.AutomationId="ThemeOptionDark" Content="Dark" Tag="Dark" />
+                        </ComboBox>
+                    </toolkit:SettingsCard>
 
-        <!--
-            No volume strip. Every other room opens with one because every other room is about a
-            volume; this room is about the app, and a strip here would be answering a question
-            nobody asked. The head keeps the strip's height, padding and divider so the chrome
-            does not jump on the way in, and the right slot carries this room's one verb.
-        -->
-        <Grid
-            Grid.Row="0"
-            Padding="18,10"
-            ColumnSpacing="14"
-            BorderBrush="{ThemeResource SmDividerBrush}"
-            BorderThickness="0,0,0,1">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
+                    <TextBlock Text="Overview and signals" Style="{StaticResource SettingsSectionHeaderStyle}"
+                               AutomationProperties.AutomationId="SignalSettingsHead" />
+                    <toolkit:SettingsCard Header="Low free-space warning" Description="Show a signal when a volume falls below this threshold.">
+                        <toolkit:SettingsCard.HeaderIcon><FontIcon Glyph="&#xE7BA;" /></toolkit:SettingsCard.HeaderIcon>
+                        <ComboBox x:Name="LowFreeCombo" MinWidth="160"
+                                  AutomationProperties.AutomationId="LowFreeCombo" AutomationProperties.Name="Low free space threshold"
+                                  SelectionChanged="LowFreeCombo_SelectionChanged">
+                            <ComboBoxItem AutomationProperties.AutomationId="LowFree10" Content="10%" Tag="10" />
+                            <ComboBoxItem AutomationProperties.AutomationId="LowFree15" Content="15%" Tag="15" />
+                            <ComboBoxItem AutomationProperties.AutomationId="LowFree20" Content="20%" Tag="20" />
+                            <ComboBoxItem AutomationProperties.AutomationId="LowFree25" Content="25%" Tag="25" />
+                        </ComboBox>
+                    </toolkit:SettingsCard>
+                    <toolkit:SettingsExpander Header="Package-cache signals" Description="Watch for caches outside your Dev Drive."
+                                             AutomationProperties.AutomationId="CacheSignalsExpander"
+                                             AutomationProperties.Name="Package-cache signals">
+                        <toolkit:SettingsExpander.HeaderIcon><FontIcon Glyph="&#xE7B8;" /></toolkit:SettingsExpander.HeaderIcon>
+                        <ToggleSwitch AutomationProperties.AutomationId="WatchCachesToggle"
+                                      AutomationProperties.Name="Watch for caches landing off your Dev Drive"
+                                      IsOn="{x:Bind WatchCachesOffDevDrive, Mode=TwoWay}" />
+                        <toolkit:SettingsExpander.Items>
+                            <toolkit:SettingsCard Header="Combine cache signals after">
+                                <ComboBox x:Name="RollupCombo" MinWidth="160"
+                                          AutomationProperties.AutomationId="RollupCombo" AutomationProperties.Name="Combine cache signals after"
+                                          SelectionChanged="RollupCombo_SelectionChanged">
+                                    <ComboBoxItem AutomationProperties.AutomationId="Rollup2" Content="2 caches" Tag="2" />
+                                    <ComboBoxItem AutomationProperties.AutomationId="Rollup3" Content="3 caches" Tag="3" />
+                                    <ComboBoxItem AutomationProperties.AutomationId="Rollup5" Content="5 caches" Tag="5" />
+                                    <ComboBoxItem AutomationProperties.AutomationId="RollupNever" Content="Never" Tag="0" />
+                                </ComboBox>
+                            </toolkit:SettingsCard>
+                        </toolkit:SettingsExpander.Items>
+                    </toolkit:SettingsExpander>
 
-            <StackPanel
-                Grid.Column="0"
-                VerticalAlignment="Center"
-                Spacing="1">
-                <TextBlock
-                    AutomationProperties.AutomationId="SettingsTitle"
-                    Style="{StaticResource SmCardTitleTextStyle}"
-                    Text="Settings" />
-                <TextBlock
-                    AutomationProperties.AutomationId="SettingsSubtitle"
-                    Style="{StaticResource SmCardSubTextStyle}"
-                    Text="Only the preferences that change what this app actually does. Nothing here is decoration." />
-            </StackPanel>
+                    <TextBlock Text="Free-space history" Style="{StaticResource SettingsSectionHeaderStyle}" />
+                    <toolkit:SettingsExpander Header="Record free space over time"
+                                             Description="Keep a reading per volume every 30 minutes when Overview loads."
+                                             AutomationProperties.AutomationId="HistorySettingsExpander"
+                                             AutomationProperties.Name="Free-space history">
+                        <toolkit:SettingsExpander.HeaderIcon><FontIcon Glyph="&#xE81C;" /></toolkit:SettingsExpander.HeaderIcon>
+                        <ToggleSwitch AutomationProperties.AutomationId="RecordHistoryToggle"
+                                      AutomationProperties.Name="Record free space over time"
+                                      IsOn="{x:Bind RecordFreeSpaceHistory, Mode=TwoWay}" />
+                        <toolkit:SettingsExpander.Items>
+                            <toolkit:SettingsCard Header="Keep readings for" Description="Older readings are removed the next time Overview loads.">
+                                <ComboBox x:Name="RetentionCombo" MinWidth="160"
+                                          AutomationProperties.AutomationId="RetentionCombo" AutomationProperties.Name="Keep free space readings for"
+                                          SelectionChanged="RetentionCombo_SelectionChanged">
+                                    <ComboBoxItem AutomationProperties.AutomationId="Retention30" Content="30 days" Tag="30" />
+                                    <ComboBoxItem AutomationProperties.AutomationId="Retention90" Content="90 days" Tag="90" />
+                                    <ComboBoxItem AutomationProperties.AutomationId="Retention365" Content="1 year" Tag="365" />
+                                </ComboBox>
+                            </toolkit:SettingsCard>
+                            <toolkit:SettingsCard Header="Saved history">
+                                <toolkit:SettingsCard.Description>
+                                    <TextBlock AutomationProperties.AutomationId="HistorySummary"
+                                               Text="{x:Bind HistorySummaryText, Mode=OneWay}" TextWrapping="Wrap" />
+                                </toolkit:SettingsCard.Description>
+                                <Button Content="Clear history" AutomationProperties.AutomationId="ClearHistoryButton"
+                                        AutomationProperties.Name="Clear saved free-space history"
+                                        IsEnabled="{x:Bind HasHistory, Mode=OneWay}" Click="ClearHistory_Click" />
+                            </toolkit:SettingsCard>
+                        </toolkit:SettingsExpander.Items>
+                    </toolkit:SettingsExpander>
 
-            <Button
-                Grid.Column="1"
-                VerticalAlignment="Center"
-                AutomationProperties.AutomationId="ResetPreferencesButton"
-                AutomationProperties.Name="Reset every preference to its default"
-                Click="ResetPreferences_Click"
-                Content="Reset to defaults" />
-        </Grid>
+                    <TextBlock Text="Drives and machine" Style="{StaticResource SettingsSectionHeaderStyle}"
+                               AutomationProperties.AutomationId="MachineSettingsHead" />
+                    <toolkit:SettingsCard Header="Default creation method">
+                        <toolkit:SettingsCard.HeaderIcon><FontIcon Glyph="&#xEDA2;" /></toolkit:SettingsCard.HeaderIcon>
+                        <ComboBox x:Name="CreationMethodCombo" MinWidth="160"
+                                  AutomationProperties.AutomationId="CreationMethodCombo" AutomationProperties.Name="Default Dev Drive creation method"
+                                  SelectionChanged="CreationMethodCombo_SelectionChanged">
+                            <ComboBoxItem AutomationProperties.AutomationId="MethodResize" Content="Resize a volume" Tag="Resize" />
+                            <ComboBoxItem AutomationProperties.AutomationId="MethodVhdx" Content="New VHDX" Tag="Vhdx" />
+                        </ComboBox>
+                    </toolkit:SettingsCard>
 
-        <!--
-            Two cards, equal width, as the comp draws it — then a third across the bottom. The comp
-            fills its two columns with eleven rows each; this build honestly has six and eight, and a
-            card that ends 400px above its own bottom edge reads as content that failed to load. The
-            slack goes to a card with real content, which is the same rule every other room follows.
-
-            No inspector: a setting explains itself in its own sub-line, so a panel repeating that
-            explanation would be the same words twice.
-        -->
-        <Grid
-            Grid.Row="1"
-            Padding="18,11"
-            RowSpacing="11">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="*" MinHeight="150" />
-            </Grid.RowDefinitions>
-
-            <Grid Grid.Row="0" ColumnSpacing="11">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="*" />
-                </Grid.ColumnDefinitions>
-
-            <!--  ================= Overview and signals =================  -->
-            <Border Grid.Column="0" Style="{StaticResource SmCardStyle}">
-                <Grid>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                    </Grid.RowDefinitions>
-
-                    <Border Grid.Row="0" Style="{StaticResource SmCardHeadStyle}">
-                        <Grid ColumnSpacing="10">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <TextBlock
-                                Grid.Column="0"
-                                VerticalAlignment="Center"
-                                AutomationProperties.AutomationId="SignalSettingsHead"
-                                Style="{StaticResource SmCardTitleTextStyle}"
-                                Text="Overview and signals" />
-                            <TextBlock
-                                Grid.Column="1"
-                                VerticalAlignment="Center"
-                                Style="{StaticResource SmCardSubTextStyle}"
-                                Text="What the landing room watches, and how loudly."
-                                TextTrimming="CharacterEllipsis" />
-                        </Grid>
-                    </Border>
-
-                    <ScrollViewer
-                        Grid.Row="1"
-                        AutomationProperties.AutomationId="SignalSettingsScroll"
-                        VerticalScrollBarVisibility="Auto">
-                        <StackPanel>
-
-                            <Border Style="{StaticResource SmSetRowStyle}">
-                                <Grid ColumnSpacing="14">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <StackPanel Grid.Column="0" VerticalAlignment="Center">
-                                        <TextBlock Style="{StaticResource SmSetLabelTextStyle}" Text="Watch for caches landing off your Dev Drive" />
-                                        <TextBlock Style="{StaticResource SmSetSubTextStyle}" Text="Raises an Overview signal when an ecosystem's cache appears on another volume" />
-                                    </StackPanel>
-                                    <ToggleSwitch
-                                        Grid.Column="1"
-                                        AutomationProperties.AutomationId="WatchCachesToggle"
-                                        AutomationProperties.Name="Watch for caches landing off your Dev Drive"
-                                        IsOn="{x:Bind WatchCachesOffDevDrive, Mode=TwoWay}"
-                                        OffContent=""
-                                        OnContent=""
-                                        Style="{StaticResource SmSetToggleStyle}" />
-                                </Grid>
-                            </Border>
-
-                            <Border Style="{StaticResource SmSetRowStyle}">
-                                <Grid ColumnSpacing="14">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <StackPanel Grid.Column="0" VerticalAlignment="Center">
-                                        <TextBlock Style="{StaticResource SmSetLabelTextStyle}" Text="Warn when free space drops below" />
-                                        <TextBlock Style="{StaticResource SmSetSubTextStyle}" Text="Percentage of the volume. Below this, Overview raises a low-space signal." />
-                                    </StackPanel>
-                                    <ComboBox
-                                        x:Name="LowFreeCombo"
-                                        Grid.Column="1"
-                                        AutomationProperties.AutomationId="LowFreeCombo"
-                                        AutomationProperties.Name="Low free space threshold"
-                                        SelectionChanged="LowFreeCombo_SelectionChanged"
-                                        Style="{StaticResource SmSetComboStyle}">
-                                        <ComboBoxItem
-                                            AutomationProperties.AutomationId="LowFree10"
-                                            Content="10%"
-                                            Tag="10" />
-                                        <ComboBoxItem
-                                            AutomationProperties.AutomationId="LowFree15"
-                                            Content="15%"
-                                            Tag="15" />
-                                        <ComboBoxItem
-                                            AutomationProperties.AutomationId="LowFree20"
-                                            Content="20%"
-                                            Tag="20" />
-                                        <ComboBoxItem
-                                            AutomationProperties.AutomationId="LowFree25"
-                                            Content="25%"
-                                            Tag="25" />
-                                    </ComboBox>
-                                </Grid>
-                            </Border>
-
-                            <Border Style="{StaticResource SmSetRowStyle}">
-                                <Grid ColumnSpacing="14">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <StackPanel Grid.Column="0" VerticalAlignment="Center">
-                                        <TextBlock Style="{StaticResource SmSetLabelTextStyle}" Text="Combine cache signals after" />
-                                        <TextBlock Style="{StaticResource SmSetSubTextStyle}" Text="One combined row instead of several saying the same sentence about different tools" />
-                                    </StackPanel>
-                                    <ComboBox
-                                        x:Name="RollupCombo"
-                                        Grid.Column="1"
-                                        AutomationProperties.AutomationId="RollupCombo"
-                                        AutomationProperties.Name="Combine cache signals after"
-                                        SelectionChanged="RollupCombo_SelectionChanged"
-                                        Style="{StaticResource SmSetComboStyle}">
-                                        <ComboBoxItem
-                                            AutomationProperties.AutomationId="Rollup2"
-                                            Content="2 caches"
-                                            Tag="2" />
-                                        <ComboBoxItem
-                                            AutomationProperties.AutomationId="Rollup3"
-                                            Content="3 caches"
-                                            Tag="3" />
-                                        <ComboBoxItem
-                                            AutomationProperties.AutomationId="Rollup5"
-                                            Content="5 caches"
-                                            Tag="5" />
-                                        <ComboBoxItem
-                                            AutomationProperties.AutomationId="RollupNever"
-                                            Content="Never"
-                                            Tag="0" />
-                                    </ComboBox>
-                                </Grid>
-                            </Border>
-
-                            <Border Style="{StaticResource SmSetRowStyle}">
-                                <Grid ColumnSpacing="14">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <StackPanel Grid.Column="0" VerticalAlignment="Center">
-                                        <TextBlock Style="{StaticResource SmSetLabelTextStyle}" Text="Record free space over time" />
-                                        <TextBlock Style="{StaticResource SmSetSubTextStyle}" Text="Windows keeps none, so the Overview chart is this app's own. One reading per volume every 30 minutes." />
-                                    </StackPanel>
-                                    <ToggleSwitch
-                                        Grid.Column="1"
-                                        AutomationProperties.AutomationId="RecordHistoryToggle"
-                                        AutomationProperties.Name="Record free space over time"
-                                        IsOn="{x:Bind RecordFreeSpaceHistory, Mode=TwoWay}"
-                                        OffContent=""
-                                        OnContent=""
-                                        Style="{StaticResource SmSetToggleStyle}" />
-                                </Grid>
-                            </Border>
-
-                            <Border Style="{StaticResource SmSetRowStyle}">
-                                <Grid ColumnSpacing="14">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <StackPanel Grid.Column="0" VerticalAlignment="Center">
-                                        <TextBlock Style="{StaticResource SmSetLabelTextStyle}" Text="Keep readings for" />
-                                        <TextBlock Style="{StaticResource SmSetSubTextStyle}" Text="Anything older is dropped the next time Overview loads" />
-                                    </StackPanel>
-                                    <ComboBox
-                                        x:Name="RetentionCombo"
-                                        Grid.Column="1"
-                                        AutomationProperties.AutomationId="RetentionCombo"
-                                        AutomationProperties.Name="Keep free space readings for"
-                                        SelectionChanged="RetentionCombo_SelectionChanged"
-                                        Style="{StaticResource SmSetComboStyle}">
-                                        <ComboBoxItem
-                                            AutomationProperties.AutomationId="Retention30"
-                                            Content="30 days"
-                                            Tag="30" />
-                                        <ComboBoxItem
-                                            AutomationProperties.AutomationId="Retention90"
-                                            Content="90 days"
-                                            Tag="90" />
-                                        <ComboBoxItem
-                                            AutomationProperties.AutomationId="Retention365"
-                                            Content="1 year"
-                                            Tag="365" />
-                                    </ComboBox>
-                                </Grid>
-                            </Border>
-
-                            <Border Style="{StaticResource SmSetRowStyle}">
-                                <Grid ColumnSpacing="14">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <StackPanel Grid.Column="0" VerticalAlignment="Center">
-                                        <TextBlock Style="{StaticResource SmSetLabelTextStyle}" Text="Free-space history on this PC" />
-                                        <TextBlock
-                                            AutomationProperties.AutomationId="HistorySummary"
-                                            Style="{StaticResource SmSetSubTextStyle}"
-                                            Text="{x:Bind HistorySummaryText, Mode=OneWay}" />
-                                    </StackPanel>
-                                    <Button
-                                        Grid.Column="1"
-                                        VerticalAlignment="Center"
-                                        AutomationProperties.AutomationId="ClearHistoryButton"
-                                        Click="ClearHistory_Click"
-                                        Content="Clear"
-                                        IsEnabled="{x:Bind HasHistory, Mode=OneWay}"
-                                        Style="{StaticResource SmCompactButtonStyle}" />
-                                </Grid>
-                            </Border>
-
-                            <!--
-                                No closing footnote on either card. "What this app changes" below
-                                says where these preferences live and what the app writes, and a
-                                card whose last line repeats the next card teaches the reader to
-                                stop reading.
-                            -->
-                        </StackPanel>
-                    </ScrollViewer>
-                </Grid>
+                    <TextBlock Text="About" Style="{StaticResource SettingsSectionHeaderStyle}" />
+                    <toolkit:SettingsExpander Header="DevDriveManager"
+                                             AutomationProperties.AutomationId="AboutSettingsExpander"
+                                             AutomationProperties.Name="About DevDriveManager">
+                        <toolkit:SettingsExpander.HeaderIcon>
+                            <ImageIcon Source="ms-appx:///Assets/AppIcon.ico" />
+                        </toolkit:SettingsExpander.HeaderIcon>
+                        <TextBlock AutomationProperties.AutomationId="AppVersionLine" Text="{x:Bind AppVersionText}"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                   Style="{StaticResource CaptionTextBlockStyle}" />
+                        <toolkit:SettingsExpander.Items>
+                            <toolkit:SettingsCard Header="Source" Description="View DevDriveManager on GitHub"
+                                                  IsClickEnabled="True" Click="Source_Click"
+                                                  AutomationProperties.AutomationId="RepoLink"
+                                                  AutomationProperties.Name="DevDriveManager source on GitHub">
+                                <toolkit:SettingsCard.ActionIcon>
+                                    <FontIcon Glyph="&#xE8A7;" />
+                                </toolkit:SettingsCard.ActionIcon>
+                            </toolkit:SettingsCard>
+                        </toolkit:SettingsExpander.Items>
+                    </toolkit:SettingsExpander>
+                    <HyperlinkButton Content="Reset preferences" HorizontalAlignment="Left" Margin="0,16,0,0"
+                                     AutomationProperties.AutomationId="ResetPreferencesButton"
+                                     AutomationProperties.Name="Reset app preferences to defaults"
+                                     Click="ResetPreferences_Click" />
+                </StackPanel>
             </Border>
-
-            <!--  ================= Drives and machine =================  -->
-            <Border Grid.Column="1" Style="{StaticResource SmCardStyle}">
-                <Grid>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                    </Grid.RowDefinitions>
-
-                    <Border Grid.Row="0" Style="{StaticResource SmCardHeadStyle}">
-                        <Grid ColumnSpacing="10">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <TextBlock
-                                Grid.Column="0"
-                                VerticalAlignment="Center"
-                                AutomationProperties.AutomationId="MachineSettingsHead"
-                                Style="{StaticResource SmCardTitleTextStyle}"
-                                Text="Drives and machine" />
-                            <TextBlock
-                                Grid.Column="1"
-                                VerticalAlignment="Center"
-                                Style="{StaticResource SmCardSubTextStyle}"
-                                Text="How the app looks, what it detects, and where to go next."
-                                TextTrimming="CharacterEllipsis" />
-                        </Grid>
-                    </Border>
-
-                    <ScrollViewer
-                        Grid.Row="1"
-                        AutomationProperties.AutomationId="SettingsScrollViewer"
-                        VerticalScrollBarVisibility="Auto">
-                        <StackPanel>
-
-                            <Border Style="{StaticResource SmSetRowStyle}">
-                                <Grid ColumnSpacing="14">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <StackPanel Grid.Column="0" VerticalAlignment="Center">
-                                        <TextBlock Style="{StaticResource SmSetLabelTextStyle}" Text="App theme" />
-                                        <TextBlock Style="{StaticResource SmSetSubTextStyle}" Text="Follow Windows, or pin the app to light or dark" />
-                                    </StackPanel>
-                                    <ComboBox
-                                        x:Name="ThemeSelector"
-                                        Grid.Column="1"
-                                        AutomationProperties.AutomationId="ThemeSelector"
-                                        AutomationProperties.Name="App theme"
-                                        SelectionChanged="ThemeSelector_SelectionChanged"
-                                        Style="{StaticResource SmSetComboStyle}">
-                                        <ComboBoxItem
-                                            AutomationProperties.AutomationId="ThemeOptionSystem"
-                                            Content="System default"
-                                            Tag="Default" />
-                                        <ComboBoxItem
-                                            AutomationProperties.AutomationId="ThemeOptionLight"
-                                            Content="Light"
-                                            Tag="Light" />
-                                        <ComboBoxItem
-                                            AutomationProperties.AutomationId="ThemeOptionDark"
-                                            Content="Dark"
-                                            Tag="Dark" />
-                                    </ComboBox>
-                                </Grid>
-                            </Border>
-
-                            <Border Style="{StaticResource SmSetRowStyle}">
-                                <Grid ColumnSpacing="14">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <StackPanel Grid.Column="0" VerticalAlignment="Center">
-                                        <TextBlock Style="{StaticResource SmSetLabelTextStyle}" Text="Default creation method" />
-                                        <TextBlock Style="{StaticResource SmSetSubTextStyle}" Text="Resizing gives a real volume; a VHDX is a file that has to mount before anything on it exists" />
-                                    </StackPanel>
-                                    <ComboBox
-                                        x:Name="CreationMethodCombo"
-                                        Grid.Column="1"
-                                        AutomationProperties.AutomationId="CreationMethodCombo"
-                                        AutomationProperties.Name="Default Dev Drive creation method"
-                                        SelectionChanged="CreationMethodCombo_SelectionChanged"
-                                        Style="{StaticResource SmSetComboStyle}">
-                                        <ComboBoxItem
-                                            AutomationProperties.AutomationId="MethodResize"
-                                            Content="Resize a volume"
-                                            Tag="Resize" />
-                                        <ComboBoxItem
-                                            AutomationProperties.AutomationId="MethodVhdx"
-                                            Content="New VHDX"
-                                            Tag="Vhdx" />
-                                    </ComboBox>
-                                </Grid>
-                            </Border>
-
-                            <Border Style="{StaticResource SmSetRowStyle}">
-                                <Grid ColumnSpacing="14">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <StackPanel Grid.Column="0" VerticalAlignment="Center">
-                                        <TextBlock Style="{StaticResource SmSetLabelTextStyle}" Text="Detection" />
-                                        <TextBlock Style="{StaticResource SmSetSubTextStyle}" Text="Fixed volumes and known package managers are read when the app loads. Nothing runs in the background." />
-                                    </StackPanel>
-                                    <Button
-                                        Grid.Column="1"
-                                        VerticalAlignment="Center"
-                                        AutomationProperties.AutomationId="RescanButton"
-                                        Command="{x:Bind ViewModel.LoadCommand}"
-                                        Content="Rescan now"
-                                        Style="{StaticResource SmCompactButtonStyle}" />
-                                </Grid>
-                            </Border>
-
-                            <Border Style="{StaticResource SmSetRowStyle}">
-                                <Grid ColumnSpacing="14">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <StackPanel Grid.Column="0" VerticalAlignment="Center">
-                                        <TextBlock Style="{StaticResource SmSetLabelTextStyle}" Text="What moving a package cache does" />
-                                        <TextBlock Style="{StaticResource SmSetSubTextStyle}" Text="Copies it to your Dev Drive and repoints the tool's per-user variable. Reversible." />
-                                    </StackPanel>
-                                    <Button
-                                        Grid.Column="1"
-                                        VerticalAlignment="Center"
-                                        AutomationProperties.AutomationId="SettingsLearnWhatThisDoes"
-                                        Click="LearnAboutCacheMoves_Click"
-                                        Content="Read"
-                                        Style="{StaticResource SmCompactButtonStyle}" />
-                                </Grid>
-                            </Border>
-
-                            <Border Style="{StaticResource SmSetRowStyle}">
-                                <Grid ColumnSpacing="14">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <StackPanel Grid.Column="0" VerticalAlignment="Center">
-                                        <TextBlock Style="{StaticResource SmSetLabelTextStyle}" Text="Dev Drives" />
-                                        <TextBlock Style="{StaticResource SmSetSubTextStyle}" Text="Create a new ReFS volume here, or manage every drive in Windows" />
-                                    </StackPanel>
-                                    <StackPanel
-                                        Grid.Column="1"
-                                        VerticalAlignment="Center"
-                                        Orientation="Horizontal"
-                                        Spacing="6">
-                                        <Button
-                                            AutomationProperties.AutomationId="SettingsCreateButton"
-                                            Command="{x:Bind ViewModel.CreateDevDriveCommand}"
-                                            Content="Create"
-                                            Style="{StaticResource SmCompactButtonStyle}" />
-                                        <Button
-                                            AutomationProperties.AutomationId="SettingsManageInStorageButton"
-                                            Command="{x:Bind ViewModel.ManageInStorageCommand}"
-                                            Content="Storage settings"
-                                            Style="{StaticResource SmCompactButtonStyle}" />
-                                    </StackPanel>
-                                </Grid>
-                            </Border>
-
-                            <Border Style="{StaticResource SmSetRowStyle}">
-                                <Grid ColumnSpacing="14">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <StackPanel Grid.Column="0" VerticalAlignment="Center">
-                                        <TextBlock Style="{StaticResource SmSetLabelTextStyle}" Text="Defender performance mode" />
-                                        <TextBlock Style="{StaticResource SmSetSubTextStyle}" Text="The single biggest factor in a Dev Drive's advantage. Windows owns this setting, not this app." />
-                                    </StackPanel>
-                                    <Button
-                                        Grid.Column="1"
-                                        VerticalAlignment="Center"
-                                        AutomationProperties.AutomationId="SettingsOpenWindowsSecurityButton"
-                                        Command="{x:Bind ViewModel.OpenWindowsSecurityCommand}"
-                                        Content="Windows Security"
-                                        Style="{StaticResource SmCompactButtonStyle}" />
-                                </Grid>
-                            </Border>
-
-                            <Border Style="{StaticResource SmSetRowStyle}">
-                                <Grid ColumnSpacing="14">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <StackPanel Grid.Column="0" VerticalAlignment="Center">
-                                        <TextBlock Style="{StaticResource SmSetLabelTextStyle}" Text="Storage Manager" />
-                                        <TextBlock
-                                            AutomationProperties.AutomationId="AppVersionLine"
-                                            Style="{StaticResource SmSetSubTextStyle}"
-                                            Text="{x:Bind AppVersionText}" />
-                                    </StackPanel>
-                                    <HyperlinkButton
-                                        Grid.Column="1"
-                                        Padding="0"
-                                        VerticalAlignment="Center"
-                                        AutomationProperties.AutomationId="RepoLink"
-                                        Content="Source"
-                                        NavigateUri="https://github.com/crutkas/devdrive" />
-                                </Grid>
-                            </Border>
-                        </StackPanel>
-                    </ScrollViewer>
-                </Grid>
-            </Border>
-            </Grid>
-
-            <!--
-                ================= What this app changes =================
-
-                The question a settings page ends on is not "what can I tune" but "what is this
-                allowed to do to my machine". Six rows answer it exhaustively: five things this build
-                writes, and the statement that everything else is measurement. Each row names where
-                the change lands and how to undo it, because "reversible" with no route back is a
-                claim rather than a fact.
-            -->
-            <Border Grid.Row="1" Style="{StaticResource SmCardStyle}">
-                <Grid>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="*" />
-                    </Grid.RowDefinitions>
-
-                    <Border Grid.Row="0" Style="{StaticResource SmCardHeadStyle}">
-                        <Grid ColumnSpacing="10">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <TextBlock
-                                Grid.Column="0"
-                                VerticalAlignment="Center"
-                                AutomationProperties.AutomationId="WriteSurfaceHead"
-                                Style="{StaticResource SmCardTitleTextStyle}"
-                                Text="What this app changes" />
-                            <TextBlock
-                                Grid.Column="1"
-                                VerticalAlignment="Center"
-                                Style="{StaticResource SmCardSubTextStyle}"
-                                Text="Everything this build can write, where it lands, and the way back."
-                                TextTrimming="CharacterEllipsis" />
-                        </Grid>
-                    </Border>
-
-                    <Grid
-                        Grid.Row="1"
-                        Padding="14,7,14,7"
-                        ColumnSpacing="14"
-                        BorderBrush="{ThemeResource SmDividerBrush}"
-                        BorderThickness="0,0,0,1">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="230" />
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="270" />
-                        </Grid.ColumnDefinitions>
-                        <TextBlock
-                            Grid.Column="0"
-                            Style="{StaticResource SmColumnHeaderTextStyle}"
-                            Text="WHAT" />
-                        <TextBlock
-                            Grid.Column="1"
-                            Style="{StaticResource SmColumnHeaderTextStyle}"
-                            Text="WHERE IT LANDS" />
-                        <TextBlock
-                            Grid.Column="2"
-                            Style="{StaticResource SmColumnHeaderTextStyle}"
-                            Text="THE WAY BACK" />
-                    </Grid>
-
-                    <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
-                        <ItemsControl AutomationProperties.Name="What this app changes" ItemsSource="{x:Bind WriteSurfaces}">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate x:DataType="vm:WriteSurfaceViewModel">
-                                    <Grid
-                                        Padding="14,7"
-                                        AutomationProperties.AutomationId="{x:Bind AutomationId}"
-                                        AutomationProperties.Name="{x:Bind AutomationName}"
-                                        BorderBrush="{ThemeResource SmDividerBrush}"
-                                        BorderThickness="0,0,0,1"
-                                        ColumnSpacing="14">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="230" />
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="270" />
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock
-                                            Grid.Column="0"
-                                            Style="{StaticResource SmCellTextStyle}"
-                                            Text="{x:Bind What}" />
-                                        <TextBlock
-                                            Grid.Column="1"
-                                            Style="{StaticResource SmMonoFaintCellTextStyle}"
-                                            Text="{x:Bind Where}" />
-                                        <TextBlock
-                                            Grid.Column="2"
-                                            Style="{x:Bind local:UiHelpers.WriteSurfaceReturnStyle(IsReversible)}"
-                                            Text="{x:Bind WayBack}" />
-                                    </Grid>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </ScrollViewer>
-                </Grid>
-            </Border>
-        </Grid>
-
-        <controls:RoomStatusBar
-            x:Name="StatusBar"
-            Grid.Row="2"
-            AutomationProperties.AutomationId="SettingsStatusBar"
-            AutomationProperties.Name="Settings status"
-            Hints="Tab to move &#xB7; Space toggle" />
+        </ScrollViewer>
     </Grid>
 </Page>

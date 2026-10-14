@@ -6,81 +6,34 @@
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:local="using:DevDriveManager"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-    Background="{ThemeResource SmCanvasBrush}"
     mc:Ignorable="d">
 
     <!--
-        The shell: a 64px icon rail beside the room frame.
-
-        This replaced a NavigationView with a 248px open pane. The pane was not the design — the
-        spec's rail is a 64px column of 56px buttons with the label under the icon, and that
-        density is what makes the rooms reachable without navigation dominating the window. A
-        NavigationView cannot render a label under a compact icon, so the rail is built here.
-
-        Automation ids are unchanged (ShellNavView, NavDashboard, ..., SettingsItem), so the change
-        is invisible to the UI suite: the rail is still invoked by id, the ids just sit on Buttons
-        now instead of NavigationViewItems.
+        AI Dev Gallery's Store-like rail, hosted by the native NavigationView. The custom item
+        presenter lives in Themes/StoreNavigationView.xaml; the platform owns selection, keyboard
+        navigation, scrolling and the footer. MainWindow still owns the separate title bar.
     -->
-
-    <Grid>
-        <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="64" />
-            <ColumnDefinition Width="*" />
-        </Grid.ColumnDefinitions>
-
-        <Border
-            Grid.Column="0"
-            Background="{ThemeResource SmCardBrush}"
-            BorderBrush="{ThemeResource SmDividerBrush}"
-            BorderThickness="0,0,1,0">
-            <Grid>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="*" />
-                    <RowDefinition Height="Auto" />
-                </Grid.RowDefinitions>
-
-                <!--  Rooms, built from RoomRegistry so adding one stays a single-list edit.  -->
-                <ScrollViewer
-                    Grid.Row="0"
-                    Padding="0,8,0,0"
-                    HorizontalScrollMode="Disabled"
-                    VerticalScrollBarVisibility="Hidden">
-                    <StackPanel
-                        x:Name="RailItems"
-                        AutomationProperties.AutomationId="ShellNavView"
-                        AutomationProperties.Name="Rooms" />
-                </ScrollViewer>
-
-                <!--  Settings is pinned to the bottom: it is a destination, not part of the flow.  -->
-                <StackPanel Grid.Row="1" Padding="0,0,0,8">
-                    <Rectangle
-                        Width="32"
-                        Height="1"
-                        Margin="0,5,0,6"
-                        Fill="{ThemeResource SmDividerBrush}" />
-                    <Button
-                        x:Name="SettingsRailButton"
-                        AutomationProperties.AutomationId="SettingsItem"
-                        AutomationProperties.Name="Settings"
-                        Style="{StaticResource SmRailButtonStyle}"
-                        Click="SettingsRailButton_Click">
-                        <StackPanel Spacing="3">
-                            <FontIcon
-                                FontFamily="{ThemeResource SymbolThemeFontFamily}"
-                                FontSize="19"
-                                Glyph="&#xE713;" />
-                            <TextBlock
-                                HorizontalAlignment="Center"
-                                FontSize="9.5"
-                                Text="Settings" />
-                        </StackPanel>
-                    </Button>
-                </StackPanel>
-            </Grid>
-        </Border>
-
-        <Grid Grid.Column="1">
+    <NavigationView
+        x:Name="ShellNavView"
+        AutomationProperties.AutomationId="ShellNavView"
+        AutomationProperties.Name="Rooms"
+        IsTitleBarAutoPaddingEnabled="False"
+        SelectionChanged="ShellNavView_SelectionChanged"
+        Style="{StaticResource StoreNavigationViewStyle}">
+        <NavigationView.FooterMenuItems>
+            <NavigationViewItem
+                x:Name="SettingsNavItem"
+                AutomationProperties.AutomationId="SettingsItem"
+                AutomationProperties.Name="Settings"
+                Content="Settings"
+                Icon="Setting"
+                Style="{StaticResource StoreNavigationViewItemStyle}"
+                Tag="settings"
+                ToolTipService.ToolTip="Settings" />
+        </NavigationView.FooterMenuItems>
+        <Grid>
             <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
@@ -103,11 +56,16 @@
                     Text="Safe-mutation test mode — nothing on this machine will actually change." />
             </Border>
 
+            <TextBlock x:Name="PageTitle" Grid.Row="1" Margin="18,24,18,16"
+                       Style="{StaticResource TitleTextBlockStyle}"
+                       AutomationProperties.AutomationId="PageTitle"
+                       AutomationProperties.HeadingLevel="Level1" />
+
             <Frame
                 x:Name="ContentFrame"
-                Grid.Row="1"
+                Grid.Row="2"
                 AutomationProperties.AutomationId="ShellContentFrame"
                 NavigationFailed="OnNavigationFailed" />
         </Grid>
-    </Grid>
+    </NavigationView>
 </Page>

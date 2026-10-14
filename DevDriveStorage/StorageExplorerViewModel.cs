@@ -222,6 +222,7 @@ public sealed class StorageTreeItemViewModel : ObservableObject
     private StorageNode _node;
     private bool _childrenMaterialized;
     private bool _isExpanded;
+    private int _colorIndex = -1;
 
     public StorageTreeItemViewModel(
         StorageNode node,
@@ -237,11 +238,28 @@ public sealed class StorageTreeItemViewModel : ObservableObject
 
     public string SizeDisplay => _node.SizeDisplay;
 
+    public string PhysicalPath => _node.PhysicalPath;
+
+    public bool IsFolder => _node.Kind == StorageNodeKind.Folder;
+
+    public int ColorIndex
+    {
+        get => _colorIndex;
+        internal set => SetProperty(ref _colorIndex, value);
+    }
+
     public Guid Id => _node.Id;
 
     public string AutomationId => $"FolderTreeItem_{_node.Id:N}";
 
-    public string AccessibleName => $"{_node.Name}, {_node.SizeDisplay}";
+    public string AccessibleName =>
+        $"{Name}, {(IsFolder ? "folder" : "file")}, {SizeDisplay} on disk, {_node.LogicalDisplay} apparent, {_node.ContextDisplay}";
+
+    /// <summary>The UI binds this without opening every collapsed branch.</summary>
+    public ObservableCollection<StorageTreeItemViewModel> MaterializedChildren => _children;
+
+    public bool HasUnrealizedChildren =>
+        !_childrenMaterialized && IsFolder && (!_node.IsMeasured || _node.ItemCount > 0);
 
     /// <summary>
     /// Children are created on first access rather than up front. A real volume holds hundreds of
@@ -259,6 +277,8 @@ public sealed class StorageTreeItemViewModel : ObservableObject
                 {
                     _children.Add(child);
                 }
+
+                OnPropertyChanged(nameof(HasUnrealizedChildren));
             }
 
             return _children;
@@ -271,7 +291,15 @@ public sealed class StorageTreeItemViewModel : ObservableObject
     public bool IsExpanded
     {
         get => _isExpanded;
-        set => SetProperty(ref _isExpanded, value);
+        set
+        {
+            if (value && IsFolder)
+            {
+                _ = Children;
+            }
+
+            SetProperty(ref _isExpanded, value);
+        }
     }
 
     /// <summary>
@@ -295,7 +323,18 @@ public sealed class StorageTreeItemViewModel : ObservableObject
             return;
         }
 
+        bool hadUnrealizedChildren = HasUnrealizedChildren;
         _node = node;
+        if (hadUnrealizedChildren != HasUnrealizedChildren)
+        {
+            OnPropertyChanged(nameof(HasUnrealizedChildren));
+        }
+
+        if (previous.LogicalBytes != node.LogicalBytes || previous.Provider != node.Provider)
+        {
+            OnPropertyChanged(nameof(AccessibleName));
+        }
+
         if (previous.Name != node.Name)
         {
             OnPropertyChanged(nameof(Name));
@@ -360,6 +399,8 @@ public sealed class StorageTreeItemViewModel : ObservableObject
 
 public sealed class StorageExplorerViewModel : ObservableObject
 {
+    public const int TreemapItemLimit = 24;
+
     private readonly IStorageSnapshotSource _source;
     private CancellationTokenSource? _scanCancellation;
     private StorageSnapshot? _snapshot;
@@ -377,6 +418,7 @@ public sealed class StorageExplorerViewModel : ObservableObject
     private int _refreshOrdinal;
     private int _projectionRevision;
     private bool _isEmpty = true;
+    private Dictionary<Guid, int> _treeColors = [];
 
     public StorageExplorerViewModel(IStorageSnapshotSource source)
     {
@@ -550,6 +592,21 @@ public sealed class StorageExplorerViewModel : ObservableObject
     }
 
     public bool IsScanning => ScanState == ExplorerScanState.Scanning;
+
+    private string? _selectedVolumePath;
+
+    /// <summary>The pending picker scope survives navigation, but cannot redirect an active scan.</summary>
+    public string? SelectedVolumePath
+    {
+        get => _selectedVolumePath;
+        set
+        {
+            if (!IsScanning)
+            {
+                SetProperty(ref _selectedVolumePath, value);
+            }
+        }
+    }
 
     public bool HasError => ScanState == ExplorerScanState.Failed;
 
@@ -732,6 +789,48 @@ public sealed class StorageExplorerViewModel : ObservableObject
         {
             NavigateTo(parentId);
         }
+    }
+
+    /// <summary>Select a file in its containing scope, or drill into a folder.</summary>
+    public void NavigateTreeItem(Guid id)
+    {
+        if (Snapshot?.Find(id) is not { } node)
+        {
+            return;
+        }
+
+        if (node.Kind == StorageNodeKind.File && node.ParentId is Guid parent &&
+            CurrentScope?.Id != parent)
+        {
+            NavigateTo(parent);
+        }
+
+        NavigateTo(id);
+    }
+
+    /// <summary>Reveal one selected path without materialising unrelated branches.</summary>
+    public StorageTreeItemViewModel? RevealTreeItem(Guid id)
+    {
+        if (Snapshot is null)
+        {
+            return null;
+        }
+
+        IEnumerable<StorageTreeItemViewModel> items = TreeRoots;
+        StorageTreeItemViewModel? match = null;
+        foreach (StorageNode node in Snapshot.AncestorsAndSelf(id))
+        {
+            match = items.FirstOrDefault(item => item.Id == node.Id);
+            if (match is null || node.Id == id)
+            {
+                return match;
+            }
+
+            match.IsExpanded = true;
+            items = match.Children;
+        }
+
+        return match;
     }
 
     public void Select(Guid id)
@@ -1019,18 +1118,20 @@ public sealed class StorageExplorerViewModel : ObservableObject
     /// show newer numbers.
     /// </summary>
     private StorageTreeItemViewModel BuildTreeItem(StorageNode node) =>
-        new(node, parent => ChildFoldersOf(parent.Id).Select(BuildTreeItem));
+        new(node, parent => TreeChildrenOf(parent.Id).Select(BuildTreeItem))
+        {
+            ColorIndex = _treeColors.GetValueOrDefault(node.Id, -1),
+        };
 
     /// <summary>
     /// Sibling order is size descending, and sizes climb throughout a scan, so folders genuinely
     /// re-rank as it runs. Reconciliation expresses that as a move of the row that changed rather
     /// than a rebuild of the ones that did not.
     /// </summary>
-    private IEnumerable<StorageNode> ChildFoldersOf(Guid parentId) =>
+    private IEnumerable<StorageNode> TreeChildrenOf(Guid parentId) =>
         Snapshot is null
             ? []
             : Snapshot.ChildrenOf(parentId)
-                .Where(child => child.Kind == StorageNodeKind.Folder)
                 .OrderByDescending(child => child.SizeBytes)
                 .ThenBy(child => child.Name, StringComparer.OrdinalIgnoreCase);
 
@@ -1045,7 +1146,7 @@ public sealed class StorageExplorerViewModel : ObservableObject
             return;
         }
 
-        item.ReconcileChildren([.. ChildFoldersOf(node.Id)], BuildTreeItem);
+        item.ReconcileChildren([.. TreeChildrenOf(node.Id)], BuildTreeItem);
         foreach (StorageTreeItemViewModel child in item.Children)
         {
             if (Snapshot.Find(child.Id) is { } fresh)
@@ -1111,6 +1212,7 @@ public sealed class StorageExplorerViewModel : ObservableObject
             }
 
             IsEmpty = true;
+            UpdateTreeColors();
             ProjectionRevision++;
             OnPropertyChanged(nameof(ItemCountSummary));
             return;
@@ -1152,12 +1254,35 @@ public sealed class StorageExplorerViewModel : ObservableObject
             (row, node) => row.Adopt(node, scopeBytes, sizeRanks[node.Id]));
 
         IsEmpty = VisibleItems.Count == 0;
+        UpdateTreeColors();
         ProjectionRevision++;
         OnPropertyChanged(nameof(ItemCountSummary));
     }
 
     private static StorageRowViewModel CreateRow(StorageNode node, long scopeBytes, int sizeRank) =>
         new(node, scopeBytes, sizeRank);
+
+    private void UpdateTreeColors()
+    {
+        // Copy the rows' stable colour identities, not their changing size ranks.
+        _treeColors = VisibleItems.Where(row => row.SizeBytes > 0)
+            .OrderByDescending(row => row.SizeBytes)
+            .Take(TreemapItemLimit)
+            .ToDictionary(row => row.Id, row => row.ColorIndex);
+        foreach (StorageTreeItemViewModel root in TreeRoots)
+        {
+            Update(root);
+        }
+
+        void Update(StorageTreeItemViewModel item)
+        {
+            item.ColorIndex = _treeColors.GetValueOrDefault(item.Id, -1);
+            foreach (StorageTreeItemViewModel child in item.MaterializedChildren)
+            {
+                Update(child);
+            }
+        }
+    }
 
     private IEnumerable<StorageNode> ApplySort(IEnumerable<StorageNode> query)
     {
@@ -1229,7 +1354,7 @@ public sealed class StorageExplorerViewModel : ObservableObject
             return;
         }
 
-        item.IsExpanded = true;
+        item.IsExpanded = item.IsFolder;
         foreach (StorageTreeItemViewModel child in item.Children)
         {
             Expand(child, path);

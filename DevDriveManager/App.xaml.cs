@@ -61,8 +61,12 @@ public partial class App : Application
     /// finished scan the moment the user looked at another room — and leave an unfinished one
     /// walking the disk on behalf of a page nobody can see.
     /// </summary>
-    public static StorageExplorerViewModel SharedSpace { get; } =
+    public static StorageExplorerViewModel SharedSpace { get; private set; } =
         new(new LiveStorageSnapshotSource());
+
+    public static IVolumeProvider SpaceVolumes { get; private set; } = new SystemVolumeProvider();
+
+    public static bool IsSpaceFixture { get; private set; }
 
     /// <summary>
     /// The shared Create room state. A half-filled create form is exactly the kind of state a user
@@ -133,6 +137,16 @@ public partial class App : Application
     /// <param name="args">Details about the launch request and process.</param>
     protected override void OnLaunched(Microsoft.UI.Xaml.LaunchActivatedEventArgs args)
     {
+#if DEBUG
+        if (args.Arguments == "--space-ui-fixture" ||
+            Environment.GetCommandLineArgs().Contains("--space-ui-fixture", StringComparer.Ordinal))
+        {
+            IsSpaceFixture = true;
+            SpaceVolumes = new Services.SpaceUiFixtureVolumes();
+            SharedSpace = new(new MockStorageSnapshotSource(
+                MockStorageScenarioCatalog.CreateDefault(), TimeSpan.FromMilliseconds(1250)));
+        }
+#endif
         Window = new MainWindow();
         DispatcherQueue = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
         Window.Activate();

@@ -204,7 +204,7 @@ public sealed partial class ReclaimViewModel : ObservableObject
         }
 
         SelectedCategory = Categories.FirstOrDefault();
-        RefreshVolumeStrip();
+        RefreshVolumeImpacts();
     }
 
     public ObservableCollection<ReclaimCategoryViewModel> Categories { get; } = [];
@@ -323,13 +323,6 @@ public sealed partial class ReclaimViewModel : ObservableObject
             return count == 1 ? "1 item queued" : $"{count:N0} items queued";
         }
     }
-
-    /// <summary>
-    /// The volume context strip. Reclaimable bytes track the current <i>selection</i>, not everything
-    /// found, so the bars answer "what will this machine look like if I press the button" rather than
-    /// "what did the scan turn up" — the latter is already the headline number.
-    /// </summary>
-    public ObservableCollection<VolumeStripEntry> VolumeStripEntries { get; } = [];
 
     public IEnumerable<ReclaimRowViewModel> AllRows => Categories.SelectMany(c => c.Rows);
 
@@ -805,11 +798,11 @@ public sealed partial class ReclaimViewModel : ObservableObject
                     .OrderByDescending(kv => kv.Value)
                     .Select(kv => $"{ReclaimFormat.Bytes(kv.Value)} on {kv.Key.TrimEnd('\\')}"));
 
-        RefreshVolumeStrip(byVolume);
+        RefreshVolumeImpacts(byVolume);
     }
 
     /// <summary>
-    /// Rebuilds the context strip and the per-volume impact rows from a cached enumeration.
+    /// Rebuilds the per-volume impact rows from a cached enumeration.
     /// </summary>
     /// <remarks>
     /// The enumeration itself is a <c>CreateFile</c> plus a <c>DeviceIoControl</c> per volume, and
@@ -817,12 +810,8 @@ public sealed partial class ReclaimViewModel : ObservableObject
     /// tick. Ticking a box cannot change how much free space a volume has, so re-reading the
     /// machine there was blocking the interaction to learn nothing. Free space only moves when a
     /// scan or a reclaim run does something, which is what <see cref="InvalidateVolumes"/> is for.
-    /// <para>
-    /// The impact rows are still built from the same enumeration as the strip, so the after-picture
-    /// bars can never disagree with the strip above them about how big a volume is.
-    /// </para>
     /// </remarks>
-    private void RefreshVolumeStrip(IReadOnlyDictionary<string, long>? reclaimableByVolume = null)
+    private void RefreshVolumeImpacts(IReadOnlyDictionary<string, long>? reclaimableByVolume = null)
     {
         IReadOnlyList<StorageVolume>? volumes = _cachedVolumes;
 
@@ -835,7 +824,7 @@ public sealed partial class ReclaimViewModel : ObservableObject
             catch (IOException)
             {
                 // A volume disappearing mid-session is a real event, not a bug. The room is still usable
-                // without its strip, so this degrades rather than taking the page down.
+                // without impact rows, so this degrades rather than taking the page down.
                 RebuildImpacts(reclaimableByVolume, []);
                 return;
             }
@@ -848,19 +837,11 @@ public sealed partial class ReclaimViewModel : ObservableObject
             _cachedVolumes = volumes;
         }
 
-        string? systemRoot = Path.GetPathRoot(Environment.SystemDirectory);
-
-        VolumeStripEntries.Clear();
-        foreach (VolumeStripEntry entry in VolumeStrip.Build(volumes, systemRoot, reclaimableByVolume))
-        {
-            VolumeStripEntries.Add(entry);
-        }
-
         RebuildImpacts(reclaimableByVolume, volumes);
     }
 
     /// <summary>
-    /// Drops the cached volume enumeration so the next strip rebuild re-reads the machine. Call
+    /// Drops the cached volume enumeration so the next impact rebuild re-reads the machine. Call
     /// after anything that can actually move free space — a completed scan, or a reclaim run.
     /// </summary>
     private void InvalidateVolumes() => _cachedVolumes = null;

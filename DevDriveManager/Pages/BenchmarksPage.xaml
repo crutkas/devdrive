@@ -9,7 +9,6 @@
     xmlns:local="using:DevDriveManager"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:pages="using:DevDriveManager.Pages"
-    xmlns:storage="using:DevDriveStorage"
     xmlns:vm="using:DevDriveManager.ViewModels"
     mc:Ignorable="d">
 
@@ -21,9 +20,7 @@
         </Grid.RowDefinitions>
 
         <!--
-            Context strip. This room compares two volumes against each other, so the two tiles above
-            the table are the two things every number below is about. The run verbs ride on the strip
-            like every other room's primary action.
+            Page commands only. The workload columns and legends identify the compared volumes.
         -->
         <Grid
             Grid.Row="0"
@@ -35,27 +32,6 @@
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
-
-            <ItemsControl
-                Grid.Column="0"
-                AutomationProperties.AutomationId="BenchmarksVolumeStrip"
-                AutomationProperties.Name="Volumes being compared"
-                ItemsSource="{x:Bind VolumeStripEntries}">
-                <ItemsControl.ItemsPanel>
-                    <ItemsPanelTemplate>
-                        <StackPanel Orientation="Horizontal" Spacing="10" />
-                    </ItemsPanelTemplate>
-                </ItemsControl.ItemsPanel>
-                <ItemsControl.ItemTemplate>
-                    <DataTemplate x:DataType="storage:VolumeStripEntry">
-                        <controls:VolumeCard
-                            AccentRole="{x:Bind AccentRole}"
-                            IsSystemVolume="{x:Bind IsSystemVolume}"
-                            ReclaimableBytes="{x:Bind ReclaimableBytes}"
-                            Volume="{x:Bind Volume}" />
-                    </DataTemplate>
-                </ItemsControl.ItemTemplate>
-            </ItemsControl>
 
             <StackPanel
                 Grid.Column="1"

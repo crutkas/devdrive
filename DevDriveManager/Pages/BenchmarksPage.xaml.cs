@@ -3,11 +3,9 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
-using System.IO;
 using System.Linq;
 using DevDriveManager.Controls;
 using DevDriveManager.ViewModels;
-using DevDriveStorage;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 
@@ -42,8 +40,6 @@ public sealed partial class BenchmarksPage : Page, INotifyPropertyChanged
     /// </summary>
     private const double WorkloadFixedColumnsWidth = 168 + 88 + 88 + 96 + 58 + (12 * 5) + 28 + 2;
 
-    private readonly IVolumeProvider _volumeProvider = new SystemVolumeProvider();
-    private readonly ObservableCollection<VolumeStripEntry> _volumeStripEntries = new();
     private readonly ObservableCollection<BenchWorkloadViewModel> _workloads = new();
     private readonly ObservableCollection<BenchSuggestionViewModel> _suggestions = new();
 
@@ -68,12 +64,6 @@ public sealed partial class BenchmarksPage : Page, INotifyPropertyChanged
         new(BenchTabKind.Workloads, "Workloads"),
         new(BenchTabKind.Suggestions, "Suggestions"),
     ];
-
-    /// <summary>
-    /// The strip above the room. This room compares two volumes, so the tiles are the two things every
-    /// number below is about. No volume carries a movable band — nothing here moves bytes.
-    /// </summary>
-    public IReadOnlyList<VolumeStripEntry> VolumeStripEntries => _volumeStripEntries;
 
     /// <summary>The measurable workloads, one row each. Exposed read-only — see the remarks.</summary>
     /// <remarks>
@@ -253,7 +243,6 @@ public sealed partial class BenchmarksPage : Page, INotifyPropertyChanged
         Raise(nameof(ShowWorkloads));
         Raise(nameof(ShowSuggestions));
 
-        RefreshVolumeStrip();
         RebuildWorkloads();
         RebuildSuggestions();
         UpdateStatusBar();
@@ -276,7 +265,6 @@ public sealed partial class BenchmarksPage : Page, INotifyPropertyChanged
         _isSubscribed = true;
         ViewModel.Suite.PropertyChanged += OnSuiteChanged;
         ViewModel.Ecosystems.Cards.CollectionChanged += OnCardsChanged;
-        ViewModel.Volumes.CollectionChanged += OnVolumesChanged;
     }
 
     private void Unsubscribe()
@@ -289,7 +277,6 @@ public sealed partial class BenchmarksPage : Page, INotifyPropertyChanged
         _isSubscribed = false;
         ViewModel.Suite.PropertyChanged -= OnSuiteChanged;
         ViewModel.Ecosystems.Cards.CollectionChanged -= OnCardsChanged;
-        ViewModel.Volumes.CollectionChanged -= OnVolumesChanged;
 
         // The rows these wrappers listen to live on the shared suite and outlive the page, so a wrapper
         // that is still subscribed is held alive by the suite's event. NavigationCacheMode is Disabled,
@@ -348,8 +335,6 @@ public sealed partial class BenchmarksPage : Page, INotifyPropertyChanged
     }
 
     /// <summary>A volume appearing or disappearing changes the strip this room compares against.</summary>
-    private void OnVolumesChanged(object? sender, NotifyCollectionChangedEventArgs e) => RefreshVolumeStrip();
-
     /// <summary>
     /// The selected row finishing is the one case where the inspector must repaint without the
     /// selection changing — the numbers it is reading out arrive after the click.
@@ -460,30 +445,6 @@ public sealed partial class BenchmarksPage : Page, INotifyPropertyChanged
         }
 
         Tab(BenchTabKind.Suggestions).Count = _suggestions.Count;
-    }
-
-    private void RefreshVolumeStrip()
-    {
-        IReadOnlyList<StorageVolume> volumes;
-        try
-        {
-            volumes = _volumeProvider.GetFixedVolumes();
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            // A volume disappearing mid-session is a real event, not a bug. The room is still usable
-            // without its strip, so this degrades rather than taking the page down.
-            _volumeStripEntries.Clear();
-            return;
-        }
-
-        string? systemRoot = Path.GetPathRoot(Environment.SystemDirectory);
-
-        _volumeStripEntries.Clear();
-        foreach (VolumeStripEntry entry in VolumeStrip.Build(volumes, systemRoot, new Dictionary<string, long>()))
-        {
-            _volumeStripEntries.Add(entry);
-        }
     }
 
     /// <summary>
