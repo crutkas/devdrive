@@ -155,39 +155,6 @@
                             </Grid>
                         </Border>
 
-                        <!--  ===== Virtual disk file (VHDX) ===== -->
-                        <Border Style="{StaticResource SmSetRowStyle}" Visibility="{x:Bind local:CreateDevDrivePage.BoolToVisibility(ViewModel.IsVhdx), Mode=OneWay}">
-                            <StackPanel Spacing="7">
-                                <TextBlock Style="{StaticResource SmSetLabelTextStyle}" Text="Virtual disk file" />
-                                <Grid ColumnSpacing="9">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBox
-                                        Grid.Column="0"
-                                        AutomationProperties.AutomationId="VhdPathTextBox"
-                                        AutomationProperties.Name="Virtual disk file path"
-                                        PlaceholderText="C:\DevDrives\DevDrive.vhdx"
-                                        Text="{x:Bind ViewModel.VhdFilePath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-                                    <Button
-                                        Grid.Column="1"
-                                        AutomationProperties.AutomationId="BrowseVhdButton"
-                                        Command="{x:Bind ViewModel.BrowseVhdPathCommand}"
-                                        Content="Browse&#8230;" />
-                                </Grid>
-                                <ComboBox
-                                    HorizontalAlignment="Stretch"
-                                    AutomationProperties.AutomationId="VhdTypeComboBox"
-                                    AutomationProperties.Name="Virtual disk type"
-                                    SelectedIndex="{x:Bind ViewModel.VhdTypeIndex, Mode=TwoWay}"
-                                    Style="{StaticResource SmSetComboStyle}">
-                                    <ComboBoxItem AutomationProperties.AutomationId="VhdTypeDynamic" Content="Dynamically expanding" />
-                                    <ComboBoxItem AutomationProperties.AutomationId="VhdTypeFixed" Content="Fixed size" />
-                                </ComboBox>
-                            </StackPanel>
-                        </Border>
-
                         <!--  ===== Size ===== -->
                         <Border Style="{StaticResource SmSetRowStyle}">
                             <StackPanel Spacing="7">
@@ -323,6 +290,39 @@
                                             Text="{x:Bind ViewModel.Label, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                                     </StackPanel>
                                 </Grid>
+
+                                <!--  ===== Virtual disk file (VHDX) ===== -->
+                                <Border Visibility="{x:Bind local:CreateDevDrivePage.BoolToVisibility(ViewModel.IsVhdx), Mode=OneWay}">
+                                    <StackPanel Spacing="7">
+                                        <TextBlock Style="{StaticResource SmSetLabelTextStyle}" Text="Virtual disk file" />
+                                        <Grid ColumnSpacing="9">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBox
+                                                Grid.Column="0"
+                                                AutomationProperties.AutomationId="VhdPathTextBox"
+                                                AutomationProperties.Name="Virtual disk file path"
+                                                PlaceholderText="C:\DevDrives\DevDrive.vhdx"
+                                                Text="{x:Bind ViewModel.VhdFilePath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                            <Button
+                                                Grid.Column="1"
+                                                AutomationProperties.AutomationId="BrowseVhdButton"
+                                                Command="{x:Bind ViewModel.BrowseVhdPathCommand}"
+                                                Content="Browse&#8230;" />
+                                        </Grid>
+                                        <ComboBox
+                                            HorizontalAlignment="Stretch"
+                                            AutomationProperties.AutomationId="VhdTypeComboBox"
+                                            AutomationProperties.Name="Virtual disk type"
+                                            SelectedIndex="{x:Bind ViewModel.VhdTypeIndex, Mode=TwoWay}"
+                                            Style="{StaticResource SmSetComboStyle}">
+                                            <ComboBoxItem AutomationProperties.AutomationId="VhdTypeDynamic" Content="Dynamically expanding" />
+                                            <ComboBoxItem AutomationProperties.AutomationId="VhdTypeFixed" Content="Fixed size" />
+                                        </ComboBox>
+                                    </StackPanel>
+                                </Border>
                             </StackPanel>
                         </Expander>
 
