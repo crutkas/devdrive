@@ -13,7 +13,7 @@ public enum CacheTabKind
 }
 
 /// <summary>
-/// One tab in the Caches room's table head.
+/// One view in the Caches room's native selector.
 /// </summary>
 /// <remarks>
 /// The room used to split rows four ways — all, needs action, on the Dev Drive, not installed — which
@@ -40,17 +40,21 @@ public sealed partial class CacheTabViewModel : ObservableObject
     [ObservableProperty]
     public partial int Count { get; set; }
 
-    /// <summary>True for the tab the table is currently showing.</summary>
-    [ObservableProperty]
-    public partial bool IsSelected { get; set; }
+    /// <summary>Visible selector label, including the live count.</summary>
+    public string DisplayText => $"{Title} ({Count})";
 
-    /// <summary>Screen-reader label: the tab read as one phrase, including its count.</summary>
+    /// <summary>Screen-reader label: the view read as one phrase, including its count.</summary>
     public string AutomationName => $"{Title}, {Count}";
 
-    /// <summary>Stable id for the UI suite. Derived from the kind, which never localises.</summary>
-    public string AutomationId => $"CacheTab_{Kind}";
+    partial void OnCountChanged(int value)
+    {
+        OnPropertyChanged(nameof(AutomationName));
+        OnPropertyChanged(nameof(DisplayText));
+    }
 
-    partial void OnCountChanged(int value) => OnPropertyChanged(nameof(AutomationName));
-
-    partial void OnTitleChanged(string value) => OnPropertyChanged(nameof(AutomationName));
+    partial void OnTitleChanged(string value)
+    {
+        OnPropertyChanged(nameof(AutomationName));
+        OnPropertyChanged(nameof(DisplayText));
+    }
 }

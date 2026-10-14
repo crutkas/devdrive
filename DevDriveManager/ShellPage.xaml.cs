@@ -10,7 +10,6 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Navigation;
 using Windows.System;
-using Rectangle = Microsoft.UI.Xaml.Shapes.Rectangle;
 
 namespace DevDriveManager;
 
@@ -39,7 +38,7 @@ public sealed partial class ShellPage : Page
         InitializeComponent();
         Current = this;
 
-        BuildRail();
+        BuildNavigationItems();
 
         ViewModel.NavigateToCreateRequested += OnNavigateToCreateRequested;
         ViewModel.LaunchUriRequested += OnLaunchUriRequested;
@@ -50,80 +49,37 @@ public sealed partial class ShellPage : Page
     }
 
     /// <summary>
-    /// Builds the rail from <see cref="RoomRegistry"/>, inserting a divider and a section caption
-    /// wherever the section changes. The section break is load-bearing: crossing it is what tells
-    /// the user they have moved between subsystems rather than just to another list of files.
+    /// Builds native navigation items from the route registry. Section boundaries remain separators;
+    /// a narrow Store-style rail does not have room for full-width section headers.
     /// </summary>
-    private void BuildRail()
+    private void BuildNavigationItems()
     {
         RoomSection? previous = null;
 
         foreach (Room room in RoomRegistry.All)
         {
-            if (room.Section != previous)
+            if (previous is not null && room.Section != previous)
             {
-                if (previous is not null)
-                {
-                    RailItems.Children.Add(new Rectangle
-                    {
-                        Margin = new Thickness(0, 8, 0, 2),
-                        Style = Resolve<Style>("SmRailDividerStyle"),
-                    });
-                }
-
-                // Utility is the "actions" bucket below the dividers; captioning it would name
-                // something the user does not think of as a place.
-                if (room.Section != RoomSection.Utility)
-                {
-                    RailItems.Children.Add(new TextBlock
-                    {
-                        Text = room.Section.ToString().ToUpperInvariant(),
-                        Margin = new Thickness(0, 4, 0, 3),
-                        Style = Resolve<Style>("SmRailSectionHeaderTextStyle"),
-                    });
-                }
+                ShellNavView.MenuItems.Add(new NavigationViewItemSeparator());
             }
 
-            RailItems.Children.Add(CreateRailButton(room));
+            var item = new NavigationViewItem
+            {
+                Content = RailLabel(room.Title),
+                Icon = new FontIcon { Glyph = room.Glyph, FontSize = 20 },
+                Style = (Style)Application.Current.Resources["StoreNavigationViewItemStyle"],
+                Tag = room.Tag,
+            };
+            AutomationProperties.SetAutomationId(item, room.AutomationId);
+            AutomationProperties.SetName(item, room.Title);
+            ToolTipService.SetToolTip(item, room.Title);
+            ShellNavView.MenuItems.Add(item);
             previous = room.Section;
         }
     }
 
-    private Button CreateRailButton(Room room)
-    {
-        var content = new StackPanel { Spacing = 3 };
-        content.Children.Add(new FontIcon
-        {
-            Glyph = room.Glyph,
-            FontSize = 19,
-        });
-        content.Children.Add(new TextBlock
-        {
-            Text = RailLabel(room.Title),
-            FontSize = 9.5,
-            HorizontalAlignment = HorizontalAlignment.Center,
-            TextTrimming = TextTrimming.CharacterEllipsis,
-        });
-
-        var button = new Button
-        {
-            Content = content,
-            Tag = room.Tag,
-            Style = Resolve<Style>("SmRailButtonStyle"),
-        };
-
-        AutomationProperties.SetAutomationId(button, room.AutomationId);
-
-        // The rail label is abbreviated to fit 56px, so the accessible name carries the full title
-        // and a screen reader never hears "Caches" for a room called "Package caches".
-        AutomationProperties.SetName(button, room.Title);
-        ToolTipService.SetToolTip(button, room.Title);
-        button.Click += RailButton_Click;
-        return button;
-    }
-
     /// <summary>
-    /// Shortens a room title to something that fits a 56px button without ellipsing. Only titles
+    /// Shortens a room title to something that fits the rail without ellipsing. Only titles
     /// that genuinely do not fit are shortened; the full title stays on the tooltip and the
     /// accessible name.
     /// </summary>
@@ -134,62 +90,34 @@ public sealed partial class ShellPage : Page
         _ => title,
     };
 
-    private T Resolve<T>(string key)
-        where T : class =>
-        Application.Current.Resources[key] as T
-            ?? throw new InvalidOperationException($"Missing shell resource '{key}'.");
-
     /// <summary>Select a top-level nav item by its tag (e.g. "caches"), updating the rail and the content frame.</summary>
     public void SelectNavItem(string tag)
     {
-        foreach (Button button in RailItems.Children.OfType<Button>())
-        {
-            if ((button.Tag as string) == tag)
-            {
-                SelectRailButton(button);
-                Navigate(tag);
-                return;
-            }
-        }
+        NavigationViewItem? item = ShellNavView.MenuItems
+            .Concat(ShellNavView.FooterMenuItems)
+            .OfType<NavigationViewItem>()
+            .FirstOrDefault(item => item.Tag as string == tag);
+        if (item is null) return;
+
+        // All callers (including attention signals and the shared Create request) use the same
+        // selection path. Re-selecting the current destination never reconstructs its page.
+        ShellNavView.SelectedItem = item;
+        Navigate(tag);
     }
 
     /// <summary>
-    /// Moves the selected state to one rail button. Selection is visual state plus an automation
-    /// item status, because the accent bar alone says nothing to a screen reader.
+    /// NavigationView owns IsSelected and exposes SelectionItem to assistive technology.
+    /// ItemStatus is retained as well for existing automation clients of the old rail.
     /// </summary>
-    /// <remarks>
-    /// The ink is deliberately not set here. The <c>Selected</c> visual state carries it, so it
-    /// re-resolves when the theme changes; assigning <c>Foreground</c> imperatively wrote a local
-    /// value that outranked the style and froze at whichever theme was live when the rail was built.
-    /// </remarks>
-    private void SelectRailButton(Button? selected)
+    private void ShellNavView_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
     {
-        foreach (Button button in RailItems.Children.OfType<Button>().Append(SettingsRailButton))
+        foreach (NavigationViewItem item in sender.MenuItems.Concat(sender.FooterMenuItems).OfType<NavigationViewItem>())
         {
-            bool isSelected = ReferenceEquals(button, selected);
-            VisualStateManager.GoToState(button, isSelected ? "Selected" : "Unselected", false);
-            AutomationProperties.SetItemStatus(button, isSelected ? "Selected" : string.Empty);
+            AutomationProperties.SetItemStatus(item, ReferenceEquals(item, args.SelectedItem) ? "Selected" : string.Empty);
         }
-    }
-
-    private void RailButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is Button { Tag: string tag } button)
+        if (args.SelectedItem is NavigationViewItem { Tag: string tag })
         {
-            SelectRailButton(button);
             Navigate(tag);
-        }
-    }
-
-    private void SettingsRailButton_Click(object sender, RoutedEventArgs e)
-    {
-        SelectRailButton(SettingsRailButton);
-        if (ContentFrame.CurrentSourcePageType != typeof(SettingsPage))
-        {
-            ContentFrame.Navigate(
-                typeof(SettingsPage),
-                null,
-                new Microsoft.UI.Xaml.Media.Animation.SuppressNavigationTransitionInfo());
         }
     }
 
@@ -219,10 +147,16 @@ public sealed partial class ShellPage : Page
 
     private void Navigate(string tag)
     {
-        Type? target = RoomRegistry.Find(tag)?.PageType;
+        Type? target = tag == "settings" ? typeof(SettingsPage) : RoomRegistry.Find(tag)?.PageType;
 
         if (target is not null && ContentFrame.CurrentSourcePageType != target)
         {
+            PageTitle.Text = tag == "settings" ? "Settings" : RoomRegistry.Find(tag)!.Title;
+            // Package caches owns its title/action rows so the controls can wrap at narrow widths.
+            bool pageOwnsHeader = target == typeof(PackageCachesPage);
+            PageTitle.Visibility = pageOwnsHeader ? Visibility.Collapsed : Visibility.Visible;
+            AutomationProperties.SetAutomationId(PageTitle,
+                pageOwnsHeader ? "ShellPageTitle" : tag == "settings" ? "SettingsTitle" : "PageTitle");
             ContentFrame.Navigate(target, null, new Microsoft.UI.Xaml.Media.Animation.SuppressNavigationTransitionInfo());
         }
     }

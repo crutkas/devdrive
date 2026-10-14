@@ -18,7 +18,8 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <TitleBar x:Name="AppTitleBar" Title="DevDriveManager">
+        <TitleBar x:Name="AppTitleBar" Title="DevDriveManager" Height="48"
+                  AutomationProperties.AutomationId="AppTitleBar">
             <TitleBar.IconSource>
                 <ImageIconSource ImageSource="Assets/AppIcon.ico" />
             </TitleBar.IconSource>

@@ -3,54 +3,38 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.IO;
 using System.Linq;
-using DevDriveManager.Controls;
+using System.Windows.Input;
 using DevDriveManager.ViewModels;
-using DevDriveStorage;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 
-// Both DevDriveCore and DevDriveStorage ship a ByteSizeFormatter. The Core one takes the ulong the
-// cache rows already carry; the Storage one takes a long. Aliased rather than qualified inline so the
-// choice is stated once instead of at each call site.
-using ByteSizeFormatter = DevDriveCore.ByteSizeFormatter;
-
 namespace DevDriveManager.Pages;
 
 /// <summary>
-/// The Caches room: which developer tools keep a package cache, where each one lives, and what moving
-/// it to the Dev Drive would change.
+/// Shows developer-tool caches, their locations, and reversible move actions.
 /// </summary>
 /// <remarks>
-/// <para>
-/// The room owns nothing but presentation. Every cache row, the reversible move engine, and the
-/// "Move all" flow live on the shared <see cref="PackageCachesViewModel"/>; this page groups the flat
-/// <see cref="PackageCachesViewModel.Caches"/> collection into bands, filters the table to the
-/// selected band, and keeps the volume strip and status bar in step.
-/// </para>
-/// <para>
-/// Rows are ordered needs-action first and the room opens on "All caches" rather than on the
-/// actionable band. The whole inventory is a dozen tools, so showing it costs nothing, and a room
-/// that opens already filtered has to explain what it is hiding before the user can trust the counts.
-/// </para>
+/// The shared <see cref="PackageCachesViewModel"/> owns detection and moves. This page filters its
+/// rows into tabs and presents the existing confirmation gates as native dialogs.
 /// </remarks>
 public sealed partial class PackageCachesPage : Page, INotifyPropertyChanged
 {
     /// <summary>
     /// Everything in a cache row that is not the location, in DIPs: the ECOSYSTEM, REDIRECTED BY,
     /// SIZE, STATUS and ACTION columns (164 + 170 + 88 + 96 + 104), the five 12px gaps, the row's own
-    /// 14px horizontal padding, and the card's 1px border on each side.
+    /// 16px horizontal padding, and the card's 1px border on each side.
     /// </summary>
-    private const double TableFixedColumnsWidth = 164 + 170 + 88 + 96 + 104 + (12 * 5) + 28 + 2;
+    private const double TableFixedColumnsWidth = 164 + 170 + 88 + 96 + 104 + (12 * 5) + 32 + 2;
 
     private readonly HashSet<PackageCacheRowViewModel> _hooked = new();
-    private readonly IVolumeProvider _volumeProvider = new SystemVolumeProvider();
 
     private double _locationColumnWidth = 220;
 
-    // Guards ContentDialog re-entrancy: WinUI allows one dialog at a time and a second ShowAsync
-    // throws, which a double-click on the explainer link would otherwise reach.
     private bool _dialogOpen;
+    private ContentDialog? _activeDialog;
+    private ContentDialog? _moveAllDialog;
+    private PackageCacheRowViewModel? _pendingRowConfirmation;
 
     public PackageCachesPage()
     {
@@ -63,29 +47,28 @@ public sealed partial class PackageCachesPage : Page, INotifyPropertyChanged
 
     public PackageCachesViewModel Caches => App.Shared.PackageCaches;
 
-    /// <summary>The table's two tabs, in head order. Rebuilt in place so the selection survives a regroup.</summary>
+    /// <summary>The native selector's two views, in display order.</summary>
     public ObservableCollection<CacheTabViewModel> Tabs { get; } =
     [
         new(CacheTabKind.Detected, "Detected"),
         new(CacheTabKind.NotInstalled, "Not installed"),
     ];
 
+    public CacheTabViewModel DetectedTab => Tabs[0];
+
+    public CacheTabViewModel NotInstalledTab => Tabs[1];
+
     /// <summary>The rows the table is showing — the selected tab, needs-action first.</summary>
     public ObservableCollection<PackageCacheRowViewModel> VisibleCaches { get; } = new();
 
-    private readonly ObservableCollection<VolumeStripEntry> _volumeStripEntries = new();
+    public bool ShowEmptyState => VisibleCaches.Count == 0;
 
-    /// <summary>
-    /// Volumes for the context strip, with the still-on-C: cache bytes as their movable overlay.
-    /// <para>
-    /// Exposed as a read-only list on purpose. A mutable collection property on a page makes the XAML
-    /// type generator treat the item type as XAML-constructible and emit setters for its members, which
-    /// does not compile against <c>VolumeStripEntry</c>'s init-only properties. The Space room hit the
-    /// same wall. The runtime instance is still an <see cref="ObservableCollection{T}"/>, so the strip
-    /// keeps updating live.
-    /// </para>
-    /// </summary>
-    public IReadOnlyList<VolumeStripEntry> VolumeStripEntries => _volumeStripEntries;
+    public string EmptyStateText => SelectedTab?.Kind == CacheTabKind.NotInstalled
+        ? "All supported tool caches were found on this PC."
+        : "No package caches detected on this PC.";
+
+    public InfoBarSeverity MoveAllSeverity =>
+        Caches.MoveAllHasFailures ? InfoBarSeverity.Error : InfoBarSeverity.Success;
 
     /// <summary>
     /// An explicit width for the location column, shared by the header and every row.
@@ -99,7 +82,7 @@ public sealed partial class PackageCachesPage : Page, INotifyPropertyChanged
 
     private CacheTabViewModel? _selectedTab;
 
-    /// <summary>Which tab the table is filtered to. Never null once the page has loaded.</summary>
+    /// <summary>Which selector item filters the shared list. Never null once the page has loaded.</summary>
     public CacheTabViewModel? SelectedTab
     {
         get => _selectedTab;
@@ -110,41 +93,15 @@ public sealed partial class PackageCachesPage : Page, INotifyPropertyChanged
                 return;
             }
 
-            if (_selectedTab is not null)
-            {
-                _selectedTab.IsSelected = false;
-            }
-
             _selectedTab = value;
-            _selectedTab.IsSelected = true;
             Raise(nameof(SelectedTab));
             RefreshVisible();
         }
     }
 
-    private PackageCacheRowViewModel? _selectedCache;
-
-    /// <summary>The row the inspector is describing.</summary>
-    public PackageCacheRowViewModel? SelectedCache
-    {
-        get => _selectedCache;
-        set
-        {
-            if (ReferenceEquals(value, _selectedCache))
-            {
-                return;
-            }
-
-            _selectedCache = value;
-            Raise(nameof(SelectedCache));
-            RaiseInspector();
-        }
-    }
-
     /// <summary>
-    /// The head chip: how many detected caches already sit on the Dev Drive. A fraction rather than a
-    /// byte total because the question the chip answers is "am I done here", and bytes cannot answer
-    /// that — a single large cache left behind reads as progress when counted in gigabytes.
+    /// How many detected caches already sit on the Dev Drive. A fraction rather than a byte total
+    /// answers "am I done here" without hiding a single large cache left behind.
     /// </summary>
     public string StatusText
     {
@@ -174,69 +131,9 @@ public sealed partial class PackageCachesPage : Page, INotifyPropertyChanged
     {
         get
         {
-            string? root = _volumeStripEntries
-                .FirstOrDefault(entry => !entry.IsSystemVolume)?.Volume.RootPath;
-            return string.IsNullOrWhiteSpace(root) || root.Length < 2
-                ? "your Dev Drive"
-                : root[..2];
-        }
-    }
-
-    /// <summary>
-    /// What every inspector section says when the selected band is empty. A blank line under a
-    /// section label reads as a bug; an em dash reads as "there is nothing here", which is the truth.
-    /// </summary>
-    private const string NothingSelected = "\u2014";
-
-    /// <summary>Where the selected cache is today, or the guidance for one we could not find.</summary>
-    public string InspectorLocation =>
-        SelectedCache is null ? NothingSelected
-        : SelectedCache.IsNotFound && !SelectedCache.IsMapped
-            ? "We didn't find this tool's cache. If you use it, point us at the folder and we'll track it."
-            : SelectedCache.ResolvedPath;
-
-    /// <summary>Where moving would put it, or why there is nowhere to put it.</summary>
-    public string InspectorDestination
-    {
-        get
-        {
-            if (SelectedCache is null)
-            {
-                return NothingSelected;
-            }
-
-            if (!Caches.HasDevDrive)
-            {
-                return "This PC has no Dev Drive yet, so there is nowhere to move caches to. Create one in the Create room.";
-            }
-
-            return SelectedCache.IsOnDevDrive
-                ? "Already on your Dev Drive."
-                : SelectedCache.CanMove
-                    ? "Your Dev Drive, under the tool's own folder. The original stays until you confirm."
-                    : "Nothing to move until this tool's cache exists.";
-        }
-    }
-
-    /// <summary>What the move actually does to the machine — the "should I" the inspector exists for.</summary>
-    public string InspectorEffect
-    {
-        get
-        {
-            if (SelectedCache is null)
-            {
-                return NothingSelected;
-            }
-
-            if (SelectedCache.IsOnDevDrive)
-            {
-                return "Nothing further. This cache already reads and writes on the Dev Drive, where "
-                    + "antivirus runs in async mode.";
-            }
-
-            return "The cache is copied to your Dev Drive and the tool's per-user environment variable "
-                + "is repointed at the copy. Nothing is deleted, and a receipt is kept so \u201CMove back\u201D "
-                + "can undo it.";
+            char? letter = App.Shared.Volumes
+                .FirstOrDefault(row => row.IsDevDrive && row.Volume.DriveLetter.HasValue)?.Volume.DriveLetter;
+            return letter is { } driveLetter ? $"{driveLetter}:" : "your Dev Drive";
         }
     }
 
@@ -245,8 +142,8 @@ public sealed partial class PackageCachesPage : Page, INotifyPropertyChanged
         Caches.CachesChanged += OnCachesChanged;
         Caches.InventoryReset += OnInventoryReset;
         Caches.PropertyChanged += OnCachesPropertyChanged;
-        _selectedTab ??= Tabs[0];
-        _selectedTab.IsSelected = true;
+        _selectedTab ??= CacheSelector.SelectedItem == NotInstalledSelector ? NotInstalledTab : DetectedTab;
+        CacheSelector.SelectedItem ??= DetectedSelector;
         Raise(nameof(SelectedTab));
         HookRows();
         Regroup();
@@ -263,6 +160,16 @@ public sealed partial class PackageCachesPage : Page, INotifyPropertyChanged
         }
 
         _hooked.Clear();
+        _activeDialog?.Hide();
+        if (Caches.IsConfirmingMoveAll)
+        {
+            Caches.CancelMoveAllCommand.Execute(null);
+        }
+
+        if (_pendingRowConfirmation?.IsConfirmingMove == true)
+        {
+            _pendingRowConfirmation.CancelMoveCommand.Execute(null);
+        }
     }
 
     private void OnCachesChanged(object? sender, System.EventArgs e)
@@ -273,10 +180,29 @@ public sealed partial class PackageCachesPage : Page, INotifyPropertyChanged
 
     private void OnInventoryReset(object? sender, System.EventArgs e) => Regroup();
 
-    private void OnCachesPropertyChanged(object? sender, PropertyChangedEventArgs e) => UpdateStatusBar();
+    private void OnCachesPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(PackageCachesViewModel.IsConfirmingMoveAll)
+            && !Caches.IsConfirmingMoveAll)
+        {
+            _moveAllDialog?.Hide();
+        }
+
+        if (e.PropertyName == nameof(PackageCachesViewModel.MoveAllHasFailures))
+        {
+            Raise(nameof(MoveAllSeverity));
+        }
+    }
 
     private void OnRowPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (e.PropertyName == nameof(PackageCacheRowViewModel.IsConfirmingMove)
+            && ReferenceEquals(sender, _pendingRowConfirmation)
+            && _pendingRowConfirmation?.IsConfirmingMove == false)
+        {
+            _activeDialog?.Hide();
+        }
+
         // A move's progress ticks (MoveProgressPercent and friends) must not churn the lists, so only
         // the properties that change which band a row belongs to — or how big it is — re-band.
         if (e.PropertyName is nameof(PackageCacheRowViewModel.CanMove)
@@ -286,10 +212,6 @@ public sealed partial class PackageCachesPage : Page, INotifyPropertyChanged
             or nameof(PackageCacheRowViewModel.SizeBytes))
         {
             Regroup();
-            if (ReferenceEquals(sender, SelectedCache))
-            {
-                RaiseInspector();
-            }
         }
     }
 
@@ -311,7 +233,7 @@ public sealed partial class PackageCachesPage : Page, INotifyPropertyChanged
         }
     }
 
-    /// <summary>Recomputes the tab counts, then the table, strip and status bar.</summary>
+    /// <summary>Recomputes the tab counts, then the visible rows and status.</summary>
     private void Regroup()
     {
         // Without a Dev Drive there is nothing to move to, so "not installed" stops being about a
@@ -324,19 +246,12 @@ public sealed partial class PackageCachesPage : Page, INotifyPropertyChanged
         }
 
         RefreshVisible();
-        RefreshVolumeStrip();
         Raise(nameof(StatusText));
-        UpdateStatusBar();
     }
 
-    /// <summary>
-    /// Rebuilds the table in place rather than reassigning the collection, so the ListView keeps its
-    /// scroll position and its selection across a move.
-    /// </summary>
+    /// <summary>Rebuilds the selected tab without replacing the collection bound to the list.</summary>
     private void RefreshVisible()
     {
-        PackageCacheRowViewModel? wasSelected = SelectedCache;
-
         List<PackageCacheRowViewModel> rows = InTab(SelectedTab?.Kind ?? CacheTabKind.Detected).ToList();
         VisibleCaches.Clear();
         foreach (PackageCacheRowViewModel row in rows)
@@ -344,13 +259,8 @@ public sealed partial class PackageCachesPage : Page, INotifyPropertyChanged
             VisibleCaches.Add(row);
         }
 
-        // Re-point the inspector rather than blanking it: a row that is still on screen after a
-        // regroup is still the row the user was reading about. Falling back to the first row rather
-        // than to null keeps the inspector answering something — unlike Reclaim, selection here is a
-        // reading cursor, not a delete list, so a default costs nothing.
-        SelectedCache = wasSelected is not null && rows.Contains(wasSelected)
-            ? wasSelected
-            : rows.FirstOrDefault();
+        Raise(nameof(ShowEmptyState));
+        Raise(nameof(EmptyStateText));
     }
 
     /// <summary>
@@ -385,106 +295,6 @@ public sealed partial class PackageCachesPage : Page, INotifyPropertyChanged
 
     private CacheTabViewModel Tab(CacheTabKind kind) => Tabs.First(t => t.Kind == kind);
 
-    private bool IsStillOnSystemDrive(PackageCacheRowViewModel row) =>
-        Caches.HasDevDrive && !row.IsOnDevDrive && row.CanMove;
-
-    private static ulong Sum(IEnumerable<PackageCacheRowViewModel> rows) =>
-        rows.Aggregate(0UL, (total, row) => total + row.SizeBytes);
-
-    /// <summary>
-    /// The strip, with the bytes that would leave the system drive shown as its movable band — the
-    /// same slot Reclaim uses for bytes that would be deleted. A move is not a delete, but from the
-    /// volume's point of view the outcome is identical, which is what the bar is drawing.
-    /// </summary>
-    private void RefreshVolumeStrip()
-    {
-        IReadOnlyList<StorageVolume> volumes;
-        try
-        {
-            volumes = _volumeProvider.GetFixedVolumes();
-        }
-        catch (IOException)
-        {
-            // A volume disappearing mid-session is a real event, not a bug. The room is still usable
-            // without its strip, so this degrades rather than taking the page down.
-            _volumeStripEntries.Clear();
-            return;
-        }
-        catch (UnauthorizedAccessException)
-        {
-            _volumeStripEntries.Clear();
-            return;
-        }
-
-        string? systemRoot = Path.GetPathRoot(Environment.SystemDirectory);
-        Dictionary<string, long> movableByRoot = new(StringComparer.OrdinalIgnoreCase);
-        foreach (PackageCacheRowViewModel row in Caches.Caches.Where(IsStillOnSystemDrive))
-        {
-            string? root = SafeRoot(row.ResolvedPath);
-            if (root is null)
-            {
-                continue;
-            }
-
-            long bytes = (long)Math.Min(row.SizeBytes, long.MaxValue);
-            movableByRoot[root] = movableByRoot.TryGetValue(root, out long existing) ? existing + bytes : bytes;
-        }
-
-        _volumeStripEntries.Clear();
-        foreach (VolumeStripEntry entry in VolumeStrip.Build(volumes, systemRoot, movableByRoot))
-        {
-            _volumeStripEntries.Add(entry);
-        }
-    }
-
-    /// <summary>
-    /// A cache path can be anything the user typed into the map box, so this never throws: an
-    /// unusable path contributes nothing to the strip rather than taking the room down.
-    /// </summary>
-    private static string? SafeRoot(string path)
-    {
-        if (string.IsNullOrWhiteSpace(path))
-        {
-            return null;
-        }
-
-        try
-        {
-            string? root = Path.GetPathRoot(path);
-            return string.IsNullOrWhiteSpace(root) ? null : root;
-        }
-        catch (ArgumentException)
-        {
-            return null;
-        }
-    }
-
-    private void UpdateStatusBar()
-    {
-        StatusBar.Facts.Clear();
-
-        if (Caches.IsCalculating)
-        {
-            StatusBar.Facts.Add(new StatusFact("Measuring caches"));
-        }
-
-        if (!Caches.HasDevDrive)
-        {
-            StatusBar.Facts.Add(new StatusFact("No Dev Drive on this PC", StatusEmphasis.Warn));
-        }
-
-        ulong onSystem = Sum(Caches.Caches.Where(IsStillOnSystemDrive));
-        StatusBar.Facts.Add(onSystem > 0UL
-            ? new StatusFact($"{ByteSizeFormatter.Format(onSystem)} still on C:", StatusEmphasis.Warn)
-            : new StatusFact("Nothing left to move", StatusEmphasis.Good));
-
-        ulong placed = Sum(Caches.Caches.Where(row => row.IsOnDevDrive));
-        if (placed > 0UL)
-        {
-            StatusBar.Facts.Add(new StatusFact($"{ByteSizeFormatter.Format(placed)} on your Dev Drive", StatusEmphasis.Good));
-        }
-    }
-
     /// <summary>
     /// Measures the table card, not the header grid. Measuring the header would feed back on itself:
     /// a wider location column grows the header's desired width, the grid is arranged at that desired
@@ -492,7 +302,7 @@ public sealed partial class PackageCachesPage : Page, INotifyPropertyChanged
     /// </summary>
     private void TableCard_SizeChanged(object sender, SizeChangedEventArgs args)
     {
-        double available = Math.Max(140, args.NewSize.Width - TableFixedColumnsWidth);
+        double available = Math.Max(180, args.NewSize.Width - TableFixedColumnsWidth);
         if (Math.Abs(available - _locationColumnWidth) < 0.5)
         {
             return;
@@ -503,24 +313,193 @@ public sealed partial class PackageCachesPage : Page, INotifyPropertyChanged
     }
 
     /// <summary>
-    /// Switches tabs. A Click handler rather than a bound command because the tab strip is chrome —
-    /// the page owns which rows are visible, not the shared ViewModel, which several rooms share.
+    /// Let the native selector own focus, selection, and visual states; only filter the shared rows.
     /// </summary>
-    private void SelectTab_Click(object sender, RoutedEventArgs e)
+    private void CacheSelector_SelectionChanged(SelectorBar sender, SelectorBarSelectionChangedEventArgs args)
     {
-        if (sender is FrameworkElement { Tag: CacheTabViewModel tab })
+        if (sender.SelectedItem == DetectedSelector)
         {
-            SelectedTab = tab;
+            SelectedTab = DetectedTab;
+        }
+        else if (sender.SelectedItem == NotInstalledSelector)
+        {
+            SelectedTab = NotInstalledTab;
         }
     }
 
     private void Raise(string property) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(property));
 
-    private void RaiseInspector()
+    private async void MoveAll_Click(object sender, RoutedEventArgs e)
     {
-        Raise(nameof(InspectorLocation));
-        Raise(nameof(InspectorDestination));
-        Raise(nameof(InspectorEffect));
+        if (_dialogOpen || !IsLoaded || XamlRoot is null || !Caches.MoveAllCommand.CanExecute(null))
+        {
+            return;
+        }
+
+        try
+        {
+            Caches.MoveAllCommand.Execute(null);
+            if (!Caches.IsConfirmingMoveAll)
+            {
+                return;
+            }
+
+            bool confirmed = await ShowConfirmationDialogAsync(
+                "Move all package caches?",
+                Caches.MoveAllConfirmBodyText,
+                "Move all",
+                "MoveAllConfirmDialog",
+                isMoveAll: true);
+            if (confirmed && IsLoaded && Caches.ConfirmMoveAllCommand.CanExecute(null))
+            {
+                await Caches.ConfirmMoveAllCommand.ExecuteAsync(null);
+            }
+        }
+        catch (Exception ex)
+        {
+            ReportActionError("Move all", ex);
+        }
+        finally
+        {
+            if (Caches.IsConfirmingMoveAll)
+            {
+                Caches.CancelMoveAllCommand.Execute(null);
+            }
+        }
+    }
+
+    private async void MoveCache_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: PackageCacheRowViewModel row })
+        {
+            await RequestRowConfirmationAsync(row, row.MoveCommand);
+        }
+    }
+
+    private async void MapPath_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: PackageCacheRowViewModel row })
+        {
+            await RequestRowConfirmationAsync(row, row.MapPathActionCommand);
+        }
+    }
+
+    private async void MoveAndRemap_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: PackageCacheRowViewModel row })
+        {
+            await RequestRowConfirmationAsync(row, row.MoveAndRemapCommand);
+        }
+    }
+
+    private async System.Threading.Tasks.Task RequestRowConfirmationAsync(
+        PackageCacheRowViewModel row,
+        ICommand command)
+    {
+        if (_dialogOpen || !IsLoaded || XamlRoot is null
+            || !Caches.Caches.Contains(row) || !command.CanExecute(null))
+        {
+            return;
+        }
+
+        try
+        {
+            command.Execute(null);
+            if (!row.IsConfirmingMove)
+            {
+                return;
+            }
+
+            _pendingRowConfirmation = row;
+            string title = row.PendingAction switch
+            {
+                PendingCacheAction.Map => $"Map {row.Header} cache?",
+                PendingCacheAction.Remap => $"Move and remap {row.Header} cache?",
+                _ => $"Move {row.Header} cache?",
+            };
+            string action = row.PendingAction switch
+            {
+                PendingCacheAction.Map => "Map path",
+                PendingCacheAction.Remap => "Move & remap",
+                _ => "Move",
+            };
+
+            bool confirmed = await ShowConfirmationDialogAsync(
+                title, row.MoveConfirmBodyText, action, row.MoveConfirmDialogAutomationId);
+            if (confirmed && IsLoaded && Caches.Caches.Contains(row)
+                && row.IsConfirmingMove && row.ConfirmMoveCommand.CanExecute(null))
+            {
+                row.ConfirmMoveCommand.Execute(null);
+            }
+        }
+        catch (Exception ex)
+        {
+            ReportActionError($"Updating {row.Header} cache", ex);
+        }
+        finally
+        {
+            if (row.IsConfirmingMove)
+            {
+                row.CancelMoveCommand.Execute(null);
+            }
+
+            _pendingRowConfirmation = null;
+        }
+    }
+
+    private async System.Threading.Tasks.Task<bool> ShowConfirmationDialogAsync(
+        string title, string body, string action, string automationId, bool isMoveAll = false)
+    {
+        if (_dialogOpen || !IsLoaded || XamlRoot is null)
+        {
+            return false;
+        }
+
+        var dialog = new ContentDialog
+        {
+            Title = title,
+            Content = new TextBlock
+            {
+                Text = body,
+                TextWrapping = TextWrapping.Wrap,
+                IsTextSelectionEnabled = true,
+            },
+            PrimaryButtonText = action,
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Close,
+            XamlRoot = XamlRoot,
+        };
+        ApplyDialogStyle(dialog);
+        AutomationProperties.SetAutomationId(dialog, automationId);
+
+        _dialogOpen = true;
+        _activeDialog = dialog;
+        if (isMoveAll)
+        {
+            _moveAllDialog = dialog;
+        }
+
+        try
+        {
+            return await dialog.ShowAsync() == ContentDialogResult.Primary;
+        }
+        finally
+        {
+            _dialogOpen = false;
+            _activeDialog = null;
+            if (isMoveAll)
+            {
+                _moveAllDialog = null;
+            }
+        }
+    }
+
+    private void ReportActionError(string action, Exception exception)
+    {
+        System.Diagnostics.Debug.WriteLine($"[caches] {action} failed: {exception}");
+        CachesActionError.Title = $"{action} failed";
+        CachesActionError.Message = exception.Message;
+        CachesActionError.IsOpen = true;
     }
 
     private bool _pickerOpen;
@@ -575,6 +554,11 @@ public sealed partial class PackageCachesPage : Page, INotifyPropertyChanged
     /// </summary>
     private async void LearnAboutCacheMoves_Click(object sender, RoutedEventArgs e)
     {
+        if (_dialogOpen || !IsLoaded)
+        {
+            return;
+        }
+
         string docPath = Path.Combine(AppContext.BaseDirectory, "docs", "PackageCacheMoves.md");
         string body;
         try
@@ -592,7 +576,14 @@ public sealed partial class PackageCachesPage : Page, INotifyPropertyChanged
                 + "a reversible receipt so you can move it back at any time.";
         }
 
-        await ShowDocDialogAsync("What moving a package cache does", body, "LearnAboutCacheMovesDialog");
+        try
+        {
+            await ShowDocDialogAsync("What moving a package cache does", body, "LearnAboutCacheMovesDialog");
+        }
+        catch (Exception ex)
+        {
+            ReportActionError("Opening cache guide", ex);
+        }
     }
 
     /// <summary>Shows a long-form, selectable read-only doc in a scrollable content dialog.</summary>
@@ -602,7 +593,7 @@ public sealed partial class PackageCachesPage : Page, INotifyPropertyChanged
     /// </remarks>
     private async System.Threading.Tasks.Task ShowDocDialogAsync(string title, string message, string automationId)
     {
-        if (_dialogOpen)
+        if (_dialogOpen || !IsLoaded || XamlRoot is null)
         {
             return;
         }
@@ -629,6 +620,7 @@ public sealed partial class PackageCachesPage : Page, INotifyPropertyChanged
         AutomationProperties.SetAutomationId(dialog, automationId);
 
         _dialogOpen = true;
+        _activeDialog = dialog;
         try
         {
             await dialog.ShowAsync();
@@ -636,6 +628,7 @@ public sealed partial class PackageCachesPage : Page, INotifyPropertyChanged
         finally
         {
             _dialogOpen = false;
+            _activeDialog = null;
         }
     }
 
@@ -648,15 +641,9 @@ public sealed partial class PackageCachesPage : Page, INotifyPropertyChanged
     }
 
     /// <summary>
-    /// Forwards each row's AutomationId onto the generated <c>ListViewItem</c>.
+    /// Forwards the row's AutomationId onto the generated <c>ListViewItem</c>, so recycled rows
+    /// remain discoverable by assistive technology and UI automation.
     /// </summary>
-    /// <remarks>
-    /// The id used to live on the template's layout-only root Grid, which surfaces as a UIA Group
-    /// with no SelectionItem pattern -- reachable, but not selectable by that id. A screen reader
-    /// (and any automation on a desktop where injected input is refused) selects through
-    /// SelectionItem, so the id has to be on the container. <c>AutomationProperties.Name</c> stays
-    /// on the template root, where it describes the row's contents.
-    /// </remarks>
     private void Caches_ContainerContentChanging(
         ListViewBase sender,
         ContainerContentChangingEventArgs args)

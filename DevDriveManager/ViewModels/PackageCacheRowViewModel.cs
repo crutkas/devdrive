@@ -9,7 +9,7 @@ using DevDriveCore.Services;
 namespace DevDriveManager.ViewModels;
 
 /// <summary>
-/// Which action the inline confirm will perform when accepted. Defaults to <see cref="Move"/> so the
+/// Which action confirmation will perform when accepted. Defaults to <see cref="Move"/> so the
 /// existing confirm path (and tests that execute <c>ConfirmMoveCommand</c> directly) keep moving.
 /// </summary>
 public enum PendingCacheAction
@@ -27,7 +27,7 @@ public enum PendingCacheAction
 /// <summary>
 /// Row VM for one developer tool's package cache. Detection data is immutable; only the size loads
 /// asynchronously (so the row shows "calculating…" then the real size). The Move command is GATED —
-/// it opens an inline, preview-only confirm (owned by this row) and changes nothing.
+/// it requests confirmation before any mutation (owned by this row).
 /// </summary>
 /// <remarks>
 /// Speed <em>testing</em> ("what does moving this cache get me?") now lives in the unified Performance
@@ -108,9 +108,7 @@ public partial class PackageCacheRowViewModel : ObservableObject
         string token = FolderToken(info.Name);
         RowAutomationId = $"PackageCacheCard_{token}";
         MoveButtonAutomationId = $"MoveCache_{token}";
-        MoveConfirmPanelAutomationId = $"MoveConfirm_{token}";
-        ConfirmMoveButtonAutomationId = $"ConfirmMove_{token}";
-        CancelMoveButtonAutomationId = $"CancelMove_{token}";
+        MoveConfirmDialogAutomationId = $"MoveConfirm_{token}";
         CancelActiveMoveButtonAutomationId = $"CancelActiveMove_{token}";
         MoveResultAutomationId = $"MoveResult_{token}";
         MoveBackButtonAutomationId = $"MoveBack_{token}";
@@ -179,18 +177,11 @@ public partial class PackageCacheRowViewModel : ObservableObject
     /// <summary>True when the cache directory does not exist.</summary>
     public bool IsNotFound { get; }
 
-    /// <summary>Dim "Not found" rows so the actionable rows stand out.</summary>
-    public double RowOpacity => IsNotFound ? 0.5 : 1.0;
-
     public string RowAutomationId { get; }
 
     public string MoveButtonAutomationId { get; }
 
-    public string MoveConfirmPanelAutomationId { get; }
-
-    public string ConfirmMoveButtonAutomationId { get; }
-
-    public string CancelMoveButtonAutomationId { get; }
+    public string MoveConfirmDialogAutomationId { get; }
 
     public string CancelActiveMoveButtonAutomationId { get; }
 
@@ -226,9 +217,9 @@ public partial class PackageCacheRowViewModel : ObservableObject
         SizeText = bytes == 0UL ? "\u2014" : ByteSizeFormatter.Format(bytes);
     }
 
-    // ---- Inline "Move" confirm + REAL reversible move (M4) ---------------------------------------
+    // ---- Move confirmation and reversible move ----------------------------------------------------
 
-    /// <summary>True while this row's inline move-confirm panel is open.</summary>
+    /// <summary>True while this row has a pending confirmation.</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ShowMoveButton))]
     [NotifyPropertyChangedFor(nameof(ShowMoveBackButton))]
@@ -246,7 +237,7 @@ public partial class PackageCacheRowViewModel : ObservableObject
     [ObservableProperty]
     public partial bool ShowMoveResult { get; set; }
 
-    /// <summary>The inline-confirm body copy (built by the parent from the SAFE move plan).</summary>
+    /// <summary>Confirmation copy built by the parent from the move plan.</summary>
     [ObservableProperty]
     public partial string MoveConfirmBodyText { get; set; } = string.Empty;
 
@@ -275,7 +266,7 @@ public partial class PackageCacheRowViewModel : ObservableObject
 
     // ---- "Map path" / "Move & remap" for an UNDETECTED tool --------------------------------------
 
-    /// <summary>Which action the inline confirm will run when accepted. Defaults to <see cref="PendingCacheAction.Move"/>.</summary>
+    /// <summary>Which action confirmation will run when accepted. Defaults to <see cref="PendingCacheAction.Move"/>.</summary>
     public PendingCacheAction PendingAction { get; set; } = PendingCacheAction.Move;
 
     /// <summary>User-editable folder this tool's cache lives at (for Map / Move &amp; remap). Two-way bound.</summary>
@@ -338,7 +329,7 @@ public partial class PackageCacheRowViewModel : ObservableObject
         MoveAndRemapCommand.NotifyCanExecuteChanged();
     }
 
-    /// <summary>Parent call: open the inline confirm with the supplied (real, reversible) body copy.</summary>
+    /// <summary>Parent call: request confirmation with the supplied (real, reversible) body copy.</summary>
     public void BeginMoveConfirm(string body)
     {
         MoveConfirmBodyText = body;

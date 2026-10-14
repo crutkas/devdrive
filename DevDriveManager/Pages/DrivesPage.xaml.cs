@@ -1,11 +1,9 @@
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
-using System.IO;
 using System.Linq;
 using DevDriveManager.Controls;
 using DevDriveManager.ViewModels;
-using DevDriveStorage;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 
@@ -42,8 +40,6 @@ public sealed partial class DrivesPage : Page, INotifyPropertyChanged
     /// </summary>
     private const double FilterFixedColumnsWidth = 188 + 96 + 104 + (12 * 3) + 28 + 2;
 
-    private readonly IVolumeProvider _volumeProvider = new SystemVolumeProvider();
-    private readonly ObservableCollection<VolumeStripEntry> _volumeStripEntries = new();
     private readonly ObservableCollection<IoPathNodeViewModel> _ioPathLeft = new();
     private readonly ObservableCollection<IoPathNodeViewModel> _ioPathRight = new();
 
@@ -67,12 +63,6 @@ public sealed partial class DrivesPage : Page, INotifyPropertyChanged
         new(DriveTabKind.Volumes, "Volumes"),
         new(DriveTabKind.FilterDrivers, "Filter drivers"),
     ];
-
-    /// <summary>
-    /// The strip above the room, same control and same meaning as every other room: what each volume
-    /// looks like right now. Nothing here moves bytes, so no volume carries a movable band.
-    /// </summary>
-    public IReadOnlyList<VolumeStripEntry> VolumeStripEntries => _volumeStripEntries;
 
     /// <summary>
     /// An explicit width for whichever column absorbs the slack, shared by the header and every row.
@@ -141,8 +131,6 @@ public sealed partial class DrivesPage : Page, INotifyPropertyChanged
     private VolumeRowViewModel? _selectedVolume;
 
     private bool _refreshQueued;
-
-    private bool _volumesDirty;
 
     /// <summary>The row the inspector describes. Follows the table's selection.</summary>
     public VolumeRowViewModel? SelectedVolume
@@ -251,7 +239,6 @@ public sealed partial class DrivesPage : Page, INotifyPropertyChanged
         Raise(nameof(ShowFilters));
         Raise(nameof(ShowFilterEmptyState));
 
-        _volumesDirty = true;
         Refresh();
     }
 
@@ -293,7 +280,7 @@ public sealed partial class DrivesPage : Page, INotifyPropertyChanged
     }
 
     private void OnCollectionChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e) =>
-        RequestRefresh(volumesChanged: ReferenceEquals(sender, ViewModel.Volumes));
+        RequestRefresh();
 
     /// <summary>
     /// Only the trust facts this room actually shows are worth a refresh. <see cref="TrustFiltersViewModel"/>
@@ -308,7 +295,7 @@ public sealed partial class DrivesPage : Page, INotifyPropertyChanged
             case nameof(TrustFiltersViewModel.ShowSeeFilters):
             case nameof(TrustFiltersViewModel.CouldNotReadFilters):
             case nameof(TrustFiltersViewModel.CouldNotReadFiltersNote):
-                RequestRefresh(volumesChanged: false);
+                RequestRefresh();
                 break;
         }
     }
@@ -319,14 +306,10 @@ public sealed partial class DrivesPage : Page, INotifyPropertyChanged
     /// <remarks>
     /// A reload clears and refills two observable collections and assigns a dozen properties, so a
     /// direct <see cref="Refresh"/> per notification runs it ~20 times for one logical update. That
-    /// matters because <see cref="RefreshVolumeStrip"/> re-enumerates every fixed volume — a
-    /// CreateFile plus a DeviceIoControl per volume, synchronously, on the UI thread — and rebuilds
-    /// every card in the strip. One tick's worth of notifications is one logical change.
+    /// coalescing keeps the table and inspector in sync with one logical change.
     /// </remarks>
-    private void RequestRefresh(bool volumesChanged)
+    private void RequestRefresh()
     {
-        _volumesDirty |= volumesChanged;
-
         if (_refreshQueued)
         {
             return;
@@ -346,20 +329,13 @@ public sealed partial class DrivesPage : Page, INotifyPropertyChanged
         }
     }
 
-    /// <summary>Recomputes the tab counts, the strip, the head chip and the status bar.</summary>
+    /// <summary>Recomputes the tab counts, the head chip and the status bar.</summary>
     private void Refresh()
     {
         Tab(DriveTabKind.Volumes).Count = ViewModel.Volumes.Count;
         Tab(DriveTabKind.FilterDrivers).Count = ViewModel.Trust.Filters.Count;
 
         ResolveSelectedVolume();
-
-        // The strip costs a full volume enumeration, so it only re-runs when the volume set moved.
-        if (_volumesDirty)
-        {
-            _volumesDirty = false;
-            RefreshVolumeStrip();
-        }
 
         BuildIoPath();
 
@@ -465,34 +441,6 @@ public sealed partial class DrivesPage : Page, INotifyPropertyChanged
         Raise(nameof(InspectorWhatThisIs));
         Raise(nameof(InspectorCapacity));
         Raise(nameof(InspectorFormat));
-    }
-
-    /// <summary>
-    /// The strip, with no movable band on any volume: this room reads the machine and changes nothing,
-    /// so drawing bytes as "would leave" would be a claim it has no basis for.
-    /// </summary>
-    private void RefreshVolumeStrip()
-    {
-        IReadOnlyList<StorageVolume> volumes;
-        try
-        {
-            volumes = _volumeProvider.GetFixedVolumes();
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            // A volume disappearing mid-session is a real event, not a bug. The room is still usable
-            // without its strip, so this degrades rather than taking the page down.
-            _volumeStripEntries.Clear();
-            return;
-        }
-
-        string? systemRoot = Path.GetPathRoot(Environment.SystemDirectory);
-
-        _volumeStripEntries.Clear();
-        foreach (VolumeStripEntry entry in VolumeStrip.Build(volumes, systemRoot, new Dictionary<string, long>()))
-        {
-            _volumeStripEntries.Add(entry);
-        }
     }
 
     private void UpdateStatusBar()

@@ -1,14 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
-using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using DevDriveCore.Models;
 using DevDriveCore.Services;
-using DevDriveManager.Controls;
 using DevDriveManager.Services;
-using DevDriveManager.ViewModels;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
@@ -16,7 +13,7 @@ using Microsoft.UI.Xaml.Controls;
 namespace DevDriveManager.Pages;
 
 /// <summary>
-/// The Settings room: two cards of setting rows, no inspector, no page scroll.
+/// Native settings cards in a single responsive, scrollable column.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -39,11 +36,11 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
     // Set once the constructor has finished seeding the controls. Every SelectionChanged handler
     // gates on it, because assigning SelectedIndex raises the same event a user click does and would
     // otherwise persist the value we only just read.
-    private bool _ready;
+    private bool _isReady;
 
     // Guards ContentDialog re-entrancy: WinUI allows one dialog at a time and a second ShowAsync
     // throws, which a double-click on any of this page's explainer buttons would otherwise reach.
-    private bool _dialogOpen;
+    private bool _isDialogOpen;
 
     private int _historyCount;
     private DateTimeOffset? _historyOldest;
@@ -66,19 +63,12 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
         SelectByTag(RetentionCombo, prefs.HistoryRetentionDays);
         CreationMethodCombo.SelectedIndex = prefs.PreferResizeOverVhdx ? 0 : 1;
 
-        _ready = true;
+        _isReady = true;
 
         ReadHistory();
-        UpdateStatus();
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
-
-    /// <summary>The shared, already-loaded app view model.</summary>
-    public MainPageViewModel ViewModel => App.Shared;
-
-    /// <summary>Everything this build is capable of writing. Constant for the life of the app.</summary>
-    public IReadOnlyList<WriteSurfaceViewModel> WriteSurfaces => WriteSurfaceViewModel.All;
 
     /// <summary>App name + version line.</summary>
     public string AppVersionText
@@ -111,7 +101,6 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
             }
 
             PreferencesService.Update(p => p with { WatchCachesOffDevDrive = value });
-            UpdateStatus();
         }
     }
 
@@ -127,7 +116,6 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
             }
 
             PreferencesService.Update(p => p with { RecordFreeSpaceHistory = value });
-            UpdateStatus();
         }
     }
 
@@ -150,7 +138,7 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
 
     private void ThemeSelector_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (!_ready)
+        if (!_isReady)
         {
             return;
         }
@@ -165,16 +153,15 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
 
     private void LowFreeCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (_ready && TagOf(LowFreeCombo) is { } percent)
+        if (_isReady && TagOf(LowFreeCombo) is { } percent)
         {
             PreferencesService.Update(p => p with { LowFreePercent = percent });
-            UpdateStatus();
         }
     }
 
     private void RollupCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (_ready && TagOf(RollupCombo) is { } threshold)
+        if (_isReady && TagOf(RollupCombo) is { } threshold)
         {
             PreferencesService.Update(p => p with { CacheRollupThreshold = threshold });
         }
@@ -182,16 +169,15 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
 
     private void RetentionCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (_ready && TagOf(RetentionCombo) is { } days)
+        if (_isReady && TagOf(RetentionCombo) is { } days)
         {
             PreferencesService.Update(p => p with { HistoryRetentionDays = days });
-            UpdateStatus();
         }
     }
 
     private void CreationMethodCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (_ready)
+        if (_isReady)
         {
             bool resize = CreationMethodCombo.SelectedIndex == 0;
             PreferencesService.Update(p => p with { PreferResizeOverVhdx = resize });
@@ -199,14 +185,19 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
     }
 
     /// <summary>
-    /// Clears the recorded readings. No confirmation: the data is a chart this app drew for itself,
-    /// it regenerates from the next load, and nothing else on the machine depends on it.
+    /// Deletes saved readings only after explicit confirmation. Past readings cannot be recreated.
     /// </summary>
-    private void ClearHistory_Click(object sender, RoutedEventArgs e)
+    private async void ClearHistory_Click(object sender, RoutedEventArgs e)
     {
+        if (!await ConfirmAsync("Clear free-space history?",
+            $"{HistorySummaryText}. All saved readings will be permanently deleted. New readings can still be recorded.",
+            "Clear history", "ClearHistoryConfirmDialog"))
+        {
+            return;
+        }
+
         _history.Clear();
         ReadHistory();
-        UpdateStatus();
     }
 
     /// <summary>
@@ -214,50 +205,51 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
     /// combos are the source of truth for what the user sees, and a reset that left them showing the
     /// old values would look like it had failed.
     /// </summary>
-    private void ResetPreferences_Click(object sender, RoutedEventArgs e)
+    private async void ResetPreferences_Click(object sender, RoutedEventArgs e)
     {
+        if (!await ConfirmAsync("Reset app preferences?",
+            "Restore warning thresholds, cache signals, history recording and retention, and the default creation method. Your theme and saved history will not change.",
+            "Reset", "ResetPreferencesConfirmDialog"))
+        {
+            return;
+        }
+
         PreferencesService.Reset();
 
         AppPreferences prefs = PreferencesService.Current;
-        _ready = false;
+        _isReady = false;
         SelectByTag(LowFreeCombo, prefs.LowFreePercent);
         SelectByTag(RollupCombo, prefs.CacheRollupThreshold);
         SelectByTag(RetentionCombo, prefs.HistoryRetentionDays);
         CreationMethodCombo.SelectedIndex = prefs.PreferResizeOverVhdx ? 0 : 1;
-        _ready = true;
+        _isReady = true;
 
         // The theme is persisted by ThemeService rather than AppPreferences, so it is deliberately
         // left alone: someone who pinned the app to Light did not ask for that to be undone by a
         // button labelled "reset to defaults" sitting under a list of signal thresholds.
         Raise(nameof(WatchCachesOffDevDrive));
         Raise(nameof(RecordFreeSpaceHistory));
-        UpdateStatus();
     }
 
-    /// <summary>
-    /// Opens the bundled explainer (<c>docs\PackageCacheMoves.md</c>, copied next to the app) in a
-    /// scrollable read-only dialog — the same content the Caches room surfaces.
-    /// </summary>
-    private async void LearnAboutCacheMoves_Click(object sender, RoutedEventArgs e)
+    private async void Source_Click(object sender, RoutedEventArgs e)
     {
-        string docPath = Path.Combine(AppContext.BaseDirectory, "docs", "PackageCacheMoves.md");
-        string body;
+        const string repositoryUrl = "https://github.com/crutkas/devdrive";
+        string message;
         try
         {
-            body = File.Exists(docPath)
-                ? await File.ReadAllTextAsync(docPath)
-                : "The package-cache explainer couldn't be found in this build. Moving a cache "
-                    + "relocates it to your Dev Drive and repoints the per-user environment variable, "
-                    + "leaving a reversible receipt so you can move it back at any time.";
+            if (await Windows.System.Launcher.LaunchUriAsync(new Uri(repositoryUrl)))
+            {
+                return;
+            }
+
+            message = $"Windows could not open your browser. Visit {repositoryUrl}.";
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        catch (System.Runtime.InteropServices.COMException ex)
         {
-            body = "Couldn't open the package-cache explainer (" + ex.Message + "). Moving a cache "
-                + "relocates it to your Dev Drive and repoints the per-user environment variable, leaving "
-                + "a reversible receipt so you can move it back at any time.";
+            message = $"Windows could not open your browser: {ex.Message}\n\nVisit {repositoryUrl}.";
         }
 
-        await ShowDocDialogAsync("What moving a package cache does", body, "SettingsLearnAboutCacheMovesDialog");
+        await ShowInfoDialogAsync("Couldn't open GitHub", message, "SourceLaunchErrorDialog");
     }
 
     // ---- Plumbing ------------------------------------------------------------------------------
@@ -267,28 +259,33 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
         IReadOnlyList<FreeSpaceSample> samples = _history.Load();
         _historyCount = samples.Count;
         _historyOldest = samples.Count == 0 ? null : samples.Min(s => s.TakenAtUtc);
-    }
-
-    /// <summary>
-    /// The room's closing edge. Settings has no rows to count, so the facts are the two answers a
-    /// reader wants confirmed after changing something: what the app is watching for, and whether it
-    /// is still recording.
-    /// </summary>
-    private void UpdateStatus()
-    {
-        AppPreferences prefs = PreferencesService.Current;
-
-        StatusBar.Facts.Clear();
-        StatusBar.Facts.Add(new StatusFact($"Warns below {prefs.LowFreePercent}% free"));
-        StatusBar.Facts.Add(prefs.WatchCachesOffDevDrive
-            ? new StatusFact("Watching for caches off the Dev Drive", StatusEmphasis.Good)
-            : new StatusFact("Not watching package caches", StatusEmphasis.Warn));
-        StatusBar.Facts.Add(prefs.RecordFreeSpaceHistory
-            ? new StatusFact($"Recording free space, keeping {prefs.HistoryRetentionDays} days")
-            : new StatusFact("Free-space history paused", StatusEmphasis.Warn));
-
         Raise(nameof(HasHistory));
         Raise(nameof(HistorySummaryText));
+    }
+
+    private async Task<bool> ConfirmAsync(string title, string message, string action, string automationId)
+    {
+        if (_isDialogOpen) return false;
+        _isDialogOpen = true;
+        try
+        {
+            var dialog = new ContentDialog
+            {
+                Title = title,
+                Content = new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap },
+                PrimaryButtonText = action,
+                CloseButtonText = "Cancel",
+                DefaultButton = ContentDialogButton.Close,
+                XamlRoot = XamlRoot,
+                Style = (Style)Application.Current.Resources["DefaultContentDialogStyle"],
+            };
+            AutomationProperties.SetAutomationId(dialog, automationId);
+            return await dialog.ShowAsync() == ContentDialogResult.Primary;
+        }
+        finally
+        {
+            _isDialogOpen = false;
+        }
     }
 
     /// <summary>Points a combo at the item whose <c>Tag</c> is this number.</summary>
@@ -318,14 +315,14 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
 
     private void Raise(string name) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
 
-    /// <summary>Shows a long-form, selectable read-only doc in a scrollable content dialog.</summary>
+    /// <summary>Shows a selectable message in a scrollable content dialog.</summary>
     /// <remarks>
     /// Guarded because WinUI allows exactly one <see cref="ContentDialog"/> at a time and a second
     /// <c>ShowAsync</c> throws. A double-click on the button is the obvious way to reach that.
     /// </remarks>
-    private async Task ShowDocDialogAsync(string title, string message, string automationId)
+    private async Task ShowInfoDialogAsync(string title, string message, string automationId)
     {
-        if (_dialogOpen)
+        if (_isDialogOpen)
         {
             return;
         }
@@ -355,14 +352,14 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
 
         AutomationProperties.SetAutomationId(dialog, automationId);
 
-        _dialogOpen = true;
+        _isDialogOpen = true;
         try
         {
             await dialog.ShowAsync();
         }
         finally
         {
-            _dialogOpen = false;
+            _isDialogOpen = false;
         }
     }
 }
