@@ -4,6 +4,13 @@ Moving a package cache (npm, NuGet, pip, Cargo, …) onto the Dev Drive is the a
 mutation. This page documents the mechanism **and, deliberately, every fallback** — what happens when a
 move is interrupted, fails a check, is cancelled, is already done, or needs to be undone.
 
+On the **Package caches** page, **Move all**, **Move**, **Map path**, and **Move & remap** show a confirmation
+dialog before changing anything. It describes the target and the per-user variable being changed;
+**Cancel** or Esc leaves the caches untouched. Move progress and results appear with the affected
+cache, and the **Move all** result appears above the list. The **Detected** and **Not installed**
+filters use a native WinUI SelectorBar over one shared ListView, so selection, focus, rows, and
+actions have the same stock WinUI behavior in both views.
+
 - Engine: `DevDriveCore/Services/PackageCacheMover.cs` (implements `IPackageCacheMover`)
 - UI orchestrator: `DevDriveCore/Services/PackageCacheMoveCoordinator.cs`
 - Options: `DevDriveCore/Models/CacheMoveOptions.cs`

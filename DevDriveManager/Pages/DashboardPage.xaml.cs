@@ -55,9 +55,7 @@ public sealed partial class DashboardPage : Page, INotifyPropertyChanged
     /// </summary>
     private static readonly TimeSpan TrendWindow = TimeSpan.FromDays(30);
 
-    private readonly IVolumeProvider _volumeProvider = new SystemVolumeProvider();
     private readonly IFreeSpaceHistoryStore _history = new JsonFreeSpaceHistoryStore();
-    private readonly ObservableCollection<VolumeStripEntry> _volumeStripEntries = [];
     private readonly ObservableCollection<AttentionSignalViewModel> _signals = [];
     private readonly ObservableCollection<InspectorFactViewModel> _biggest = [];
     private readonly ObservableCollection<InspectorFactViewModel> _coverage = [];
@@ -84,8 +82,6 @@ public sealed partial class DashboardPage : Page, INotifyPropertyChanged
     public ReclaimViewModel Reclaim => App.SharedReclaim;
 
     public StorageExplorerViewModel Space => App.SharedSpace;
-
-    public IReadOnlyList<VolumeStripEntry> VolumeStripEntries => _volumeStripEntries;
 
     public IReadOnlyList<AttentionSignalViewModel> Signals => _signals;
 
@@ -321,14 +317,11 @@ public sealed partial class DashboardPage : Page, INotifyPropertyChanged
 
     private void Refresh()
     {
-        // Both of these read the machine: the strip is a CreateFile plus a DeviceIoControl per
-        // volume, and RecordFreeSpace reads and rewrites a JSON file. Neither can produce a
-        // different answer unless the volume set actually moved, and Refresh runs on every tick of
-        // a streaming scan, so they are gated rather than coalesced.
+        // RecordFreeSpace reads and rewrites history. Only record when volume data changes,
+        // not on every tick of a streaming scan.
         if (_volumesDirty)
         {
             _volumesDirty = false;
-            RefreshVolumeStrip();
             RecordFreeSpace();
         }
 
@@ -614,30 +607,6 @@ public sealed partial class DashboardPage : Page, INotifyPropertyChanged
         Raise(nameof(MetricTwoValue));
         Raise(nameof(SelectionLabel));
         Raise(nameof(SelectionDetail));
-    }
-
-    // ---- The strip and the status bar ---------------------------------------------------------
-
-    private void RefreshVolumeStrip()
-    {
-        IReadOnlyList<StorageVolume> volumes;
-        try
-        {
-            volumes = _volumeProvider.GetFixedVolumes();
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            _volumeStripEntries.Clear();
-            return;
-        }
-
-        string? systemRoot = Path.GetPathRoot(Environment.SystemDirectory);
-
-        _volumeStripEntries.Clear();
-        foreach (VolumeStripEntry entry in VolumeStrip.Build(volumes, systemRoot, new Dictionary<string, long>()))
-        {
-            _volumeStripEntries.Add(entry);
-        }
     }
 
     private void UpdateStatusBar()

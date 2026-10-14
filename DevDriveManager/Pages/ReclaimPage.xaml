@@ -19,13 +19,7 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <!--
-            Context strip. The volume bars show what the machine looks like after the current
-            selection, which is why they update as rows are ticked rather than only after a scan.
-            The room's primary action lives here, on the strip, for the same reason the Space room
-            puts scanning on its strip: the thing you act on and the thing you act with belong
-            together.
-        -->
+        <!-- Scan commands; selection impact remains in the room's per-volume impact rows. -->
         <controls:RoomScanBar
             x:Name="ScanBar"
             Grid.Row="0"
@@ -34,10 +28,7 @@
             IsScanning="{x:Bind ViewModel.IsScanning, Mode=OneWay}"
             ScanLabel="Scan this PC"
             ScanRequested="ScanBar_ScanRequested"
-            SelectionMode="None"
-            StripAutomationId="ReclaimVolumeStrip"
-            StripAutomationName="Volumes on this machine"
-            Volumes="{x:Bind ViewModel.VolumeStripEntries}" />
+            SelectionMode="None" />
 
         <!--
             The room. Same three-column grammar as Space, and deliberately so: the category rail

@@ -221,7 +221,7 @@ Test-UI "Nav: Create Dev Drive present"     { winapp ui wait-for "NavCreate"    
 #      about any particular finding — which findings appear depends entirely on the test machine.
 # ─────────────────────────────────────────────────────────────────────────────
 Test-UI "Navigate to Overview"               { Goto "NavDashboard" "SignalsSubtitle" }
-Test-UI "Overview: volume strip"             { winapp ui wait-for "OverviewVolumeStrip"   -a $AppPid -t 3000 }
+Test-UI "Overview: no display-only volume strip" { winapp ui wait-for "OverviewVolumeStrip" -a $AppPid --gone -t 3000 }
 Test-UI "Overview: scan action"              { winapp ui wait-for "ScanBarScanButton"     -a $AppPid -t 3000 }
 Test-UI "Overview: last-scan chip"           { winapp ui wait-for "LastScanChip"          -a $AppPid -t 3000 }
 Test-UI "Overview: free-space chart card"    { winapp ui wait-for "TrendSubtitle"         -a $AppPid -t 3000 }
@@ -413,6 +413,7 @@ Test-UI "Scan grammar: picking a scope does not start a scan" {
 #  (3) Package caches — two tabs over one table: Detected, then Not installed.
 # ─────────────────────────────────────────────────────────────────────────────
 Test-UI "Navigate to Package caches"         { Goto "NavPackageCaches" "PackageCachesScrollViewer" }
+Test-UI "Caches: page owns its title"          { winapp ui wait-for "PageTitle" -a $AppPid -t 3000 }
 # The Detected tab is where the room opens. Which ecosystems are installed, and which volume each cache
 # sits on, are facts about THIS PC — so both assertions below discover the set and check the rule.
 # They used to name Cargo and npm, which is the same scar that took MapPathInput_uv red (see below).
@@ -473,7 +474,43 @@ Test-UI "Caches: back to Detected" {
     if ((Find-Ids 'PackageCacheCard_[A-Za-z0-9]+').Count -eq 0) { throw "Detected tab did not come back" }
 }
 Test-UI "Caches: Move all present"           { winapp ui wait-for "MoveAllButton"     -a $AppPid -t 3000 }
-Test-UI "Caches: 'Learn what this does' link"{ winapp ui wait-for "LearnWhatThisDoes" -a $AppPid -t 3000 }
+Test-UI "Caches: cache-move guide link"      { winapp ui wait-for "LearnWhatThisDoes" -a $AppPid -t 3000 }
+Test-UI "Caches: no inspector or footer" {
+    winapp ui wait-for "CachesInspectorName" -a $AppPid --gone -t 1000
+    winapp ui wait-for "CachesStatusBar"     -a $AppPid --gone -t 1000
+}
+Test-UI "Caches: Move all opens a dialog; Cancel preserves the list" {
+    $before = @(Find-Ids 'MoveCache_[A-Za-z0-9]+' 1500).Count
+    winapp ui invoke "MoveAllButton" -a $AppPid
+    try {
+        winapp ui wait-for "MoveAllConfirmDialog" -a $AppPid -t 3000
+        winapp ui wait-for "MoveAllConfirmPanel"  -a $AppPid --gone -t 1000
+    }
+    finally {
+        if (Test-Present "MoveAllConfirmDialog") {
+            winapp ui invoke "CloseButton" -a $AppPid 2>$null | Out-Null
+        }
+    }
+    winapp ui wait-for "MoveAllButton" -a $AppPid -t 3000
+    if (@(Find-Ids 'MoveCache_[A-Za-z0-9]+' 1500).Count -ne $before) {
+        throw "Cancelling Move all changed the available cache moves"
+    }
+}
+Test-UI "Caches: an individual move also opens a dialog" {
+    $move = @(Find-Ids 'MoveCache_[A-Za-z0-9]+' 1500 | Select-Object -First 1)
+    if ($move.Count -eq 0) { throw "No movable cache was found for the confirmation test" }
+    $dialogId = $move[0] -replace '^MoveCache_', 'MoveConfirm_'
+    winapp ui invoke $move[0] -a $AppPid
+    try {
+        winapp ui wait-for $dialogId -a $AppPid -t 3000
+    }
+    finally {
+        if (Test-Present $dialogId) {
+            winapp ui invoke "CloseButton" -a $AppPid 2>$null | Out-Null
+        }
+    }
+    winapp ui wait-for $move[0] -a $AppPid -t 3000
+}
 winapp ui screenshot -a $AppPid -o "screenshots\02-caches.png" 2>$null | Out-Null
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -647,23 +684,43 @@ Test-UI "Create: the done card offers the two next rooms" {
 winapp ui screenshot -a $AppPid -o "screenshots\08-create-complete.png" 2>$null | Out-Null
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  (7) Settings — two cards of preferences, every one of which reaches a real decision.
+#  (7) Settings — native cards and expanders, every preference reaches a real decision.
 #      The suite changes each preference, asserts the control reflects it, then puts it back, so a
 #      run leaves the machine and the app exactly as it found them.
 # ─────────────────────────────────────────────────────────────────────────────
+function Expand-SettingsGroup([string]$id) {
+    $tree = winapp ui inspect $id -a $AppPid --json --depth 2 | Out-String | ConvertFrom-Json
+    $header = $tree.windows[0].elements[0].children |
+        Where-Object className -eq 'Microsoft.UI.Xaml.Controls.Expander' | Select-Object -First 1
+    if (-not $header) { throw "No native Expander peer for $id." }
+    if ($header.expandState -ne 'expanded') {
+        winapp ui invoke $header.selector -a $AppPid | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Could not expand $id." }
+    }
+}
+
 Test-UI "Navigate to Settings" {
     winapp ui invoke "SettingsItem" -a $AppPid 2>$null | Out-Null
     Start-Sleep -Milliseconds 500
     winapp ui wait-for "ThemeSelector" -a $AppPid -t 5000 | Out-Null
 }
-Test-UI "Settings: Rescan present"           { winapp ui wait-for "RescanButton"          -a $AppPid -t 3000 }
-Test-UI "Settings: Create present"           { winapp ui wait-for "SettingsCreateButton"  -a $AppPid -t 3000 }
-Test-UI "Settings: Windows Security present" { winapp ui wait-for "SettingsOpenWindowsSecurityButton" -a $AppPid -t 3000 }
-Test-UI "Settings: two cards"                {
+Test-UI "Settings: machine action shortcuts removed" {
+    foreach ($id in @("RescanButton", "SettingsCreateButton", "SettingsManageInStorageButton", "SettingsOpenWindowsSecurityButton")) {
+        if (Test-Present $id) { throw "'$id' should not be present in Settings." }
+    }
+}
+Test-UI "Settings: grouped sections"         {
     if (-not (Test-Present "SignalSettingsHead")) { throw "Overview-and-signals card head missing" }
     winapp ui wait-for "MachineSettingsHead" -a $AppPid -t 3000
 }
-Test-UI "Settings: status bar"               { winapp ui wait-for "SettingsStatusBar"     -a $AppPid -t 3000 }
+Test-UI "Settings: obsolete content removed" {
+    winapp ui wait-for "SettingsStatusBar" -a $AppPid --gone -t 3000
+    winapp ui wait-for "WriteSurfaceHead" -a $AppPid --gone -t 3000
+}
+Test-UI "Settings: expand preference groups" {
+    Expand-SettingsGroup CacheSignalsExpander
+    Expand-SettingsGroup HistorySettingsExpander
+}
 Test-UI "Settings: reset present"            { winapp ui wait-for "ResetPreferencesButton" -a $AppPid -t 3000 }
 winapp ui screenshot -a $AppPid -o "screenshots\09-settings.png" 2>$null | Out-Null
 
@@ -678,16 +735,14 @@ foreach ($pref in @("WatchCachesToggle", "LowFreeCombo", "RollupCombo",
 # Round-trip one combo of each kind. The threshold reaches AttentionSignalBuilder and the method
 # reaches the Create room, so proving the control moves is proving the preference moves.
 Select-Combo "LowFreeCombo" "LowFree25"
-# Traced THROUGH to the status bar, not just back off the ComboBox. A control that reflects its own
-# click proves only that the click landed; the status bar reading "Warns below 25% free" is what proves
-# the preference reached a consumer. (This assertion used to sit in its own test named
-# "status bar reports the threshold" which never looked at the threshold — it checked only that the bar
-# exposed *some* facts, and so would have passed with the number wrong or the wiring cut.)
-Test-UI "Preference: low-free threshold -> 25%, and the status bar follows" {
+# Recreate the page to verify the preference reached the store, not only the ComboBox.
+Test-UI "Preference: low-free threshold -> 25%, retained across navigation" {
+    winapp ui invoke "NavDrives" -a $AppPid | Out-Null
+    winapp ui wait-for "VolumesList" -a $AppPid -t 3000 | Out-Null
+    winapp ui invoke "SettingsItem" -a $AppPid | Out-Null
     winapp ui wait-for "LowFreeCombo" -a $AppPid --value "25%" -t 3000
-    $facts = (winapp ui inspect "SettingsStatusBar" -a $AppPid --json --depth 20 2>$null | Out-String)
-    $global:LASTEXITCODE = 0
-    if ($facts -notmatch 'Warns below 25% free') { throw "status bar did not follow the threshold to 25%" }
+    Expand-SettingsGroup CacheSignalsExpander
+    Expand-SettingsGroup HistorySettingsExpander
 }
 Select-Combo "LowFreeCombo" "LowFree15"
 Test-UI "Preference: low-free threshold restored" {
