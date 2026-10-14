@@ -154,7 +154,8 @@ public sealed partial class ShellPage : Page
             PageTitle.Text = tag == "settings" ? "Settings" : RoomRegistry.Find(tag)!.Title;
             // These pages own their title row so the room's actions can sit beside the title.
             bool pageOwnsHeader = target == typeof(SpacePage) || target == typeof(PackageCachesPage) ||
-                target == typeof(DashboardPage) || target == typeof(ReclaimPage);
+                target == typeof(DashboardPage) || target == typeof(ReclaimPage) ||
+                target == typeof(DrivesPage) || target == typeof(BenchmarksPage);
             PageHeader.Visibility = pageOwnsHeader ? Visibility.Collapsed : Visibility.Visible;
             AutomationProperties.SetAutomationId(PageTitle,
                 pageOwnsHeader ? "ShellPageTitle" : tag == "settings" ? "SettingsTitle" : "PageTitle");

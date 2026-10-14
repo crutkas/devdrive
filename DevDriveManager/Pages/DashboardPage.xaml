@@ -22,9 +22,10 @@
         <!--
             Same header grammar as Space: the title and the room's one action share a row. Overview
             acts on the whole machine, so the scan bar has no strip, only its button, and the label
-            is the identical string Reclaim uses, because it is the identical act.
+            is the identical string Reclaim uses, because it is the identical act. No bottom margin:
+            the room's own 11px top padding is the gap, so it is not counted twice.
         -->
-        <Grid Grid.Row="0" Margin="18,24,18,16" ColumnSpacing="16">
+        <Grid Grid.Row="0" Margin="18,12,18,0" ColumnSpacing="16">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
