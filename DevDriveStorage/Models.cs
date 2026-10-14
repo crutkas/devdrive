@@ -38,6 +38,18 @@ public sealed record StorageProviderContext(
 
 public sealed record StorageNode
 {
+    // A scan holds over a million nodes, so per-node bytes are the snapshot's footprint. Paths are
+    // the biggest of them: a file's full path is its folder's path plus its name, and storing it
+    // whole cost more memory than every other node field together. A file made by InFolder keeps a
+    // reference to its folder's path string (one shared instance per folder) and joins on read.
+    private readonly string _path;
+    private readonly bool _pathIsFolder;
+    private readonly long _modifiedUtcTicks;
+
+    // Apparent size and provider context are set on a few percent of nodes; one optional reference
+    // costs every other node 8 bytes instead of 24.
+    private readonly RareMetadata? _rare;
+
     public StorageNode(
         Guid id,
         Guid? parentId,
@@ -49,6 +61,24 @@ public sealed record StorageNode
         DateTimeOffset modifiedAtUtc,
         StorageProviderContext? provider,
         long? logicalBytes = null)
+        : this(id, parentId, name, physicalPath, pathIsFolder: false, kind, sizeBytes, itemCount,
+            modifiedAtUtc.UtcTicks, provider, logicalBytes)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(physicalPath);
+    }
+
+    private StorageNode(
+        Guid id,
+        Guid? parentId,
+        string name,
+        string path,
+        bool pathIsFolder,
+        StorageNodeKind kind,
+        long sizeBytes,
+        int itemCount,
+        long modifiedUtcTicks,
+        StorageProviderContext? provider,
+        long? logicalBytes)
     {
         if (id == Guid.Empty)
         {
@@ -56,7 +86,6 @@ public sealed record StorageNode
         }
 
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        ArgumentException.ThrowIfNullOrWhiteSpace(physicalPath);
         ArgumentOutOfRangeException.ThrowIfNegative(sizeBytes);
         ArgumentOutOfRangeException.ThrowIfNegative(itemCount);
         if (kind == StorageNodeKind.File && itemCount != 0)
@@ -69,16 +98,37 @@ public sealed record StorageNode
             ArgumentOutOfRangeException.ThrowIfNegative(logical, nameof(logicalBytes));
         }
 
-        LogicalBytes = logicalBytes;
         Id = id;
         ParentId = parentId;
         Name = name;
-        PhysicalPath = physicalPath;
+        _path = path;
+        _pathIsFolder = pathIsFolder;
         Kind = kind;
         SizeBytes = sizeBytes;
         ItemCount = itemCount;
-        ModifiedAtUtc = modifiedAtUtc;
-        Provider = provider;
+        _modifiedUtcTicks = modifiedUtcTicks;
+        _rare = RareMetadata.Create(logicalBytes, provider);
+    }
+
+    /// <summary>
+    /// A node whose <see cref="PhysicalPath"/> is <paramref name="folderPath"/> joined with
+    /// <paramref name="name"/>, built on read. Pass the folder's own path instance so every child
+    /// shares it rather than carrying a copy.
+    /// </summary>
+    internal static StorageNode InFolder(
+        Guid id,
+        Guid parentId,
+        string name,
+        string folderPath,
+        StorageNodeKind kind,
+        long sizeBytes,
+        DateTimeOffset modifiedAtUtc,
+        StorageProviderContext? provider,
+        long? logicalBytes)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(folderPath);
+        return new StorageNode(id, parentId, name, folderPath, pathIsFolder: true, kind, sizeBytes, 0,
+            modifiedAtUtc.UtcTicks, provider, logicalBytes);
     }
 
     public Guid Id { get; init; }
@@ -87,7 +137,16 @@ public sealed record StorageNode
 
     public string Name { get; init; }
 
-    public string PhysicalPath { get; init; }
+    public string PhysicalPath
+    {
+        get => _pathIsFolder ? Path.Combine(_path, Name) : _path;
+        init
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(value);
+            _path = value;
+            _pathIsFolder = false;
+        }
+    }
 
     public StorageNodeKind Kind { get; init; }
 
@@ -95,15 +154,27 @@ public sealed record StorageNode
 
     public int ItemCount { get; init; }
 
-    public DateTimeOffset ModifiedAtUtc { get; init; }
+    public DateTimeOffset ModifiedAtUtc
+    {
+        get => new(_modifiedUtcTicks, TimeSpan.Zero);
+        init => _modifiedUtcTicks = value.UtcTicks;
+    }
 
-    public StorageProviderContext? Provider { get; init; }
+    public StorageProviderContext? Provider
+    {
+        get => _rare?.Provider;
+        init => _rare = RareMetadata.Create(LogicalBytes, value);
+    }
 
     /// <summary>
     /// Apparent size on disk when it differs from the bytes actually allocated —
     /// sparse virtual disks and copy-on-write clones are the common cases.
     /// </summary>
-    public long? LogicalBytes { get; init; }
+    public long? LogicalBytes
+    {
+        get => _rare?.LogicalBytes;
+        init => _rare = RareMetadata.Create(value, Provider);
+    }
 
     /// <summary>
     /// Whether this node's bytes have actually been counted. A streaming scan discovers a folder
@@ -140,6 +211,12 @@ public sealed record StorageNode
         ?? (Kind == StorageNodeKind.Folder ? "Physical folder" : "Physical file");
 
     public string ModifiedDisplay => ModifiedAtUtc.ToString("MMM d · HH:mm");
+
+    private sealed record RareMetadata(long? LogicalBytes, StorageProviderContext? Provider)
+    {
+        public static RareMetadata? Create(long? logicalBytes, StorageProviderContext? provider) =>
+            logicalBytes is null && provider is null ? null : new(logicalBytes, provider);
+    }
 }
 
 public sealed record ScanCoverage
@@ -330,18 +407,11 @@ public sealed class StorageSnapshot
         // A plain dictionary, sized up front: an immutable dictionary builds an AVL tree, which on a
         // million-node volume was most of the cost of constructing the snapshot. Nothing mutates it.
         var builder = new Dictionary<Guid, StorageNode>(nodes.Length);
-        var paths = new HashSet<string>(nodes.Length, StringComparer.OrdinalIgnoreCase);
         foreach (StorageNode node in nodes)
         {
             if (!builder.TryAdd(node.Id, node))
             {
                 throw new StorageSnapshotValidationException($"Duplicate node ID: {node.Id}.");
-            }
-
-            if (!paths.Add(node.PhysicalPath))
-            {
-                throw new StorageSnapshotValidationException(
-                    $"Duplicate physical path: {node.PhysicalPath}.");
             }
         }
 
@@ -380,6 +450,8 @@ public sealed class StorageSnapshot
     /// Groups children under their parent once, in the display order <see cref="ChildrenOf"/>
     /// promises. Without this every child lookup is a full scan of <see cref="Nodes"/>, which is
     /// invisible on a small snapshot and quadratic on a real volume with a million nodes.
+    /// Two siblings with the same name would be the same path, so that is rejected here: checking
+    /// names per folder costs nothing, where checking whole paths built every path in the volume.
     /// </summary>
     private static Dictionary<Guid, StorageNode[]> BuildChildIndex(ImmutableArray<StorageNode> nodes)
     {
@@ -401,8 +473,19 @@ public sealed class StorageSnapshot
         }
 
         var index = new Dictionary<Guid, StorageNode[]>(grouped.Count);
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach ((Guid parentId, List<StorageNode> siblings) in grouped)
         {
+            names.Clear();
+            foreach (StorageNode sibling in siblings)
+            {
+                if (!names.Add(sibling.Name))
+                {
+                    throw new StorageSnapshotValidationException(
+                        $"Duplicate physical path: {sibling.PhysicalPath}.");
+                }
+            }
+
             siblings.Sort(static (left, right) =>
             {
                 int byKind = (right.Kind == StorageNodeKind.Folder).CompareTo(

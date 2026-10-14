@@ -23,6 +23,39 @@ public sealed class ModelAndScenarioTests
     }
 
     [TestMethod]
+    public void SnapshotRejectsSiblingsThatWouldShareAPath()
+    {
+        Assert.ThrowsExactly<StorageSnapshotValidationException>(() =>
+            StorageTestBuilder.Snapshot(nodes:
+            [
+                StorageTestBuilder.Node(StorageTestBuilder.RootId, null, "root", @"M:\",
+                    StorageNodeKind.Folder, 2, 2),
+                StorageTestBuilder.Node(Guid.NewGuid(), StorageTestBuilder.RootId, "Data", @"M:\Data",
+                    StorageNodeKind.Folder, 1),
+                StorageTestBuilder.Node(Guid.NewGuid(), StorageTestBuilder.RootId, "data", @"M:\data",
+                    StorageNodeKind.File, 1),
+            ]));
+    }
+
+    [TestMethod]
+    public void ClearingOneRareFieldKeepsTheOther()
+    {
+        var provider = new StorageProviderContext(
+            "WSL", "Ubuntu", "Mock correlation only", ProviderAvailability.Available, null);
+        var node = new StorageNode(
+            StorageTestBuilder.FileId, StorageTestBuilder.FolderId, "disk.vhdx", @"M:\disk.vhdx",
+            StorageNodeKind.File, 42, 0, DateTimeOffset.Parse("2026-08-02T12:00:00Z"), provider, 4096);
+
+        Assert.AreEqual(4096, (node with { Provider = null }).LogicalBytes);
+        Assert.AreEqual(provider, (node with { LogicalBytes = null }).Provider);
+        Assert.AreEqual(
+            node with { Provider = null, LogicalBytes = null },
+            StorageTestBuilder.Node(
+                StorageTestBuilder.FileId, StorageTestBuilder.FolderId, "disk.vhdx", @"M:\disk.vhdx",
+                StorageNodeKind.File, 42));
+    }
+
+    [TestMethod]
     public void SnapshotRejectsMissingParentAndInvalidBytes()
     {
         var orphan = StorageTestBuilder.Node(Guid.NewGuid(), Guid.NewGuid(), "orphan", @"M:\orphan",

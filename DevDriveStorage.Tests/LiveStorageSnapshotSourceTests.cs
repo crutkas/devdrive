@@ -58,6 +58,22 @@ public sealed class LiveStorageSnapshotSourceTests
     }
 
     [TestMethod]
+    public async Task FilePathsAreRebuiltFromTheirFolderAndStillPointAtTheFile()
+    {
+        _fixture.File("a.bin", 4096);
+        _fixture.File("sub/deeper/b.bin", 4096);
+
+        StorageSnapshot snapshot = await ScanAsync(_fixture.Root);
+
+        foreach (StorageNode file in snapshot.Nodes.Where(n => n.Kind == StorageNodeKind.File))
+        {
+            StorageNode parent = snapshot.Find(file.ParentId!.Value)!;
+            Assert.AreEqual(Path.Combine(parent.PhysicalPath, file.Name), file.PhysicalPath);
+            Assert.IsTrue(File.Exists(file.PhysicalPath), $"{file.PhysicalPath} should exist");
+        }
+    }
+
+    [TestMethod]
     public async Task StreamedPartialsCarryUsableSnapshotsAndNeverDoubleCount()
     {
         // A tree wide enough that the walk crosses several partial-emission points.
