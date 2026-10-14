@@ -594,12 +594,13 @@ Test-UI "Create: room grammar is present" {
 Test-UI "Create: guardrails note present"    { winapp ui wait-for "GuardrailsInfoBar" -a $AppPid -t 3000 }
 Test-UI "Create: size row carries a slider and its ceiling" {
     Assert-Present @("SizeSlider", "SizeNumberBox", "SizeMaximumTick")
-    if ((Get-Name "SizeMaximumTick") -notmatch '^[0-9,]+ GB \u2014 ') { throw "Maximum tick does not name its ceiling." }
+    if ((Get-Name "SizeMaximumTick") -notmatch '^[0-9,]+ GB max$') { throw "Maximum tick does not name its ceiling." }
 }
-Test-UI "Create: format is stated, not chosen" {
-    if ((Get-Name "FormatPill") -notmatch 'ReFS') { throw "Format pill does not say ReFS." }
+Test-UI "Create: method and name sit behind More options" {
+    Assert-Present @("MoreOptionsExpander")
+    winapp ui invoke "MoreOptionsExpander" -a $AppPid 2>$null | Out-Null
+    winapp ui wait-for "DriveLetterComboBox" -a $AppPid -t 3000
 }
-Test-UI "Create: the reclaim tie-in is present" { winapp ui wait-for "ReclaimTieIn" -a $AppPid -t 3000 }
 winapp ui screenshot -a $AppPid -o "screenshots\05-create.png" 2>$null | Out-Null
 
 Test-UI "Create: method is two options, resize is the default" {

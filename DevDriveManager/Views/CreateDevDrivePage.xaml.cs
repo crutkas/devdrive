@@ -67,73 +67,25 @@ public sealed partial class CreateDevDrivePage : Page, INotifyPropertyChanged
     /// <summary>The volumes this room is about to change. Same strip as every other room.</summary>
     public IReadOnlyList<VolumeStripEntry> VolumeStripEntries => _volumeStripEntries;
 
-    /// <summary>
-    /// The right-hand slider tick. Names the ceiling and why it is the ceiling, because "141 GB" on
-    /// its own does not say whether the number came from the disk or from this app.
-    /// </summary>
-    public string MaximumTickText => ViewModel.IsResize
-        ? $"{ViewModel.SliderMaximumGb:N0} GB \u2014 all shrinkable space"
-        : $"{ViewModel.SliderMaximumGb:N0} GB \u2014 free space on the host volume";
-
-    /// <summary>Where the finished drive will appear, spelled the way the shell will show it.</summary>
-    public string MountPointText =>
-        $"Mounts as {ViewModel.SelectedDriveLetter}\\ \u2014 labelled \u201C{(string.IsNullOrWhiteSpace(ViewModel.Label) ? "DevDrive" : ViewModel.Label)}\u201D";
+    /// <summary>The slider's right-hand end: the largest size this source can give.</summary>
+    public string MaximumTickText => $"{ViewModel.SliderMaximumGb:N0} GB max";
 
     /// <summary>
-    /// The reclaim tie-in, in the states it can honestly be in.
+    /// Whether the one-line Reclaim hint shows. Only when Reclaim has found something safe to free:
+    /// with nothing to offer, the line is advice the reader cannot act on.
     /// </summary>
-    /// <remarks>
-    /// A shrink can only use free space at the <i>end</i> of the volume, so clearing space before
-    /// repartitioning is one of the few orderings in this app that changes the outcome rather than
-    /// just the wait. The wording never claims a specific new maximum: whether freed bytes actually
-    /// raise the shrink ceiling depends on where they sat on the volume, which no scan can say.
-    /// </remarks>
-    public string ReclaimTieInText
-    {
-        get
-        {
-            ReclaimViewModel reclaim = App.SharedReclaim;
+    public bool HasReclaimTieIn => App.SharedReclaim.HasScanned && App.SharedReclaim.FoundRiskMix.SafeBytes > 0;
 
-            if (!ViewModel.IsResize)
-            {
-                return "A virtual disk repartitions nothing, but every byte it grows into comes out of "
-                    + "the host volume's free space \u2014 so the ceiling above is the host's free "
-                    + "space, and clearing space raises it directly.";
-            }
+    /// <summary>
+    /// The Reclaim hint. Never claims a specific new maximum: whether freed bytes raise the shrink
+    /// ceiling depends on where they sat on the volume, which no scan can say.
+    /// </summary>
+    public string ReclaimTieInText => ViewModel.IsResize
+        ? "Freeing space first can raise the maximum."
+        : "Freeing space first raises the maximum.";
 
-            if (!reclaim.HasScanned)
-            {
-                return "Reclaim hasn't run yet. A shrink can only use free space at the end of the "
-                    + "volume, so clearing space first often raises the maximum above \u2014 and it is "
-                    + "space you keep either way.";
-            }
-
-            if (reclaim.FoundRiskMix.SafeBytes <= 0)
-            {
-                return "Reclaim found nothing safe to delete, so the maximum above is what the volume "
-                    + "can give as it stands.";
-            }
-
-            return $"Reclaim found {reclaim.FoundRiskMix.SafeText} that is safe to delete \u2014 "
-                + "regenerable files, nothing lost. Freeing it before you shrink can raise the maximum "
-                + "above, because a shrink only uses free space at the end of the volume.";
-        }
-    }
-
-    /// <summary>The tie-in card's title, which names the constraint rather than the room.</summary>
-    public string ReclaimTieInHead => ViewModel.IsResize ? "Free space first" : "Room on the host";
-
-    /// <summary>The tie-in's verb. Names the prize when there is one, the errand when there is not.</summary>
-    public string ReclaimTieInAction
-    {
-        get
-        {
-            ReclaimViewModel reclaim = App.SharedReclaim;
-            return reclaim.HasScanned && reclaim.FoundRiskMix.SafeBytes > 0
-                ? $"Reclaim {reclaim.FoundRiskMix.SafeText}"
-                : "Find space first";
-        }
-    }
+    /// <summary>The hint's verb, naming the prize.</summary>
+    public string ReclaimTieInAction => $"Reclaim {App.SharedReclaim.FoundRiskMix.SafeText}";
 
     /// <summary>Shows <see cref="Visibility.Visible"/> when <paramref name="value"/> is true.</summary>
     public static Visibility BoolToVisibility(bool value) => value ? Visibility.Visible : Visibility.Collapsed;
@@ -232,12 +184,7 @@ public sealed partial class CreateDevDrivePage : Page, INotifyPropertyChanged
             case nameof(CreateDevDriveViewModel.SourceIndex):
                 Raise(nameof(MaximumTickText));
                 Raise(nameof(ReclaimTieInText));
-                Raise(nameof(ReclaimTieInHead));
                 UpdateStatus();
-                break;
-            case nameof(CreateDevDriveViewModel.SelectedDriveLetter):
-            case nameof(CreateDevDriveViewModel.Label):
-                Raise(nameof(MountPointText));
                 break;
 
             // The strip is the machine's volumes, not a preview of the drive being configured, so it
@@ -260,7 +207,7 @@ public sealed partial class CreateDevDrivePage : Page, INotifyPropertyChanged
     {
         if (e.PropertyName is nameof(ReclaimViewModel.HasScanned) or nameof(ReclaimViewModel.FoundRiskMix))
         {
-            Raise(nameof(ReclaimTieInText));
+            Raise(nameof(HasReclaimTieIn));
             Raise(nameof(ReclaimTieInAction));
         }
     }
@@ -288,9 +235,8 @@ public sealed partial class CreateDevDrivePage : Page, INotifyPropertyChanged
     }
 
     /// <summary>
-    /// The room's closing edge. Carries the comp's dialog footer — how long it takes, whether the
-    /// machine reboots, and whether the source volume stays online — because those are the three
-    /// things a reader wants confirmed with a finger over the Create button.
+    /// The room's closing edge. While idle it only says how long the work takes; the method and size
+    /// are already on screen above it.
     /// </summary>
     private void UpdateStatus()
     {
@@ -311,16 +257,8 @@ public sealed partial class CreateDevDrivePage : Page, INotifyPropertyChanged
         }
 
         StatusBar.Facts.Add(ViewModel.IsResize
-            ? new StatusFact("Resizing a volume")
-            : new StatusFact("Creating a virtual disk"));
-
-        StatusBar.Facts.Add(ViewModel.HasSizeError
-            ? new StatusFact(ViewModel.SizeErrorText, StatusEmphasis.Bad)
-            : new StatusFact(ViewModel.DevDriveSizeText, StatusEmphasis.Good));
-
-        StatusBar.Facts.Add(ViewModel.IsResize
-            ? new StatusFact("About 2 minutes \u00B7 no reboot \u00B7 the source volume stays online")
-            : new StatusFact("About 1 minute \u00B7 no reboot \u00B7 nothing is repartitioned"));
+            ? new StatusFact("About 2 minutes \u00B7 no reboot")
+            : new StatusFact("About 1 minute \u00B7 no reboot"));
     }
 
     private void Raise(string name) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
