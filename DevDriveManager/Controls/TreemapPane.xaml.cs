@@ -312,7 +312,6 @@ public sealed partial class TreemapPane : UserControl
         ReleaseAnimationTemplates();
         _theme?.Dispose();
         _theme = null;
-        _root?.Dispose();
         _root = null;
         _compositor = null;
         TreemapEmptyState.Visibility = Visibility.Collapsed;
