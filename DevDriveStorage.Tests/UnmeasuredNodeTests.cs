@@ -138,11 +138,14 @@ public sealed class UnmeasuredNodeTests
         }
 
         var partials = new List<StorageSnapshot>();
-        var progress = new Progress<StorageScanProgress>(report =>
+        var progress = new InlineProgress(report =>
         {
             if (report.Partial is StorageSnapshot partial)
             {
-                partials.Add(partial);
+                lock (partials)
+                {
+                    partials.Add(partial);
+                }
             }
         });
 
@@ -213,5 +216,14 @@ public sealed class UnmeasuredNodeTests
             Unmeasured(managed),
             "the fallback is a performance difference, not a correctness one — both paths must " +
             "report the same set of things as measured.");
+    }
+
+    /// <summary>
+    /// Applies reports on the scanning thread. <see cref="Progress{T}"/> posts to the thread pool,
+    /// so with a fast scan its callbacks can still be queued when the awaited scan returns.
+    /// </summary>
+    private sealed class InlineProgress(Action<StorageScanProgress> onReport) : IProgress<StorageScanProgress>
+    {
+        public void Report(StorageScanProgress value) => onReport(value);
     }
 }

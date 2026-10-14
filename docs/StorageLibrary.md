@@ -61,6 +61,38 @@ partial snapshots as it walks. Three rules make that safe to bind to:
 Throttling is `max(interval, 2 x last emit cost)`, which self-limits to about a
 third of scan time at any tree size without a machine-specific threshold.
 
+## How the live scan walks
+
+`LiveStorageSnapshotSource` drives `Live/ParallelVolumeScanner`:
+
+- **One worker per logical core** pulls folders off a shared queue. Each folder
+  is opened once (`CreateFileW` with `FILE_LIST_DIRECTORY | SYNCHRONIZE` and
+  backup semantics) and listed with `NtQueryDirectoryFile` into a 256 KB
+  per-thread buffer, using `FileIdFullDirectoryInformation` and falling back to
+  `FileFullDirectoryInformation` where the file system rejects it. No file is
+  ever opened; size on disk is the entry's `AllocationSize`.
+- **Junctions, symlinks and mount points are not followed** (reparse tags with
+  the name-surrogate bit). Other reparse folders are, including OneDrive
+  folders, whose tag reads back as zero from a listing.
+- **NTFS hard links count once**, de-duplicated by file id. Cloud-only
+  placeholders (`RECALL_ON_DATA_ACCESS`) allocate nothing and are tallied
+  separately.
+- **Elevated, it enables SeBackupPrivilege** so locked system folders can be
+  listed. As a standard user those folders are counted as unreadable.
+- **Files never get an object.** Each folder keeps running totals plus a min-heap
+  of its biggest files (capped at the per-folder child limit); a name string is
+  only allocated when a file enters that heap. Folder ids are assigned at
+  discovery, so a child always follows its parent and the rollup is one
+  backward pass.
+- **Partials freeze the walk.** Workers hold a shared lock while they mutate a
+  folder; building a partial takes it exclusively, so every partial is a
+  consistent tree.
+
+The finished snapshot's `ScanCoverage.Statistics` carries the headline numbers
+(files, hard-link duplicates, folders, unreadable folders, size on disk, the
+drive's used space, cloud-only bytes, query and total time), shown in the Space
+room's coverage block.
+
 ## Swapping a source
 
 Only one seam changes: implement `IStorageSnapshotSource` and inject it where

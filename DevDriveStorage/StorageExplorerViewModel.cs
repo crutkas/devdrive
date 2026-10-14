@@ -639,6 +639,13 @@ public sealed class StorageExplorerViewModel : ObservableObject
 
     public bool HasCoverageDetail => CoverageDetail.Length > 0;
 
+    /// <summary>
+    /// The live scanner's headline counts — files, hard-link duplicates, folders, unreadable
+    /// folders, size on disk against the drive's used space, cloud-only bytes and query time.
+    /// Empty for sources that do not measure them.
+    /// </summary>
+    public string ScanStatisticsSummary => Snapshot?.Coverage.Statistics?.Display ?? string.Empty;
+
     public string SnapshotSummary => Snapshot is null
         ? "No snapshot"
         : $"Scanned {Snapshot.CapturedAtUtc.ToLocalTime():MMM d, HH:mm}";
@@ -965,6 +972,7 @@ public sealed class StorageExplorerViewModel : ObservableObject
         OnPropertyChanged(nameof(CoverageSummary));
         OnPropertyChanged(nameof(CoverageDetail));
         OnPropertyChanged(nameof(HasCoverageDetail));
+        OnPropertyChanged(nameof(ScanStatisticsSummary));
         OnPropertyChanged(nameof(SnapshotSummary));
         OnPropertyChanged(nameof(ScopeLogicalSummary));
     }
