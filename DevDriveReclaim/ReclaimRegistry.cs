@@ -77,6 +77,11 @@ public static class ReclaimRegistry
             candidates.Add(Path.Combine(profile, folder));
         }
 
+        // Where the GitHub Copilot app clones repositories and parks its per-session worktrees
+        // (.copilot\repos\copilot-worktrees\<repo>\<session>). On a machine that develops mostly
+        // through it, none of the conventional folders above exist and every worktree lives here.
+        candidates.Add(Path.Combine(profile, ".copilot", "repos"));
+
         foreach (string volume in volumeRoots)
         {
             foreach (string folder in (string[])["src", "source", "repos", "dev", "code", "git", "projects"])

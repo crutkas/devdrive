@@ -460,6 +460,49 @@ public sealed class LiveStorageSnapshotSourceTests
     }
 
     [TestMethod]
+    public async Task HardLinksAreCountedOnceAndStatisticsArePublished()
+    {
+        string original = _fixture.File("data/original.bin", 64 * 1024);
+        _fixture.File("data/other.bin", 4096);
+        _fixture.Dir("empty");
+        if (!CreateHardLink(Path.Combine(_fixture.Root, "link.bin"), original, IntPtr.Zero))
+        {
+            Assert.Inconclusive("Hard links are not supported on the temp volume.");
+        }
+
+        var source = new LiveStorageSnapshotSource();
+        StorageSnapshot snapshot = await source.GetSnapshotAsync(
+            new StorageSnapshotRequest(_fixture.Root), null, CancellationToken.None);
+
+        ScanStatistics? stats = snapshot.Coverage.Statistics;
+        Assert.IsNotNull(stats, "a live scan must publish its statistics");
+        Assert.AreSame(stats, source.LastStatistics);
+        Assert.AreEqual(2, stats.FolderCount, "data and empty");
+        Assert.AreEqual(0, stats.UnreadableFolderCount);
+        Assert.IsGreaterThanOrEqualTo(1, stats.WorkerCount);
+        Assert.AreEqual(snapshot.Root.SizeBytes, stats.SizeOnDiskBytes);
+
+        if (string.Equals(stats.FileSystem, "NTFS", StringComparison.OrdinalIgnoreCase))
+        {
+            Assert.AreEqual(2, stats.FileCount, "the hard link must not count as a second file");
+            Assert.AreEqual(1, stats.HardLinkDuplicateCount);
+            long distinct = snapshot.Nodes
+                .Where(n => n.Name is "original.bin" or "link.bin")
+                .Max(n => n.SizeBytes);
+            long both = snapshot.Nodes
+                .Where(n => n.Name is "original.bin" or "link.bin")
+                .Sum(n => n.SizeBytes);
+            Assert.AreEqual(distinct, both, "the linked bytes must be counted once");
+        }
+    }
+
+    [System.Runtime.InteropServices.DllImport(
+        "kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode, SetLastError = true,
+        EntryPoint = "CreateHardLinkW")]
+    [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+    private static extern bool CreateHardLink(string fileName, string existingFileName, IntPtr securityAttributes);
+
+    [TestMethod]
     public async Task ProviderCorrelationTagsKnownArtifacts()
     {
         _fixture.File("app/node_modules/left-pad/index.js", 1024);

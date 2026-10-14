@@ -291,8 +291,10 @@ public sealed partial class SpacePage : Page, INotifyPropertyChanged
                 int n => $"{n:N0} denied",
             };
 
+            string statistics = ViewModel.ScanStatisticsSummary;
             return $"{snapshot.Root.ItemCount:N0} nodes · {denied}\n"
-                + $"{ViewModel.CoverageSummary} · {ViewModel.SnapshotSummary}";
+                + $"{ViewModel.CoverageSummary} · {ViewModel.SnapshotSummary}"
+                + (statistics.Length == 0 ? string.Empty : "\n" + statistics);
         }
     }
 
@@ -606,11 +608,7 @@ public sealed partial class SpacePage : Page, INotifyPropertyChanged
         }
 
         _pendingVolumeLabel = volume.DisplayName;
-
-        _ = ViewModel.Snapshot is not null &&
-            string.Equals(ViewModel.ScenarioId, volume.RootPath, StringComparison.OrdinalIgnoreCase)
-                ? ViewModel.RefreshAsync()
-                : ViewModel.LoadScenarioAsync(volume.RootPath);
+        App.ScanEverything(volume.RootPath);
     }
 
     /// <summary>

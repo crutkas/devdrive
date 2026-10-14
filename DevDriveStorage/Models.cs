@@ -232,13 +232,71 @@ public sealed record ScanCoverage
     public double Ratio => TotalBytes == 0 ? 1 : (double)CoveredBytes / TotalBytes;
 
     public string Display => $"{Ratio:P0} coverage";
+
+    /// <summary>
+    /// Whole-scan counts from the live scanner, or <see langword="null"/> for sources that do not
+    /// measure them (the mock path, and partial snapshots mid-walk).
+    /// </summary>
+    public ScanStatistics? Statistics { get; init; }
+}
+
+/// <summary>
+/// The headline numbers of one live scan. These describe the whole walk, independent of how many
+/// rows the snapshot emits per folder.
+/// </summary>
+/// <param name="FileCount">Distinct files counted. A file with several hard links counts once.</param>
+/// <param name="HardLinkDuplicateCount">Extra hard links to a file already counted (NTFS only).</param>
+/// <param name="FolderCount">Folders found beneath the scan root.</param>
+/// <param name="UnreadableFolderCount">Folders that could not be listed, or only partly.</param>
+/// <param name="SizeOnDiskBytes">Sum of every distinct file's allocation on disk.</param>
+/// <param name="VolumeUsedBytes">The volume's own used-space figure, when the root is a volume.</param>
+/// <param name="CloudOnlyFileCount">Cloud-only placeholders (recall on data access).</param>
+/// <param name="CloudOnlyBytes">Logical size of cloud-only placeholders. They allocate nothing locally.</param>
+/// <param name="QueryDuration">Wall time of the walk itself.</param>
+/// <param name="TotalDuration">Wall time including building the snapshot.</param>
+/// <param name="WorkerCount">Threads that walked the tree.</param>
+/// <param name="FileSystem">The volume's file system name (NTFS, ReFS, …), when known.</param>
+/// <param name="UsedBackupPrivilege">Whether SeBackupPrivilege was enabled for the walk.</param>
+public sealed record ScanStatistics(
+    long FileCount,
+    long HardLinkDuplicateCount,
+    long FolderCount,
+    long UnreadableFolderCount,
+    long SizeOnDiskBytes,
+    long? VolumeUsedBytes,
+    long CloudOnlyFileCount,
+    long CloudOnlyBytes,
+    TimeSpan QueryDuration,
+    TimeSpan TotalDuration,
+    int WorkerCount,
+    string? FileSystem,
+    bool UsedBackupPrivilege)
+{
+    /// <summary>Multi-line summary for status surfaces.</summary>
+    public string Display
+    {
+        get
+        {
+            string used = VolumeUsedBytes is long volumeUsed
+                ? $" · drive used {ByteSizeFormatter.Format(volumeUsed)}"
+                : string.Empty;
+            string cloud = CloudOnlyFileCount > 0
+                ? $" · {CloudOnlyFileCount:N0} cloud-only ({ByteSizeFormatter.Format(CloudOnlyBytes)})"
+                : string.Empty;
+            return $"{FileCount:N0} files · {HardLinkDuplicateCount:N0} hard-link duplicates · "
+                + $"{FolderCount:N0} folders · {UnreadableFolderCount:N0} unreadable\n"
+                + $"{ByteSizeFormatter.Format(SizeOnDiskBytes)} on disk{used}{cloud}\n"
+                + $"Query {QueryDuration.TotalSeconds:0.00} s · total {TotalDuration.TotalSeconds:0.00} s · "
+                + $"{WorkerCount} threads{(FileSystem is null ? string.Empty : $" · {FileSystem}")}";
+        }
+    }
 }
 
 public sealed class StorageSnapshot
 {
     public const int CurrentSchemaVersion = 1;
 
-    private readonly ImmutableDictionary<Guid, StorageNode> _nodesById;
+    private readonly Dictionary<Guid, StorageNode> _nodesById;
     private readonly Dictionary<Guid, StorageNode[]> _childrenByParent;
 
     public StorageSnapshot(
@@ -269,8 +327,10 @@ public sealed class StorageSnapshot
             throw new StorageSnapshotValidationException("A snapshot must contain a root node.");
         }
 
-        var builder = ImmutableDictionary.CreateBuilder<Guid, StorageNode>();
-        var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // A plain dictionary, sized up front: an immutable dictionary builds an AVL tree, which on a
+        // million-node volume was most of the cost of constructing the snapshot. Nothing mutates it.
+        var builder = new Dictionary<Guid, StorageNode>(nodes.Length);
+        var paths = new HashSet<string>(nodes.Length, StringComparer.OrdinalIgnoreCase);
         foreach (StorageNode node in nodes)
         {
             if (!builder.TryAdd(node.Id, node))
@@ -312,7 +372,7 @@ public sealed class StorageSnapshot
         Completion = completion;
         Coverage = coverage ?? throw new ArgumentNullException(nameof(coverage));
         Nodes = nodes;
-        _nodesById = builder.ToImmutable();
+        _nodesById = builder;
         _childrenByParent = BuildChildIndex(nodes);
     }
 

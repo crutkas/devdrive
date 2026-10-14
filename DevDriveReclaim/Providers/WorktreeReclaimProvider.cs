@@ -35,41 +35,56 @@ public sealed class WorktreeReclaimProvider(IWorktreeInspector? inspector = null
 
         return Task.Run<IReadOnlyList<ReclaimCandidate>>(() =>
         {
-            var candidates = new List<ReclaimCandidate>();
+            DiscoveredRepository[] worktrees =
+            [
+                .. context.Repositories(cancellationToken).Where(r => r.IsWorktree),
+            ];
 
-            IEnumerable<DiscoveredRepository> worktrees = context
-                .Repositories(cancellationToken)
-                .Where(r => r.IsWorktree);
-
-            foreach (DiscoveredRepository worktree in worktrees)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                progress?.Report(new ReclaimScanProgress(
-                    ReclaimCategory.Id, $"Checking {worktree.Name}", candidates.Count));
-
-                WorktreeState state = _inspector.Inspect(worktree.Path, cancellationToken);
-                DirectoryMeasurement measurement =
-                    DirectoryMeasurer.Measure(worktree.Path, cancellationToken);
-
-                if (measurement.AllocatedBytes <= 0)
+            // Each worktree costs a few git processes and a walk of its tree, and they are
+            // independent. One at a time, 53 worktrees took ~40 s; most of that is waiting on git
+            // and the disk, so running several at once is nearly free.
+            var slots = new ReclaimCandidate?[worktrees.Length];
+            int done = 0;
+            Parallel.For(
+                0,
+                worktrees.Length,
+                new ParallelOptions
                 {
-                    continue;
-                }
+                    CancellationToken = cancellationToken,
+                    MaxDegreeOfParallelism = Math.Clamp(Environment.ProcessorCount, 2, 8),
+                },
+                i =>
+                {
+                    DiscoveredRepository worktree = worktrees[i];
+                    progress?.Report(new ReclaimScanProgress(
+                        ReclaimCategory.Id, $"Checking {worktree.Name}", Volatile.Read(ref done)));
 
-                (ReclaimRisk risk, string reason, string detail) = Grade(state, worktree.Name);
+                    WorktreeState state = _inspector.Inspect(worktree.Path, cancellationToken);
+                    DirectoryMeasurement measurement =
+                        DirectoryMeasurer.Measure(worktree.Path, cancellationToken);
+                    Interlocked.Increment(ref done);
 
-                candidates.Add(new ReclaimCandidate(
-                    ReclaimCategory.Id,
-                    worktree.Path,
-                    worktree.Name,
-                    measurement.AllocatedBytes,
-                    risk,
-                    reason,
-                    RecoveryHint(state, worktree.Name),
-                    lastUsedUtc: measurement.NewestWriteUtc,
-                    itemCount: measurement.FileCount,
-                    detail: detail));
-            }
+                    if (measurement.AllocatedBytes <= 0)
+                    {
+                        return;
+                    }
+
+                    (ReclaimRisk risk, string reason, string detail) = Grade(state, worktree.Name);
+
+                    slots[i] = new ReclaimCandidate(
+                        ReclaimCategory.Id,
+                        worktree.Path,
+                        worktree.Name,
+                        measurement.AllocatedBytes,
+                        risk,
+                        reason,
+                        RecoveryHint(state, worktree.Name),
+                        lastUsedUtc: measurement.NewestWriteUtc,
+                        itemCount: measurement.FileCount,
+                        detail: detail);
+                });
+
+            var candidates = new List<ReclaimCandidate>(slots.Where(c => c is not null)!);
 
             AddOrphans(context, candidates, progress, cancellationToken);
 

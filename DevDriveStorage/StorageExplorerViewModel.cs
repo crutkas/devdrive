@@ -518,7 +518,14 @@ public sealed class StorageExplorerViewModel : ObservableObject
 
     public string ModeCaption => Mode == ExplorerMode.Folders
         ? "Immediate contents of this folder"
-        : "Every file below this folder, largest first";
+        : $"The {LargestFilesLimit:N0} largest files below this folder";
+
+    /// <summary>
+    /// How many rows the Largest files view shows. A drive root has a million files below it, and
+    /// listing all of them meant a row view model per file built on the UI thread — the room hung
+    /// for seconds on a list nobody scrolls past the first screens of.
+    /// </summary>
+    public const int LargestFilesLimit = 1000;
 
     public ExplorerSortColumn SortColumn
     {
@@ -638,6 +645,13 @@ public sealed class StorageExplorerViewModel : ObservableObject
     }
 
     public bool HasCoverageDetail => CoverageDetail.Length > 0;
+
+    /// <summary>
+    /// The live scanner's headline counts — files, hard-link duplicates, folders, unreadable
+    /// folders, size on disk against the drive's used space, cloud-only bytes and query time.
+    /// Empty for sources that do not measure them.
+    /// </summary>
+    public string ScanStatisticsSummary => Snapshot?.Coverage.Statistics?.Display ?? string.Empty;
 
     public string SnapshotSummary => Snapshot is null
         ? "No snapshot"
@@ -965,6 +979,7 @@ public sealed class StorageExplorerViewModel : ObservableObject
         OnPropertyChanged(nameof(CoverageSummary));
         OnPropertyChanged(nameof(CoverageDetail));
         OnPropertyChanged(nameof(HasCoverageDetail));
+        OnPropertyChanged(nameof(ScanStatisticsSummary));
         OnPropertyChanged(nameof(SnapshotSummary));
         OnPropertyChanged(nameof(ScopeLogicalSummary));
     }
@@ -1128,7 +1143,9 @@ public sealed class StorageExplorerViewModel : ObservableObject
                 node.PhysicalPath.Contains(SearchText, StringComparison.OrdinalIgnoreCase));
         }
 
-        StorageNode[] matches = query.ToArray();
+        StorageNode[] matches = Mode == ExplorerMode.LargestFiles
+            ? Largest(query, LargestFilesLimit)
+            : query.ToArray();
 
         // Colour identity follows size rank, not the active sort, so re-sorting the
         // table never reshuffles the colours that tie rows to treemap rectangles.
@@ -1158,6 +1175,28 @@ public sealed class StorageExplorerViewModel : ObservableObject
 
     private static StorageRowViewModel CreateRow(StorageNode node, long scopeBytes, int sizeRank) =>
         new(node, scopeBytes, sizeRank);
+
+    /// <summary>
+    /// The <paramref name="limit"/> biggest nodes, via a bounded min-heap: one pass over the
+    /// candidates and O(limit) memory, instead of sorting a million files to keep a thousand.
+    /// </summary>
+    private static StorageNode[] Largest(IEnumerable<StorageNode> nodes, int limit)
+    {
+        var heap = new PriorityQueue<StorageNode, long>(limit + 1);
+        foreach (StorageNode node in nodes)
+        {
+            if (heap.Count < limit)
+            {
+                heap.Enqueue(node, node.SizeBytes);
+            }
+            else if (heap.TryPeek(out _, out long smallest) && node.SizeBytes > smallest)
+            {
+                heap.DequeueEnqueue(node, node.SizeBytes);
+            }
+        }
+
+        return [.. heap.UnorderedItems.Select(item => item.Element)];
+    }
 
     private IEnumerable<StorageNode> ApplySort(IEnumerable<StorageNode> query)
     {
