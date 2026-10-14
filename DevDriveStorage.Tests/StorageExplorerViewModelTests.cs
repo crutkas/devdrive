@@ -187,7 +187,16 @@ public sealed class StorageExplorerViewModelTests
         await viewModel.LoadScenarioAsync("large");
         viewModel.Mode = ExplorerMode.LargestFiles;
 
-        Assert.IsGreaterThanOrEqualTo(2000, viewModel.VisibleItems.Count);
+        // The view is capped, and the cap has to keep the genuinely largest files.
+        StorageNode[] allFiles = [.. viewModel.Snapshot!.Nodes.Where(n => n.Kind == StorageNodeKind.File)];
+        Assert.IsGreaterThan(StorageExplorerViewModel.LargestFilesLimit, allFiles.Length,
+            "the scenario must exceed the cap or this test proves nothing");
+        Assert.HasCount(StorageExplorerViewModel.LargestFilesLimit, viewModel.VisibleItems);
+        long smallestKept = viewModel.VisibleItems.Min(row => row.SizeBytes);
+        Assert.AreEqual(
+            allFiles.Count(n => n.SizeBytes > smallestKept),
+            viewModel.VisibleItems.Count(row => row.SizeBytes > smallestKept),
+            "every file bigger than the smallest row shown must be in the list");
         Assert.IsTrue(viewModel.VisibleItems.Zip(viewModel.VisibleItems.Skip(1))
             .All(pair => pair.First.SizeBytes >= pair.Second.SizeBytes));
     }
