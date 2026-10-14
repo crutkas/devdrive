@@ -196,13 +196,14 @@ internal sealed class TreemapTheme : IDisposable
         return brush;
     }
 
+    /// <summary>
+    /// Drops the theme's references without closing the brushes: cells being torn down may still be
+    /// painted with them, and closing a composition object the compositor still uses frees it under
+    /// its .NET wrapper, which the GC finalizer later releases again and crashes. See
+    /// <c>TreemapPane.ReleaseAnimationTemplates</c> for the same rule.
+    /// </summary>
     public void Dispose()
     {
-        foreach (CompositionObject owned in _owned)
-        {
-            owned.Dispose();
-        }
-
         _owned.Clear();
         _bodies.Clear();
         _headers.Clear();

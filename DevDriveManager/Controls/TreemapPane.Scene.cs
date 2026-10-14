@@ -342,10 +342,9 @@ public sealed partial class TreemapPane
         float radius = Math.Min(depth == 0 ? TopLevelRadius : NestedRadius, Math.Min(size.X, size.Y) / 4);
         if (radius < 1.5f)
         {
-            if (visual.Clip is RectangleClip stale)
+            if (visual.Clip is not null)
             {
                 visual.Body.Clip = null;
-                stale.Dispose();
                 visual.Clip = null;
             }
 
@@ -394,7 +393,6 @@ public sealed partial class TreemapPane
             if (visual.Header is SpriteVisual stale)
             {
                 visual.Body.Children.Remove(stale);
-                stale.Dispose();
                 visual.Header = null;
                 visual.HeaderSlot = -1;
             }
@@ -525,8 +523,6 @@ public sealed partial class TreemapPane
                 layer.Retiring.Remove(visual);
                 visual.Dispose();
             }
-
-            batch.Dispose();
         };
     }
 
@@ -568,8 +564,6 @@ public sealed partial class TreemapPane
             {
                 DisposeLayer(layer);
             }
-
-            batch.Dispose();
         };
     }
 
@@ -618,14 +612,6 @@ public sealed partial class TreemapPane
         }
 
         FlushDisposals();
-        _hoverVisual?.Dispose();
-        _hoverShape?.Dispose();
-        _hoverGeometry?.Dispose();
-        _selectionVisual?.Dispose();
-        _selectionOuter?.Dispose();
-        _selectionInner?.Dispose();
-        _selectionOuterGeometry?.Dispose();
-        _selectionInnerGeometry?.Dispose();
         _hoverVisual = null;
         _hoverShape = null;
         _hoverGeometry = null;
@@ -775,8 +761,6 @@ public sealed partial class TreemapPane
             {
                 DisposeLayer(previous);
             }
-
-            batch.Dispose();
         };
     }
 
@@ -1315,7 +1299,6 @@ public sealed partial class TreemapPane
 
             Retiring.Clear();
             Cells.Clear();
-            Container.Dispose();
         }
     }
 
@@ -1364,18 +1347,16 @@ public sealed partial class TreemapPane
 
         public bool Disposed { get; private set; }
 
+        /// <summary>
+        /// Marks the cell dead without closing its visuals. The compositor can still hold them —
+        /// implicit animations, label expressions, an in-flight batch — and closing one under it
+        /// frees the native object beneath its .NET wrapper; the GC finalizer then releases it a
+        /// second time and the app crashes. Dropping the references lets the GC release them once
+        /// nothing uses them, the same rule <see cref="ReleaseAnimationTemplates"/> follows.
+        /// </summary>
         public void Dispose()
         {
-            if (Disposed)
-            {
-                return;
-            }
-
             Disposed = true;
-            Clip?.Dispose();
-            Header?.Dispose();
-            Inner?.Dispose();
-            Body.Dispose();
         }
     }
 }
