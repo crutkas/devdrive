@@ -53,6 +53,49 @@ internal static class StorageContextMenu
             }
         };
         menu.Items.Add(open);
+
+        // A package cache found off the Dev Drive is the one folder here with a better home than the
+        // Recycle Bin, so the map offers the move rather than leaving the user to find the Caches tab.
+        if (node.Kind == StorageNodeKind.Folder && FindCacheOffDevDrive(node.PhysicalPath) is { } cache)
+        {
+            var move = new MenuFlyoutItem
+            {
+                Text = $"Move {cache.Header} cache to Dev Drive",
+                Icon = new FontIcon { Glyph = "\uE8DE" },
+            };
+            AutomationProperties.SetAutomationId(move, "MoveCacheToDevDrive");
+            move.Click += (_, _) => ShellPage.Current?.SelectNavItem("caches");
+            menu.Items.Add(new MenuFlyoutSeparator());
+            menu.Items.Add(move);
+        }
+
         return menu;
+    }
+
+    /// <summary>The detected cache that holds <paramref name="path"/> and is not yet on a Dev Drive.</summary>
+    private static ViewModels.PackageCacheRowViewModel? FindCacheOffDevDrive(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return null;
+        }
+
+        string folder = Path.TrimEndingDirectorySeparator(path);
+        foreach (ViewModels.PackageCacheRowViewModel row in App.Shared.PackageCaches.Caches)
+        {
+            if (!row.Info.Detected || row.IsOnDevDrive || string.IsNullOrWhiteSpace(row.LocationText))
+            {
+                continue;
+            }
+
+            string cache = Path.TrimEndingDirectorySeparator(row.LocationText);
+            if (folder.Equals(cache, StringComparison.OrdinalIgnoreCase)
+                || folder.StartsWith(cache + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            {
+                return row;
+            }
+        }
+
+        return null;
     }
 }

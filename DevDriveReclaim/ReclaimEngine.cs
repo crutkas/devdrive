@@ -77,6 +77,31 @@ public sealed class ReclaimResult
         AllCandidates.Count(c => c.Risk == risk);
 
     /// <summary>
+    /// The same result with only the candidates that live on <paramref name="volumeRoot"/>.
+    /// </summary>
+    /// <remarks>
+    /// Some providers look in fixed places whatever the scope (package caches live in the user
+    /// profile), so a scan of one drive can still find things on another. The Space map shows one
+    /// drive, and a clean-up list beside it that offers bytes on a different drive would not match
+    /// the map it sits next to.
+    /// </remarks>
+    public ReclaimResult Within(string volumeRoot)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(volumeRoot);
+        string root = volumeRoot.TrimEnd('\\', '/');
+        string prefix = root + Path.DirectorySeparatorChar;
+
+        return new ReclaimResult(
+            Categories.Select(category => category with
+            {
+                Candidates = [.. category.Candidates.Where(c =>
+                    c.Path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+                    || c.Path.Equals(root, StringComparison.OrdinalIgnoreCase))],
+            }),
+            ScannedAtUtc);
+    }
+
+    /// <summary>
     /// The default selection: exactly the Safe tier. Check and Careful are never preselected —
     /// a tool that pre-ticks something destructive has made the decision for the user.
     /// </summary>

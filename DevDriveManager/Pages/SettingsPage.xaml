@@ -75,37 +75,6 @@
                         </toolkit:SettingsExpander.Items>
                     </toolkit:SettingsExpander>
 
-                    <TextBlock Text="Free-space history" Style="{StaticResource SettingsSectionHeaderStyle}" />
-                    <toolkit:SettingsExpander Header="Record free space over time"
-                                             Description="Keep a reading per volume every 30 minutes when Overview loads."
-                                             AutomationProperties.AutomationId="HistorySettingsExpander"
-                                             AutomationProperties.Name="Free-space history">
-                        <toolkit:SettingsExpander.HeaderIcon><FontIcon Glyph="&#xE81C;" /></toolkit:SettingsExpander.HeaderIcon>
-                        <ToggleSwitch AutomationProperties.AutomationId="RecordHistoryToggle"
-                                      AutomationProperties.Name="Record free space over time"
-                                      IsOn="{x:Bind RecordFreeSpaceHistory, Mode=TwoWay}" />
-                        <toolkit:SettingsExpander.Items>
-                            <toolkit:SettingsCard Header="Keep readings for" Description="Older readings are removed the next time Overview loads.">
-                                <ComboBox x:Name="RetentionCombo" MinWidth="160"
-                                          AutomationProperties.AutomationId="RetentionCombo" AutomationProperties.Name="Keep free space readings for"
-                                          SelectionChanged="RetentionCombo_SelectionChanged">
-                                    <ComboBoxItem AutomationProperties.AutomationId="Retention30" Content="30 days" Tag="30" />
-                                    <ComboBoxItem AutomationProperties.AutomationId="Retention90" Content="90 days" Tag="90" />
-                                    <ComboBoxItem AutomationProperties.AutomationId="Retention365" Content="1 year" Tag="365" />
-                                </ComboBox>
-                            </toolkit:SettingsCard>
-                            <toolkit:SettingsCard Header="Saved history">
-                                <toolkit:SettingsCard.Description>
-                                    <TextBlock AutomationProperties.AutomationId="HistorySummary"
-                                               Text="{x:Bind HistorySummaryText, Mode=OneWay}" TextWrapping="Wrap" />
-                                </toolkit:SettingsCard.Description>
-                                <Button Content="Clear history" AutomationProperties.AutomationId="ClearHistoryButton"
-                                        AutomationProperties.Name="Clear saved free-space history"
-                                        IsEnabled="{x:Bind HasHistory, Mode=OneWay}" Click="ClearHistory_Click" />
-                            </toolkit:SettingsCard>
-                        </toolkit:SettingsExpander.Items>
-                    </toolkit:SettingsExpander>
-
                     <TextBlock Text="Drives and machine" Style="{StaticResource SettingsSectionHeaderStyle}"
                                AutomationProperties.AutomationId="MachineSettingsHead" />
                     <toolkit:SettingsCard Header="Default creation method">

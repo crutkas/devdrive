@@ -61,6 +61,28 @@ public static class ReclaimRegistry
     }
 
     /// <summary>
+    /// Builds a scan context for one volume: the clean-up scan that runs beside a Space scan of it.
+    /// </summary>
+    /// <remarks>
+    /// With <paramref name="includeWholeVolume"/> the volume itself is the source root. That is right
+    /// for a Dev Drive or a data drive, where people clone straight into the root (<c>D:\repo</c>)
+    /// and the conventional folder names would miss every repo. The system volume keeps the
+    /// conventional folders, because walking <c>C:\</c> for repos means walking Windows and Program
+    /// Files too.
+    /// </remarks>
+    public static ReclaimScanContext CreateVolumeContext(string volumeRoot, bool includeWholeVolume)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(volumeRoot);
+        string root = volumeRoot.TrimEnd('\\', '/') + Path.DirectorySeparatorChar;
+
+        IReadOnlyList<string> sourceRoots = includeWholeVolume
+            ? [root]
+            : [.. DiscoverSourceRoots([root]).Where(path => IsUnderneath(path, root))];
+
+        return new ReclaimScanContext([root], sourceRoots);
+    }
+
+    /// <summary>
     /// Conventional code locations that exist on this machine. Deduplicated by path, and never
     /// nested inside one another — scanning both <c>C:\src</c> and <c>C:\src\work</c> would count
     /// the same bytes twice and quietly double the headline number.

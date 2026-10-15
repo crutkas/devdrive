@@ -107,7 +107,7 @@ public partial class PackageCacheRowViewModel : ObservableObject
 
         string token = FolderToken(info.Name);
         RowAutomationId = $"PackageCacheCard_{token}";
-        MoveButtonAutomationId = $"MoveCache_{token}";
+        SelectAutomationId = $"SelectCache_{token}";
         MoveConfirmDialogAutomationId = $"MoveConfirm_{token}";
         CancelActiveMoveButtonAutomationId = $"CancelActiveMove_{token}";
         MoveResultAutomationId = $"MoveResult_{token}";
@@ -164,9 +164,16 @@ public partial class PackageCacheRowViewModel : ObservableObject
 
     /// <summary>True when the cache exists and is NOT on the Dev Drive (so it can be moved).</summary>
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(ShowMoveButton))]
+    [NotifyPropertyChangedFor(nameof(CanSelectForMove))]
     [NotifyCanExecuteChangedFor(nameof(MoveCommand))]
     public partial bool CanMove { get; set; }
+
+    /// <summary>
+    /// Ticked in the Dev Drive page's recommendations list. Its one Move button moves every ticked
+    /// cache that can move. Ticked by default, because every move is reversible.
+    /// </summary>
+    [ObservableProperty]
+    public partial bool IsSelectedForMove { get; set; } = true;
 
     /// <summary>True when the cache is already on the Dev Drive (show the "set" check).</summary>
     [ObservableProperty]
@@ -179,7 +186,7 @@ public partial class PackageCacheRowViewModel : ObservableObject
 
     public string RowAutomationId { get; }
 
-    public string MoveButtonAutomationId { get; }
+    public string SelectAutomationId { get; }
 
     public string MoveConfirmDialogAutomationId { get; }
 
@@ -221,14 +228,14 @@ public partial class PackageCacheRowViewModel : ObservableObject
 
     /// <summary>True while this row has a pending confirmation.</summary>
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(ShowMoveButton))]
+    [NotifyPropertyChangedFor(nameof(CanSelectForMove))]
     [NotifyPropertyChangedFor(nameof(ShowMoveBackButton))]
     [NotifyPropertyChangedFor(nameof(ShowMapBlock))]
     public partial bool IsConfirmingMove { get; set; }
 
     /// <summary>True while the REAL move (or move-back) is running — drives the live progress UI.</summary>
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(ShowMoveButton))]
+    [NotifyPropertyChangedFor(nameof(CanSelectForMove))]
     [NotifyPropertyChangedFor(nameof(ShowMoveBackButton))]
     [NotifyPropertyChangedFor(nameof(ShowMapBlock))]
     public partial bool IsMoving { get; set; }
@@ -258,8 +265,8 @@ public partial class PackageCacheRowViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(ShowMoveBackButton))]
     public partial bool CanMoveBack { get; set; }
 
-    /// <summary>Show the "Move" button when this cache can move and no confirm/move is in flight.</summary>
-    public bool ShowMoveButton => CanMove && !IsConfirmingMove && !IsMoving;
+    /// <summary>Offer this cache for a move (its tick box) when it can move and no confirm/move is in flight.</summary>
+    public bool CanSelectForMove => CanMove && !IsConfirmingMove && !IsMoving;
 
     /// <summary>Show "Move back" when a reversible move exists and nothing is in flight.</summary>
     public bool ShowMoveBackButton => _hasDevDrive && CanMoveBack && !IsConfirmingMove && !IsMoving;

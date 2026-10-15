@@ -116,7 +116,7 @@ public sealed class PackageCachesViewModelTests
         Assert.IsTrue(vm.ShowDashboardCacheList);
         Assert.IsFalse(vm.ShowAllCachesOnDevDrive);
         Assert.IsFalse(vm.ShowMoveAllButton);
-        Assert.IsTrue(vm.Caches.All(c => !c.CanMove && !c.ShowMoveButton && !c.ShowMoveBackButton));
+        Assert.IsTrue(vm.Caches.All(c => !c.CanMove && !c.CanSelectForMove && !c.ShowMoveBackButton));
         Assert.AreEqual("2 package caches detected on this PC.", vm.WarningMessage);
         Assert.AreEqual(NpmSource, vm.Caches.Single(c => c.Header == "npm").ResolvedPath);
     }

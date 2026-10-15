@@ -18,12 +18,12 @@
         <!--
             Page commands. Source-volume selection belongs to the creation form below.
 
-            The comp draws this room as a modal dialog, and it stays a room here: the rail already
-            has a Create entry that six other rooms' primary action points at, and the app's version
-            of the form carries three fields the comp's does not (the VHDX path, the disk type, the
-            unit).
+            The comp draws this as a modal dialog, and it stays a page here: it opens from Drives as
+            a sub-page (the shell shows "Drives › Create Dev Drive"), several rooms' primary action
+            points at it, and the app's version of the form carries three fields the comp's does not
+            (the VHDX path, the disk type, the unit).
 
-            Cancel sits beside Create because this is the one room whose work is not saved as you go.
+            Cancel sits beside Create because this is the one page whose work is not saved as you go.
         -->
         <Grid
             Grid.Row="0"

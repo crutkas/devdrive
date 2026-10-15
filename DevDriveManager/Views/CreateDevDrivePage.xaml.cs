@@ -141,7 +141,7 @@ public sealed partial class CreateDevDrivePage : Page, INotifyPropertyChanged
 
     private void Navigate(string roomTag) => ShellPage.Current?.SelectNavItem(roomTag);
 
-    private void OnNavigateBack() => Navigate("overview");
+    private void OnNavigateBack() => Navigate("drives");
 
     // ---- Live state ------------------------------------------------------------------------------
 

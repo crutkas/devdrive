@@ -568,8 +568,9 @@ public partial class PackageCachesViewModel : ObservableObject
     private void MoveAll()
     {
         // F2: live CanMove predicate (same as UpdateWarning / ConfirmMoveAll) so the count matches the warning.
+        // Only ticked rows move; rows start ticked, so with nothing unticked this is every movable cache.
         List<PackageCacheRowViewModel> onSystem = Caches
-            .Where(c => c.CanMove)
+            .Where(c => c.CanMove && c.IsSelectedForMove)
             .ToList();
         if (onSystem.Count == 0)
         {
@@ -596,9 +597,9 @@ public partial class PackageCachesViewModel : ObservableObject
     }
 
     /// <summary>
-    /// Confirms "Move all": sequentially moves every eligible on-system cache via the SAME real per-row
-    /// engine path, with continue-on-error (one failure doesn't abort the rest) and a combined result
-    /// that reports which tools failed.
+    /// Confirms "Move all": sequentially moves every eligible, ticked on-system cache via the SAME real
+    /// per-row engine path, with continue-on-error (one failure doesn't abort the rest) and a combined
+    /// result that reports which tools failed.
     /// </summary>
     private bool CanConfirmMoveAll() =>
         HasDevDrive
@@ -618,9 +619,9 @@ public partial class PackageCachesViewModel : ObservableObject
             return;
         }
 
-        // F2: same live CanMove predicate as UpdateWarning / MoveAll.
+        // F2: same live CanMove predicate as UpdateWarning / MoveAll, and the same tick filter as MoveAll.
         List<PackageCacheRowViewModel> onSystem = Caches
-            .Where(c => c.CanMove)
+            .Where(c => c.CanMove && c.IsSelectedForMove)
             .ToList();
         if (onSystem.Count == 0)
         {

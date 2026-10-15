@@ -1,6 +1,8 @@
 using System.ComponentModel;
 using CommunityToolkit.WinUI.Animations;
 using DevDriveManager.Controls;
+using DevDriveManager.ViewModels;
+using DevDriveReclaim;
 using DevDriveStorage;
 using Microsoft.UI.Input;
 using Microsoft.UI.Xaml;
@@ -29,12 +31,16 @@ public sealed partial class SpacePage : Page, INotifyPropertyChanged
     [
         nameof(ShowOverlay),
         nameof(IsScanning),
+        nameof(IsBusy),
         nameof(LiveScanText),
         nameof(OverlayTitle),
         nameof(OverlayDetail),
+        nameof(OverlayGlyph),
     ];
 
     private readonly IVolumeProvider _volumes;
+    private readonly Func<ReclaimConfirmationRequest, Task<bool>> _confirm;
+    private List<SpaceCleanupGroup> _cleanupGroups = [];
     private bool _isLoaded;
     private bool _syncingTree;
     private bool _sourcesAttached;
@@ -52,6 +58,7 @@ public sealed partial class SpacePage : Page, INotifyPropertyChanged
     {
         _volumes = volumes;
         ViewModel = App.SharedSpace;
+        _confirm = request => ReclaimConfirmDialog.ShowAsync(XamlRoot, request);
         // Older visits may have left the app-lifetime projection in largest-files/search mode.
         // These are projection changes only, never a scan.
         ViewModel.Mode = ExplorerMode.Folders;
@@ -66,15 +73,23 @@ public sealed partial class SpacePage : Page, INotifyPropertyChanged
         Unloaded += (_, _) =>
         {
             ViewModel.PropertyChanged -= ViewModel_PropertyChanged;
+            Reclaim.PropertyChanged -= Reclaim_PropertyChanged;
             if (OperatingSystem.IsWindowsVersionAtLeast(10, 0, 19041))
                 _uiSettings.AnimationsEnabledChanged -= AnimationsEnabledChanged;
             DetachItemsSources();
+
+            // A hook holding this page's XamlRoot would show the dialog on a window that is gone.
+            if (Reclaim.ConfirmationRequested == _confirm)
+            {
+                Reclaim.ConfirmationRequested = null;
+            }
         };
     }
 
     public StorageExplorerViewModel ViewModel { get; }
 
-    public string PageTitle => RoomRegistry.Find("space")!.Title;
+    /// <summary>The clean-up scan that runs beside the map's scan, shared with Home.</summary>
+    public ReclaimViewModel Reclaim { get; } = App.SharedReclaim;
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -87,6 +102,9 @@ public sealed partial class SpacePage : Page, INotifyPropertyChanged
 
     public bool IsScanning => ViewModel.ScanState is ExplorerScanState.Scanning;
 
+    /// <summary>Either scan is still running: the map's, or the clean-up check beside it.</summary>
+    public bool IsBusy => IsScanning || Reclaim.IsScanning;
+
     public string LiveScanText => _pendingVolumeLabel is null
         ? "Scanning — results update as they are found"
         : $"Scanning {_pendingVolumeLabel} — results update as they are found";
@@ -98,18 +116,25 @@ public sealed partial class SpacePage : Page, INotifyPropertyChanged
         ExplorerScanState.Cancelled => "Scan cancelled",
         ExplorerScanState.Completed => "No files found",
         _ when App.IsSpaceFixture => "Synthetic space test data — no disk scans",
-        _ => StripEntries.Count == 0 ? "No fixed volumes available" : "Pick a volume to scan",
+        _ => StripEntries.Count == 0 ? "No drives found" : "Pick a drive to scan",
     };
 
     public string OverlayDetail => ViewModel.ScanState switch
     {
         ExplorerScanState.Scanning => ViewModel.ProgressLabel,
         ExplorerScanState.Failed => ViewModel.ErrorMessage ?? "No detail was reported.",
-        ExplorerScanState.Cancelled => "Nothing was changed. Pick a volume above to start again.",
-        ExplorerScanState.Completed => "This scope contains no readable files or folders.",
-        _ when StripEntries.Count == 0 => "No fixed volumes could be read. Check that your drive is connected and available.",
-        _ => "Choose a volume above and select Scan. A first scan reads every directory on the "
-            + "volume, so a large drive can take several minutes — you can cancel at any point.",
+        ExplorerScanState.Cancelled => "Nothing was changed.",
+        ExplorerScanState.Completed => "There is nothing here to show.",
+        _ when StripEntries.Count == 0 => "Check that your drive is connected.",
+        _ => "See what is using space on it.",
+    };
+
+    public string OverlayGlyph => ViewModel.ScanState switch
+    {
+        ExplorerScanState.Failed => "\uE783",
+        ExplorerScanState.Cancelled => "\uE711",
+        ExplorerScanState.Completed => "\uE8B7",
+        _ => "\uEDA2",
     };
 
     public static Visibility BoolToVisibility(bool value) => value ? Visibility.Visible : Visibility.Collapsed;
@@ -117,7 +142,7 @@ public sealed partial class SpacePage : Page, INotifyPropertyChanged
     public static Visibility OverlayMessageVisibility(bool isScanning) =>
         isScanning ? Visibility.Collapsed : Visibility.Visible;
 
-    // The native card fill is translucent; don't let the treemap's empty label bleed through it.
+    // The overlay is see-through, so hide the content under it rather than letting it bleed through.
     public static double ContentOpacity(bool showOverlay) => showOverlay ? 0 : 1;
 
     public static bool IsIndeterminate(double progress) => progress <= 0;
@@ -132,10 +157,21 @@ public sealed partial class SpacePage : Page, INotifyPropertyChanged
         ? $"{DevDriveCore.ByteSizeFormatter.Format((ulong)Math.Max(0, volume.FreeBytes))} free"
         : "Free space unavailable";
 
+    // Safe is the normal case, so only the exceptions get a label.
+    public static Visibility RiskLabelVisibility(ReclaimRisk risk) =>
+        risk == ReclaimRisk.Safe ? Visibility.Collapsed : Visibility.Visible;
+
+    public static string CleanupRowTip(string path, string reason) => $"{path}\n{reason}";
+
+    public static string RevealName(string name) => $"Show {name} in the map";
+
     private void OnLoadedSubscribe(object sender, RoutedEventArgs args)
     {
         ViewModel.PropertyChanged -= ViewModel_PropertyChanged;
         ViewModel.PropertyChanged += ViewModel_PropertyChanged;
+        Reclaim.PropertyChanged -= Reclaim_PropertyChanged;
+        Reclaim.PropertyChanged += Reclaim_PropertyChanged;
+        Reclaim.ConfirmationRequested = _confirm;
         FolderTree.ItemsSource = ViewModel.TreeRoots;
         StorageTreemap.Rows = ViewModel.VisibleItems;
         _sourcesAttached = true;
@@ -147,6 +183,8 @@ public sealed partial class SpacePage : Page, INotifyPropertyChanged
         UpdateAnimations();
         UpdateDerived();
         SyncTreeSelection();
+        RebuildCleanupGroups();
+        UpdateCleanupPanel();
     }
 
     private void AnimationsEnabledChanged(UISettings sender, object args) =>
@@ -179,6 +217,7 @@ public sealed partial class SpacePage : Page, INotifyPropertyChanged
         _sourcesAttached = false;
         FolderTree.ItemsSource = null;
         StorageTreemap.Rows = null;
+        CleanupList.ItemsSource = null;
     }
 
     private IReadOnlyList<VolumeStripEntry> BuildStrip()
@@ -327,8 +366,24 @@ public sealed partial class SpacePage : Page, INotifyPropertyChanged
 
     private void StorageTreemap_NavigateUpRequested(object? sender, EventArgs args) => ViewModel.NavigateUp();
 
-    private void CancelScanButton_Click(object sender, RoutedEventArgs args) => ViewModel.CancelScan();
-    private void RetryScanButton_Click(object sender, RoutedEventArgs args) => _ = ViewModel.RetryAsync();
+    private void CancelScanButton_Click(object sender, RoutedEventArgs args)
+    {
+        ViewModel.CancelScan();
+        if (Reclaim.CancelScanCommand.CanExecute(null))
+        {
+            Reclaim.CancelScanCommand.Execute(null);
+        }
+    }
+
+    private void RetryScanButton_Click(object sender, RoutedEventArgs args)
+    {
+        _ = ViewModel.RetryAsync();
+        if (ViewModel.ScenarioId is { Length: > 0 } root)
+        {
+            StartCleanupScan(root);
+        }
+    }
+
     private void VolumePicker_SelectionChanged(object sender, SelectionChangedEventArgs args)
     {
         if (VolumePicker.SelectedItem is not VolumeStripEntry entry)
@@ -342,7 +397,7 @@ public sealed partial class SpacePage : Page, INotifyPropertyChanged
 
     private void ScanButton_Click(object sender, RoutedEventArgs args)
     {
-        if (IsScanning || _selectedVolume is not StorageVolume volume)
+        if (IsBusy || Reclaim.IsReclaiming || _selectedVolume is not StorageVolume volume)
         {
             return;
         }
@@ -352,18 +407,189 @@ public sealed partial class SpacePage : Page, INotifyPropertyChanged
             string.Equals(ViewModel.ScenarioId, volume.RootPath, StringComparison.OrdinalIgnoreCase)
                 ? ViewModel.RefreshAsync()
                 : ViewModel.LoadScenarioAsync(volume.RootPath);
+        StartCleanupScan(volume.RootPath);
+    }
+
+    /// <summary>
+    /// Looks for things to clean up on the same drive, at the same time as the map scan.
+    /// </summary>
+    /// <remarks>
+    /// The system drive only checks the usual code folders: walking all of <c>C:\</c> for repos means
+    /// walking Windows too. Any other drive is checked from its root, because people clone straight
+    /// into <c>D:\</c> and the usual folder names would find nothing there.
+    /// </remarks>
+    private void StartCleanupScan(string volumeRoot)
+    {
+        if (App.IsSpaceFixture || Reclaim.IsScanning || Reclaim.IsReclaiming)
+        {
+            return;
+        }
+
+        string? systemRoot = Path.GetPathRoot(Environment.SystemDirectory);
+        bool isSystem = string.Equals(
+            volumeRoot.TrimEnd('\\'), systemRoot?.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase);
+        _ = Reclaim.ScanVolumeAsync(volumeRoot, includeWholeVolume: !isSystem);
+    }
+
+    private void Reclaim_PropertyChanged(object? sender, PropertyChangedEventArgs args)
+    {
+        switch (args.PropertyName)
+        {
+            case nameof(ReclaimViewModel.IsScanning):
+                UpdateDerived();
+                RebuildCleanupGroups();
+                break;
+            case nameof(ReclaimViewModel.IsReclaiming):
+                RefreshScanBar();
+                break;
+            case nameof(ReclaimViewModel.HasScanned):
+            case nameof(ReclaimViewModel.FoundBytes):
+                RebuildCleanupGroups();
+                break;
+        }
+
+        UpdateCleanupPanel();
+    }
+
+    /// <summary>
+    /// Rebuilds the grouped list from the categories that found something, largest first.
+    /// </summary>
+    /// <remarks>
+    /// A plain list, copied from the ViewModel's collections, so no native collection listener is
+    /// left on the app-lifetime ViewModel when the page goes away. Rows only change when a scan or a
+    /// clean-up finishes, and both are covered by the properties that call this.
+    /// </remarks>
+    private void RebuildCleanupGroups()
+    {
+        if (!_sourcesAttached)
+        {
+            return;
+        }
+
+        HashSet<string> expanded = [.. _cleanupGroups.Where(g => g.IsExpanded).Select(g => g.Id)];
+        bool fresh = _cleanupGroups.Count == 0;
+
+        _cleanupGroups = Reclaim.IsScanning
+            ? []
+            : [.. Reclaim.Categories
+                .Where(c => c.Rows.Count > 0)
+                .OrderByDescending(c => c.TotalBytes)
+                .Select(c => new SpaceCleanupGroup(c, expanded.Contains(c.Category.Id)))];
+
+        // Open the biggest group on a new result, so the list says what was found without a click.
+        if (fresh && _cleanupGroups.Count > 0)
+        {
+            _cleanupGroups[0].IsExpanded = true;
+        }
+
+        CleanupList.ItemsSource = _cleanupGroups;
+        CleanupScroller.Visibility = BoolToVisibility(_cleanupGroups.Count > 0);
+    }
+
+    private void UpdateCleanupPanel()
+    {
+        bool scanning = Reclaim.IsScanning;
+        bool reclaiming = Reclaim.IsReclaiming;
+        bool failed = !scanning && Reclaim.ScanError is not null;
+        bool found = !scanning && _cleanupGroups.Count > 0;
+        string scope = Reclaim.ScopeText;
+
+        CleanupHeadline.Text = Reclaim.FoundBytesText;
+        CleanupHeadline.Visibility = BoolToVisibility(found);
+
+        CleanupDetail.Text = scanning ? $"Looking for things to clean up on {scope}…"
+            : failed ? $"The clean-up check did not finish. {Reclaim.ScanError}"
+            : found ? $"can be freed on {scope}"
+            : string.Empty;
+        CleanupDetail.Visibility = BoolToVisibility(CleanupDetail.Text.Length > 0);
+        CleanupProgress.Visibility = BoolToVisibility(scanning || reclaiming);
+
+        string? summary = reclaiming ? Reclaim.ReclaimProgressText : Reclaim.LastRunSummary;
+        CleanupRunSummary.Text = summary ?? string.Empty;
+        CleanupRunSummary.Visibility = BoolToVisibility(!scanning && !string.IsNullOrEmpty(summary));
+        CleanupRunSummary.Foreground = (Brush)Application.Current.Resources[
+            Reclaim.LastRunHadFailures && !reclaiming ? "SystemFillColorCriticalBrush" : "TextFillColorSecondaryBrush"];
+
+        bool empty = !scanning && !failed && !found;
+        CleanupEmpty.Visibility = BoolToVisibility(empty);
+        if (empty)
+        {
+            CleanupEmptyIcon.Glyph = Reclaim.HasScanned ? "\uE73E" : "\uE721";
+            CleanupEmptyText.Text = Reclaim.HasScanned
+                ? $"Nothing to clean up on {scope}."
+                : "Scan a drive to see what you can remove.";
+        }
+
+        CleanupFooter.Visibility = BoolToVisibility(found || reclaiming);
+        CleanupButton.Content = reclaiming ? "Removing…"
+            : Reclaim.SelectedBytes > 0 ? $"Clean up {Reclaim.SelectedBytesText}"
+            : "Clean up";
+    }
+
+    /// <summary>Shows a clean-up item where it sits in the map, beside the things around it.</summary>
+    private void CleanupRow_Click(object sender, RoutedEventArgs args)
+    {
+        if (sender is not FrameworkElement { Tag: ReclaimRowViewModel row } ||
+            ViewModel.Snapshot is not { } snapshot ||
+            FindNode(snapshot, row.Path) is not { } node)
+        {
+            return;
+        }
+
+        if (node.ParentId is Guid parent)
+        {
+            ViewModel.NavigateTo(parent);
+        }
+
+        ViewModel.Select(node.Id);
+    }
+
+    /// <summary>
+    /// The node for <paramref name="path"/>, or the deepest folder the map has above it. Null when the
+    /// path is not on the scanned drive at all.
+    /// </summary>
+    private static StorageNode? FindNode(StorageSnapshot snapshot, string path)
+    {
+        string target = path.TrimEnd('\\');
+        StorageNode current = snapshot.Root;
+        if (!IsSameOrUnder(target, current.PhysicalPath))
+        {
+            return null;
+        }
+
+        while (!string.Equals(current.PhysicalPath.TrimEnd('\\'), target, StringComparison.OrdinalIgnoreCase))
+        {
+            StorageNode? next = snapshot.ChildrenOf(current.Id)
+                .FirstOrDefault(child => IsSameOrUnder(target, child.PhysicalPath));
+            if (next is null)
+            {
+                break;
+            }
+
+            current = next;
+        }
+
+        return current;
+    }
+
+    private static bool IsSameOrUnder(string target, string candidate)
+    {
+        string root = candidate.TrimEnd('\\');
+        return root.Length > 0 &&
+            (string.Equals(target, root, StringComparison.OrdinalIgnoreCase) ||
+             target.StartsWith(root + "\\", StringComparison.OrdinalIgnoreCase));
     }
 
     private void RefreshScanBar()
     {
-        ScanButton.IsEnabled = !IsScanning && _selectedVolume is not null;
-        VolumePicker.IsEnabled = !IsScanning && StripEntries.Count > 0;
+        ScanButton.IsEnabled = !IsBusy && !Reclaim.IsReclaiming && _selectedVolume is not null;
+        VolumePicker.IsEnabled = !IsBusy && StripEntries.Count > 0;
     }
 
     private void Page_KeyDown(object sender, KeyRoutedEventArgs args)
     {
         bool menu = InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Menu).HasFlag(CoreVirtualKeyStates.Down);
-        if (args.Key == VirtualKey.F5 && !IsScanning && _selectedVolume is not null)
+        if (args.Key == VirtualKey.F5 && !IsBusy && _selectedVolume is not null)
         {
             ScanButton_Click(sender, args);
             args.Handled = true;
@@ -380,4 +606,25 @@ public sealed partial class SpacePage : Page, INotifyPropertyChanged
             args.Handled = true;
         }
     }
+}
+
+/// <summary>One kind of thing the clean-up check found, shown as a group in the Space panel.</summary>
+public sealed class SpaceCleanupGroup(ReclaimCategoryViewModel category, bool isExpanded)
+{
+    public string Id { get; } = category.Category.Id;
+
+    public string Title { get; } = category.Title;
+
+    public string Glyph { get; } = category.Glyph;
+
+    public string TotalText { get; } = category.TotalText;
+
+    // A copy, so the page never listens to the shared ViewModel's collection.
+    public IReadOnlyList<ReclaimRowViewModel> Rows { get; } = [.. category.Rows];
+
+    public bool IsExpanded { get; set; } = isExpanded;
+
+    public string AutomationId => $"SpaceCleanupGroup_{Id}";
+
+    public string AutomationName => $"{Title}, {TotalText}, {Rows.Count} {(Rows.Count == 1 ? "item" : "items")}";
 }

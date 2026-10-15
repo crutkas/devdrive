@@ -1,0 +1,373 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Page
+    x:Class="DevDriveManager.Pages.DevDrivePage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:DevDriveManager"
+    xmlns:pages="using:DevDriveManager.Pages"
+    xmlns:toolkit="using:CommunityToolkit.WinUI.Controls"
+    xmlns:vm="using:DevDriveManager.ViewModels">
+
+    <Page.Resources>
+        <!-- Same rhythm as Settings: 4px between cards, a little air above each section. -->
+        <Style x:Key="DevDriveSectionHeaderStyle" TargetType="TextBlock"
+               BasedOn="{StaticResource BodyStrongTextBlockStyle}">
+            <Setter Property="Margin" Value="1,28,0,6" />
+            <Setter Property="AutomationProperties.HeadingLevel" Value="Level2" />
+        </Style>
+
+        <!-- One package cache in the recommendations panel: a tick box when it can move, how big it is. -->
+        <DataTemplate x:Key="CacheRecommendationTemplate" x:DataType="vm:PackageCacheRowViewModel">
+            <Grid Padding="8,4" ColumnSpacing="12"
+                  AutomationProperties.AutomationId="{x:Bind RowAutomationId}"
+                  AutomationProperties.Name="{x:Bind AutomationName, Mode=OneWay}"
+                  ToolTipService.ToolTip="{x:Bind LocationText, Mode=OneWay}">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="20" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <CheckBox MinWidth="0" Padding="0" VerticalAlignment="Center"
+                          IsChecked="{x:Bind IsSelectedForMove, Mode=TwoWay}"
+                          AutomationProperties.AutomationId="{x:Bind SelectAutomationId}"
+                          AutomationProperties.Name="{x:Bind pages:DevDrivePage.SelectName(Header)}"
+                          Visibility="{x:Bind local:UiHelpers.BoolToVisibility(CanSelectForMove), Mode=OneWay}" />
+                <FontIcon Glyph="{x:Bind pages:DevDrivePage.CacheGlyph(IsOnDevDrive), Mode=OneWay}"
+                          FontSize="16" VerticalAlignment="Center" HorizontalAlignment="Center"
+                          Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                          Visibility="{x:Bind local:UiHelpers.InvertBoolToVisibility(CanSelectForMove), Mode=OneWay}" />
+                <TextBlock Grid.Column="1" Text="{x:Bind Header}" VerticalAlignment="Center"
+                           TextTrimming="CharacterEllipsis" />
+                <TextBlock Grid.Column="2" Text="{x:Bind SizeText, Mode=OneWay}" VerticalAlignment="Center"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <Button Grid.Column="3" Padding="8" VerticalAlignment="Center"
+                        Background="Transparent" BorderBrush="Transparent"
+                        Command="{x:Bind MoveBackCommand}"
+                        ToolTipService.ToolTip="Move back"
+                        AutomationProperties.AutomationId="{x:Bind MoveBackButtonAutomationId}"
+                        AutomationProperties.Name="{x:Bind pages:DevDrivePage.MoveBackName(Header)}"
+                        Visibility="{x:Bind local:UiHelpers.BoolToVisibility(ShowMoveBackButton), Mode=OneWay}">
+                    <FontIcon Glyph="&#xE7A7;" FontSize="14" />
+                </Button>
+
+                <Grid Grid.Row="1" Grid.ColumnSpan="4" Margin="0,6,0,0" ColumnSpacing="8"
+                      Visibility="{x:Bind local:UiHelpers.BoolToVisibility(IsMoving), Mode=OneWay}">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel VerticalAlignment="Center" Spacing="4">
+                        <ProgressBar Maximum="100" Value="{x:Bind MoveProgressPercent, Mode=OneWay}"
+                                     AutomationProperties.AutomationId="{x:Bind MoveProgressAutomationId}"
+                                     AutomationProperties.Name="Move progress" />
+                        <TextBlock Text="{x:Bind MoveProgressText, Mode=OneWay}"
+                                   Style="{StaticResource CaptionTextBlockStyle}"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                   TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
+                    <Button Grid.Column="1" Content="Cancel" VerticalAlignment="Center"
+                            Command="{x:Bind CancelActiveMoveCommand}"
+                            AutomationProperties.AutomationId="{x:Bind CancelActiveMoveButtonAutomationId}"
+                            AutomationProperties.Name="Cancel move" />
+                </Grid>
+
+                <TextBlock Grid.Row="2" Grid.ColumnSpan="4" Margin="0,6,0,0" TextWrapping="Wrap"
+                           Text="{x:Bind MoveResultText, Mode=OneWay}"
+                           Style="{StaticResource CaptionTextBlockStyle}"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                           AutomationProperties.AutomationId="{x:Bind MoveResultAutomationId}"
+                           Visibility="{x:Bind local:UiHelpers.BoolToVisibility(ShowMoveResult), Mode=OneWay}" />
+            </Grid>
+        </DataTemplate>
+    </Page.Resources>
+
+    <Grid Margin="18,4,18,12" ColumnSpacing="12">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" MinWidth="400" />
+            <ColumnDefinition Width="320" />
+        </Grid.ColumnDefinitions>
+
+        <ScrollViewer AutomationProperties.AutomationId="DevDriveScrollViewer"
+                      HorizontalScrollMode="Disabled"
+                      VerticalScrollBarVisibility="Auto">
+            <StackPanel Margin="0,0,0,24" Spacing="4">
+
+                <!-- ============ No Dev Drive yet: say what it is and offer to make one ============ -->
+                <Grid Padding="24" ColumnSpacing="20" CornerRadius="8" BorderThickness="1"
+                      Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                      BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                      AutomationProperties.AutomationId="DevDriveEmptyState"
+                      AutomationProperties.Name="No Dev Drive on this PC"
+                      Visibility="{x:Bind local:UiHelpers.InvertBoolToVisibility(ViewModel.HasDevDrive), Mode=OneWay}">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <FontIcon Glyph="&#xEC7A;" FontSize="40" VerticalAlignment="Top"
+                              Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                    <StackPanel Grid.Column="1" Spacing="8">
+                        <TextBlock Text="Set up a Dev Drive"
+                                   Style="{StaticResource SubtitleTextBlockStyle}"
+                                   AutomationProperties.HeadingLevel="Level2" />
+                        <TextBlock MaxWidth="640" HorizontalAlignment="Left" TextWrapping="Wrap"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                   Text="A Dev Drive is a fast ReFS volume for code, builds, and package caches. Antivirus scans it without slowing you down." />
+                        <Button Margin="0,8,0,0"
+                                Content="Create Dev Drive"
+                                Style="{StaticResource AccentButtonStyle}"
+                                Command="{x:Bind ViewModel.CreateDevDriveCommand}"
+                                AutomationProperties.AutomationId="CreateDevDriveButton" />
+                    </StackPanel>
+                </Grid>
+
+                <!-- ============ The Dev Drive(s) ============ -->
+                <Grid AutomationProperties.AutomationId="DevDriveCards"
+                      AutomationProperties.Name="Your Dev Drives"
+                      Visibility="{x:Bind local:UiHelpers.BoolToVisibility(ViewModel.HasDevDrive), Mode=OneWay}">
+                    <ItemsRepeater ItemsSource="{x:Bind DriveCards}">
+                        <ItemsRepeater.Layout>
+                            <UniformGridLayout ItemsStretch="Fill"
+                                               MaximumRowsOrColumns="{x:Bind DriveColumns, Mode=OneWay}"
+                                               MinItemWidth="300"
+                                               MinColumnSpacing="12"
+                                               MinRowSpacing="12" />
+                        </ItemsRepeater.Layout>
+                        <ItemsRepeater.ItemTemplate>
+                            <DataTemplate x:DataType="vm:DriveCardViewModel">
+                                <Grid Padding="16" RowSpacing="12" CornerRadius="8" BorderThickness="1"
+                                      Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                                      BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                      AutomationProperties.AutomationId="{x:Bind AutomationId}"
+                                      AutomationProperties.Name="{x:Bind AutomationName}">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+
+                                    <Grid ColumnSpacing="12">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <FontIcon Glyph="{x:Bind Glyph}" FontSize="24" VerticalAlignment="Center"
+                                                  Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                            <TextBlock Text="{x:Bind Title}"
+                                                       Style="{StaticResource BodyStrongTextBlockStyle}"
+                                                       TextTrimming="CharacterEllipsis" />
+                                            <TextBlock Text="{x:Bind Subtitle}"
+                                                       Style="{StaticResource CaptionTextBlockStyle}"
+                                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                       TextTrimming="CharacterEllipsis" />
+                                        </StackPanel>
+                                        <Border Grid.Column="2" VerticalAlignment="Center"
+                                                Padding="8,2" CornerRadius="10" BorderThickness="1"
+                                                Background="{ThemeResource ControlFillColorSecondaryBrush}"
+                                                BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
+                                                Visibility="{x:Bind local:UiHelpers.BoolToVisibility(HasBadge)}">
+                                            <TextBlock Text="{x:Bind BadgeText}"
+                                                       Style="{StaticResource CaptionTextBlockStyle}" />
+                                        </Border>
+                                    </Grid>
+
+                                    <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8">
+                                        <TextBlock Text="{x:Bind FreeText}"
+                                                   Style="{StaticResource SubtitleTextBlockStyle}" />
+                                        <TextBlock Text="{x:Bind OfText}" VerticalAlignment="Bottom" Margin="0,0,0,3"
+                                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                    </StackPanel>
+
+                                    <StackPanel Grid.Row="2" Spacing="8"
+                                                Visibility="{x:Bind local:UiHelpers.BoolToVisibility(IsSizeKnown)}">
+                                        <Grid Height="8" CornerRadius="4"
+                                              Background="{ThemeResource ControlStrongFillColorDisabledBrush}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="{x:Bind UsedWidth}" />
+                                                <ColumnDefinition Width="{x:Bind FreeWidth}" />
+                                            </Grid.ColumnDefinitions>
+                                            <Border CornerRadius="4,0,0,4"
+                                                    Background="{ThemeResource AccentFillColorDefaultBrush}"
+                                                    Visibility="{x:Bind local:UiHelpers.InvertBoolToVisibility(IsLow)}" />
+                                            <Border CornerRadius="4,0,0,4"
+                                                    Background="{ThemeResource SystemFillColorCriticalBrush}"
+                                                    Visibility="{x:Bind local:UiHelpers.BoolToVisibility(IsLow)}" />
+                                        </Grid>
+                                        <StackPanel Orientation="Horizontal" Spacing="6">
+                                            <FontIcon Glyph="&#xE7BA;" FontSize="14"
+                                                      Foreground="{ThemeResource SystemFillColorCriticalBrush}"
+                                                      ToolTipService.ToolTip="{x:Bind LowText}"
+                                                      Visibility="{x:Bind local:UiHelpers.BoolToVisibility(IsLow)}" />
+                                            <TextBlock Text="{x:Bind UsedText}" TextTrimming="CharacterEllipsis"
+                                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsRepeater.ItemTemplate>
+                    </ItemsRepeater>
+                </Grid>
+
+                <!-- ============ What lives on it ============ -->
+                <TextBlock Text="Set up" Style="{StaticResource DevDriveSectionHeaderStyle}"
+                           AutomationProperties.AutomationId="DevDriveSetupHead"
+                           Visibility="{x:Bind local:UiHelpers.BoolToVisibility(ViewModel.HasDevDrive), Mode=OneWay}" />
+
+                <toolkit:SettingsCard Header="Performance mode"
+                                      Description="Antivirus scans files in the background, so builds stay fast."
+                                      AutomationProperties.AutomationId="DevDrivePerformanceMode"
+                                      Visibility="{x:Bind local:UiHelpers.BoolToVisibility(ViewModel.HasDevDrive), Mode=OneWay}">
+                    <toolkit:SettingsCard.HeaderIcon><FontIcon Glyph="&#xEC4A;" /></toolkit:SettingsCard.HeaderIcon>
+                    <StackPanel Orientation="Horizontal" Spacing="12">
+                        <TextBlock VerticalAlignment="Center"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                   Text="{x:Bind PerformanceModeState, Mode=OneWay}"
+                                   AutomationProperties.AutomationId="DevDrivePerformanceModeState" />
+                        <Button Content="Turn on"
+                                Command="{x:Bind ViewModel.EnablePerformanceModeCommand}"
+                                AutomationProperties.AutomationId="DevDriveTurnOnPerformanceMode"
+                                Visibility="{x:Bind local:UiHelpers.BoolToVisibility(ViewModel.Trust.CanTurnOnPerformanceMode), Mode=OneWay}" />
+                        <Button Content="Windows Security"
+                                Command="{x:Bind ViewModel.OpenWindowsSecurityCommand}"
+                                ToolTipService.ToolTip="{x:Bind ViewModel.Trust.PerformanceModePolicyNote}"
+                                AutomationProperties.AutomationId="DevDriveOpenWindowsSecurity"
+                                Visibility="{x:Bind local:UiHelpers.BoolToVisibility(ViewModel.Trust.IsPerformanceModePolicyControlled), Mode=OneWay}" />
+                    </StackPanel>
+                </toolkit:SettingsCard>
+
+                <toolkit:SettingsCard Header="Create another Dev Drive"
+                                      Description="Add a second volume, or a virtual disk you can move between PCs."
+                                      IsClickEnabled="True" Tag="create" Click="Room_Click"
+                                      AutomationProperties.AutomationId="DevDriveCreateAnother"
+                                      Visibility="{x:Bind local:UiHelpers.BoolToVisibility(ViewModel.HasDevDrive), Mode=OneWay}">
+                    <toolkit:SettingsCard.HeaderIcon><FontIcon Glyph="&#xE710;" /></toolkit:SettingsCard.HeaderIcon>
+                </toolkit:SettingsCard>
+
+                <!-- ============ Go deeper ============ -->
+                <TextBlock Text="More" Style="{StaticResource DevDriveSectionHeaderStyle}"
+                           AutomationProperties.AutomationId="DevDriveMoreHead" />
+
+                <toolkit:SettingsCard Header="Compare speed"
+                                      Description="Time builds and package restores on a Dev Drive and on your other drives."
+                                      IsClickEnabled="True" Tag="benchmarks" Click="Room_Click"
+                                      AutomationProperties.AutomationId="DevDriveCompareSpeedLink">
+                    <toolkit:SettingsCard.HeaderIcon><FontIcon Glyph="&#xE9D9;" /></toolkit:SettingsCard.HeaderIcon>
+                </toolkit:SettingsCard>
+
+                <toolkit:SettingsCard Header="Drives and filters"
+                                      Description="Every volume on this PC, its trust state, and the filters that run on it."
+                                      IsClickEnabled="True" Tag="volumes" Click="Room_Click"
+                                      AutomationProperties.AutomationId="DevDriveVolumesLink">
+                    <toolkit:SettingsCard.HeaderIcon><FontIcon Glyph="&#xEDA2;" /></toolkit:SettingsCard.HeaderIcon>
+                </toolkit:SettingsCard>
+
+                <toolkit:SettingsCard Header="Storage settings"
+                                      Description="Resize, format, or delete volumes in Windows Settings."
+                                      IsClickEnabled="True"
+                                      Command="{x:Bind ViewModel.ManageInStorageCommand}"
+                                      AutomationProperties.AutomationId="DevDriveStorageSettingsLink">
+                    <toolkit:SettingsCard.HeaderIcon><FontIcon Glyph="&#xE713;" /></toolkit:SettingsCard.HeaderIcon>
+                    <toolkit:SettingsCard.ActionIcon><FontIcon Glyph="&#xE8A7;" /></toolkit:SettingsCard.ActionIcon>
+                </toolkit:SettingsCard>
+            </StackPanel>
+        </ScrollViewer>
+
+        <!-- Package caches that belong on the Dev Drive, and the way to move them there. -->
+        <Grid x:Name="DevDriveCachePanel" Grid.Column="1"
+              Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+              BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1"
+              CornerRadius="{ThemeResource ControlCornerRadius}"
+              AutomationProperties.AutomationId="DevDriveCachePanel"
+              AutomationProperties.Name="Recommended for your Dev Drive">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <StackPanel Padding="16,14,16,12" Spacing="2">
+                <TextBlock Text="Recommended for your Dev Drive" Style="{StaticResource BodyStrongTextBlockStyle}"
+                           AutomationProperties.HeadingLevel="Level2" />
+                <TextBlock x:Name="CacheHeadline" Style="{StaticResource SubtitleTextBlockStyle}"
+                           Visibility="Collapsed"
+                           AutomationProperties.AutomationId="DevDriveCacheHeadline" />
+                <TextBlock x:Name="CacheDetail" Style="{StaticResource CaptionTextBlockStyle}"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"
+                           AutomationProperties.AutomationId="DevDriveCacheDetail" />
+                <ProgressBar x:Name="CacheProgress" Margin="0,8,0,0" IsIndeterminate="True"
+                             Visibility="Collapsed"
+                             AutomationProperties.Name="Looking for package caches" />
+                <InfoBar x:Name="MoveAllResultBar" Margin="0,8,0,0" IsClosable="True"
+                         Title="Package cache move"
+                         IsOpen="{x:Bind Caches.ShowMoveAllResult, Mode=TwoWay}"
+                         Message="{x:Bind Caches.MoveAllResultText, Mode=OneWay}"
+                         AutomationProperties.AutomationId="MoveAllResult" />
+                <InfoBar x:Name="CachesActionError" Margin="0,8,0,0" IsClosable="True" Severity="Error"
+                         Title="Package cache action failed"
+                         AutomationProperties.AutomationId="CachesActionError" />
+            </StackPanel>
+
+            <ScrollViewer x:Name="CacheScroller" Grid.Row="1" Padding="8,0,8,8"
+                          HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto"
+                          AutomationProperties.AutomationId="DevDriveCacheScroller">
+                <StackPanel>
+                    <ItemsRepeater x:Name="CacheToMoveList"
+                                   ItemTemplate="{StaticResource CacheRecommendationTemplate}"
+                                   AutomationProperties.AutomationId="DevDriveCacheList"
+                                   AutomationProperties.Name="Package caches to move">
+                        <ItemsRepeater.Layout>
+                            <StackLayout Spacing="2" />
+                        </ItemsRepeater.Layout>
+                    </ItemsRepeater>
+                    <TextBlock x:Name="CacheOnDriveHead" Margin="8,16,8,4" Text="On your Dev Drive"
+                               Style="{StaticResource CaptionTextBlockStyle}"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                               Visibility="Collapsed"
+                               AutomationProperties.HeadingLevel="Level3"
+                               AutomationProperties.AutomationId="DevDriveCacheOnDriveHead" />
+                    <ItemsRepeater x:Name="CacheOnDriveList"
+                                   ItemTemplate="{StaticResource CacheRecommendationTemplate}"
+                                   AutomationProperties.AutomationId="DevDriveCacheOnDriveList"
+                                   AutomationProperties.Name="Package caches on your Dev Drive">
+                        <ItemsRepeater.Layout>
+                            <StackLayout Spacing="2" />
+                        </ItemsRepeater.Layout>
+                    </ItemsRepeater>
+                </StackPanel>
+            </ScrollViewer>
+
+            <StackPanel x:Name="CacheEmpty" Grid.Row="1" Padding="24" Spacing="12" Visibility="Collapsed"
+                        HorizontalAlignment="Center" VerticalAlignment="Center">
+                <FontIcon Glyph="&#xE7B8;" FontSize="32"
+                          Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                <TextBlock Text="No package caches found." TextAlignment="Center" TextWrapping="Wrap"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                           AutomationProperties.AutomationId="DevDriveCacheEmpty" />
+            </StackPanel>
+
+            <Grid x:Name="CacheFooter" Grid.Row="2" Padding="16,12" ColumnSpacing="8" Visibility="Collapsed"
+                  BorderThickness="0,1,0,0" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <HyperlinkButton Content="How it works" Padding="4,5" VerticalAlignment="Center"
+                                 Click="LearnAboutCacheMoves_Click"
+                                 AutomationProperties.AutomationId="LearnWhatThisDoes" />
+                <Button x:Name="MoveSelectedButton" Grid.Column="1" Content="Move"
+                        Style="{StaticResource AccentButtonStyle}"
+                        Click="MoveAll_Click"
+                        AutomationProperties.AutomationId="MoveAllButton"
+                        Visibility="{x:Bind local:UiHelpers.BoolToVisibility(Caches.ShowMoveAllButton), Mode=OneWay}" />
+            </Grid>
+        </Grid>
+    </Grid>
+</Page>

@@ -272,16 +272,44 @@ public static class AttentionSignalBuilder
             return null;
         }
 
+        // The caches that would move are the reason to want one, so the signal names them. Their
+        // size is shown but not ranked on: moving a cache returns nothing on its own, it changes
+        // which volume carries it.
+        IReadOnlyList<CacheSignalInput> movable = inputs.WatchCachesOffDevDrive ? inputs.CachesOffDevDrive : [];
+        long movableBytes = movable.Sum(c => c.SizeBytes);
+        string detail = movable.Count switch
+        {
+            0 => "Source and package caches are all on volumes the antivirus filter scans inline",
+            _ => $"{EcosystemList(movable)} {(movable.Count == 1 ? "cache" : "caches")}"
+                + (movableBytes > 0 ? $" ({ByteSizeFormatter.Format((ulong)movableBytes)})" : string.Empty)
+                + " could move onto one, out of the antivirus filter's way",
+        };
+
         return new AttentionSignal
         {
             Id = "NoDevDrive",
             Title = "There is no Dev Drive on this PC",
-            Detail = "Source and package caches are all on volumes the antivirus filter scans inline",
+            Detail = detail,
             Where = VolumeList(inputs.Volumes),
             Impact = "not set up",
             Kind = SignalKind.Warn,
             RoomTag = "create",
             RoomLabel = "Create",
+        };
+    }
+
+    /// <summary>"pip", "npm and pip", "npm, NuGet and pip" — sorted, so the sentence is stable.</summary>
+    private static string EcosystemList(IReadOnlyList<CacheSignalInput> caches)
+    {
+        string[] names = [.. caches
+            .Select(c => c.Ecosystem)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Order(StringComparer.OrdinalIgnoreCase)];
+
+        return names.Length switch
+        {
+            1 => names[0],
+            _ => $"{string.Join(", ", names[..^1])} and {names[^1]}",
         };
     }
 

@@ -4,11 +4,13 @@
     Follows the winui-ui-testing skill: one batch script, single run, structured results.
     Drives the *built, running* app via `winapp ui` (UI Automation).
 
-    The redesign splits the old single endless-scroll page into a NavigationView shell of focused
-    rooms — Overview, Reclaim, Space, Caches, Drives, Benchmarks, Create Dev Drive and Settings —
-    all backed by ONE shared MainPageViewModel (App.Shared), loaded once. This suite:
-      (1) asserts the shell + every nav item renders;
-      (2) navigates to each page and asserts a page-specific anchor element;
+    The redesign splits the old single endless-scroll page into a NavigationView shell of three rooms
+    plus Settings — Home; Space (one page: the map, with a clean-up panel beside it); Dev Drive
+    (tabs: Overview, Package caches, with the sub-pages Create Dev Drive, Compare speed and Drives
+    and filters reached from its Overview links under a "Dev Drive > ..." breadcrumb) — all backed
+    by ONE shared MainPageViewModel (App.Shared), loaded once. This suite:
+      (1) asserts the shell + every nav item renders, and that the retired rail rooms are gone;
+      (2) navigates to each page (rail room, shell tab or Dev Drive link) and asserts a page anchor;
       (3) checks the headline data is correct (G: is a ReFS Dev Drive; C: is plain NTFS);
       (4) checks the package-cache status grouping (Needs action / On your Dev Drive / Not installed);
       (5) exercises the one real preference — the Light/Dark/System theme override — and asserts the
@@ -25,7 +27,7 @@
       # indicator, and note its PID. This script exits with code 2 if the seam is absent.
       .\ui-tests.ps1 -AppPid <PID>
 
-      # ...and additionally run the Reclaim scan assertions, which are minutes of real disk I/O:
+      # ...and additionally run the Space clean-up scan assertions, which are minutes of real disk I/O:
       .\ui-tests.ps1 -AppPid <PID> -IncludeSlowScans
 
     Exit code 0 = all passed, 1 = one or more failures, 2 = safe mutation mode is absent.
@@ -34,11 +36,11 @@
 param(
     [Parameter(Mandatory)][int]$AppPid,
 
-    # A real Reclaim scan walks every source tree on the machine and takes over a minute, so the
-    # assertions that need one are opt-in rather than paid for on every structural run. They are the
-    # only place the room's post-scan selection state can be observed at all: ReclaimViewModel cannot
-    # be link-compiled into a unit test, because StatusEmphasis lives in a control's code-behind and
-    # would drag Microsoft.UI.Xaml in with it.
+    # A real Space scan maps a whole volume and walks its source trees for clean-up, and takes over a
+    # minute, so the assertions that need one are opt-in rather than paid for on every structural run.
+    # They are the only place the clean-up panel's post-scan selection state can be observed at all:
+    # ReclaimViewModel cannot be link-compiled into a unit test, because StatusEmphasis lives in a
+    # control's code-behind and would drag Microsoft.UI.Xaml in with it.
     [switch]$IncludeSlowScans)
 # NOTE: do NOT name the parameter $Pid — it is read-only in PowerShell.
 
@@ -112,12 +114,19 @@ function Assert-Present([string[]]$ids, [int]$timeoutMs = 3000) {
     }
 }
 
+# Property ASSERTION: a bare `wait-for -p` only fails a test when it is the block's LAST native call,
+# and a later Test-Present resets the exit code — so mid-block property checks must throw themselves.
+function Assert-Value([string]$id, [string]$property, [string]$value, [int]$timeoutMs = 3000) {
+    winapp ui wait-for $id -a $AppPid -p $property --value $value -t $timeoutMs 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "'$id' $property never read '$value'." }
+}
+
 # How many rows a list is actually showing.
 #
-# Counted as ListItems from the control view rather than by AutomationId, because ReclaimPage is the
-# one room with no ContainerContentChanging hook, so its per-row ids never reach UIA at all. Grepping
-# for ReclaimRow_* there returns nothing whether the table is full or empty — a test written that way
-# reports PASS for exactly the state it was meant to catch.
+# Counted as ListItems from the control view rather than by AutomationId, because a ListView without a
+# ContainerContentChanging hook never puts its per-row ids into UIA. Grepping for row ids there returns
+# nothing whether the table is full or empty — a test written that way reports PASS for exactly the
+# state it was meant to catch.
 #
 # `--depth 1` keeps this counting containers rather than the labels inside them.
 function Get-RowCount([string]$listId) {
@@ -169,6 +178,53 @@ function Goto([string]$navId, [string]$anchorId) {
     winapp ui wait-for $anchorId -a $AppPid -t 5000 | Out-Null
 }
 
+# Space is one page with no tab bar; what can be cleaned up is the panel beside its map.
+function Goto-SpaceMap  { Goto "NavSpace" "SpaceFolderTree" }
+function Goto-Reclaim   { Goto "NavSpace" "SpaceCleanupPanel" }
+# Dev Drive is one page too; its package caches are the "Recommended" panel beside it.
+function Goto-DevDrive  { Goto "NavDrives" "DevDriveScrollViewer" }
+function Goto-Caches    { Goto "NavDrives" "DevDriveCachePanel" }
+
+# Dev Drive's sub-pages are reached from links on its page, never from the rail.
+function Goto-DevDriveLink([string]$linkId, [string]$anchorId) {
+    Goto-DevDrive
+    winapp ui invoke $linkId -a $AppPid 2>$null | Out-Null
+    Start-Sleep -Milliseconds 500
+    winapp ui wait-for $anchorId -a $AppPid -t 5000 | Out-Null
+}
+
+# Create is the empty state's button on a PC without a Dev Drive, and "Create another" once one exists.
+function Get-CreateTrigger {
+    if (Test-Present "CreateDevDriveButton") { return "CreateDevDriveButton" }
+    return "DevDriveCreateAnother"
+}
+function Goto-Create {
+    Goto-DevDrive
+    winapp ui invoke (Get-CreateTrigger) -a $AppPid 2>$null | Out-Null
+    Start-Sleep -Milliseconds 500
+    winapp ui wait-for "CreateFormHead" -a $AppPid -t 5000 | Out-Null
+}
+
+# Breadcrumb items are generated from strings and carry no AutomationId: find one by Name under
+# PageBreadcrumb and invoke its slug straight away (slugs are only valid for the inspect that made them).
+function Invoke-Crumb([string]$name) {
+    $obj = winapp ui inspect "PageBreadcrumb" -a $AppPid --json --depth 6 2>$null | Out-String | ConvertFrom-Json
+    $queue = [System.Collections.Generic.Queue[object]]::new()
+    foreach ($w in $obj.windows) { foreach ($e in $w.elements) { $queue.Enqueue($e) } }
+    $textMatch = $null
+    while ($queue.Count -gt 0) {
+        $n = $queue.Dequeue()
+        if ($n.name -eq $name) {
+            if ($n.className -like '*BreadcrumbBarItem') { $textMatch = $n; break }
+            if (-not $textMatch) { $textMatch = $n }
+        }
+        foreach ($c in $n.children) { $queue.Enqueue($c) }
+    }
+    if (-not $textMatch) { throw "No '$name' crumb in PageBreadcrumb." }
+    # invoke falls back to the nearest invokable ancestor when the match is the crumb's text.
+    winapp ui invoke $textMatch.selector -a $AppPid 2>$null | Out-Null
+}
+
 # Select a row and wait until a companion element reflects the selection.
 #
 # This goes through UIA's SelectionItemPattern rather than `winapp ui click`, which simulates a
@@ -206,126 +262,131 @@ if ($LASTEXITCODE -ne 0) {
 #  (1) Shell + navigation rail render
 # ─────────────────────────────────────────────────────────────────────────────
 Test-UI "Shell NavigationView present"      { winapp ui wait-for "ShellNavView"     -a $AppPid -t 6000 }
-Test-UI "Nav: Dashboard present"            { winapp ui wait-for "NavDashboard"     -a $AppPid -t 4000 }
-Test-UI "Nav: Reclaim present"              { winapp ui wait-for "NavReclaim"       -a $AppPid -t 4000 }
-Test-UI "Nav: Package caches present"       { winapp ui wait-for "NavPackageCaches" -a $AppPid -t 4000 }
-Test-UI "Nav: Benchmarks present"           { winapp ui wait-for "NavBenchmarks"    -a $AppPid -t 4000 }
-Test-UI "Nav: Drives present"               { winapp ui wait-for "NavDrives"        -a $AppPid -t 4000 }
-Test-UI "Nav: Space present"                { winapp ui wait-for "NavSpace"         -a $AppPid -t 4000 }
-Test-UI "Nav: Create Dev Drive present"     { winapp ui wait-for "NavCreate"        -a $AppPid -t 4000 }
+Test-UI "Nav: Home present"                 { winapp ui wait-for "NavDashboard" -a $AppPid -p Name --value "Home"      -t 4000 }
+Test-UI "Nav: Space present"                { winapp ui wait-for "NavSpace"     -a $AppPid -p Name --value "Space"     -t 4000 }
+Test-UI "Nav: Dev Drive present"            { winapp ui wait-for "NavDrives"    -a $AppPid -p Name --value "Dev Drive" -t 4000 }
+Test-UI "Nav: Settings present"             { winapp ui wait-for "SettingsItem" -a $AppPid -t 4000 }
+# Clean up is a panel on Space, Package caches a Dev Drive tab, Benchmarks and Create Dev Drive
+# are Dev Drive sub-pages. None of them is a rail room any more.
+Test-UI "Nav: retired rooms are not on the rail" {
+    foreach ($id in @("NavReclaim", "NavPackageCaches", "NavBenchmarks", "NavCreate")) {
+        if (Test-Present $id 1000) { throw "'$id' should no longer be a rail room." }
+    }
+}
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  (2) Overview — the landing room. Ranks what this machine needs and routes each finding to the
-#      room that acts on it. Everything here is derived from the other rooms' data, so the assertions
-#      are about the room's own furniture (strip, table, chart, inspector, status bar) rather than
-#      about any particular finding — which findings appear depends entirely on the test machine.
+#  (2) Overview — the landing room. Two questions only: how do my drives look (used, reclaimable,
+#      free) and what could this PC gain (a Dev Drive, caches moved onto it, space to get back).
+#      Everything here is derived from the other rooms' data, so the assertions are about the room's
+#      own furniture rather than any particular finding — which findings appear depends entirely on
+#      the test machine.
 # ─────────────────────────────────────────────────────────────────────────────
-Test-UI "Navigate to Overview"               { Goto "NavDashboard" "SignalsSubtitle" }
+Test-UI "Navigate to Home"                   { Goto "NavDashboard" "OverviewDrives" }
+Test-UI "Home: the room's own title reads Home" {
+    winapp ui wait-for "PageTitle" -a $AppPid -p Name --value "Home" -t 3000
+}
 Test-UI "Overview: no display-only volume strip" { winapp ui wait-for "OverviewVolumeStrip" -a $AppPid --gone -t 3000 }
 Test-UI "Overview: scan action"              { winapp ui wait-for "ScanBarScanButton"     -a $AppPid -t 3000 }
-Test-UI "Overview: last-scan chip"           { winapp ui wait-for "LastScanChip"          -a $AppPid -t 3000 }
-Test-UI "Overview: free-space chart card"    { winapp ui wait-for "TrendSubtitle"         -a $AppPid -t 3000 }
-Test-UI "Overview: inspector title"          { winapp ui wait-for "OverviewInspectorTitle" -a $AppPid -t 3000 }
-Test-UI "Overview: coverage facts"           { winapp ui wait-for "CoverageNodes"        -a $AppPid -t 3000 }
-Test-UI "Overview: status bar"               { winapp ui wait-for "OverviewStatusBar"     -a $AppPid -t 3000 }
-Test-UI "Overview: inspector footnote"       { winapp ui wait-for "OverviewFootNote"      -a $AppPid -t 3000 }
-
-# The signals table and its empty state are mutually exclusive, and which one shows depends on what
-# the machine actually has to report — so assert that the room committed to one of them.
-Test-UI "Overview: signals table or empty state" {
-    if (-not ((Test-Present "SignalsList") -or (Test-Present "SignalsEmptyTitle"))) {
-        throw "neither the signals table nor its empty state rendered"
-    }
-    winapp ui wait-for "SignalsSubtitle" -a $AppPid -t 3000 | Out-Null
+Test-UI "Overview: no last-scan caption"     { winapp ui wait-for "LastScanChip"          -a $AppPid --gone -t 3000 }
+Test-UI "Overview: opportunities header"     { winapp ui wait-for "OverviewOpportunities" -a $AppPid -t 3000 }
+Test-UI "Overview: quick actions"            { winapp ui wait-for "OverviewQuickActions"  -a $AppPid -t 3000 }
+Test-UI "Overview: quick actions lead to Space, Clean up and Package caches" {
+    Assert-Present @("OverviewQuick_space", "OverviewQuick_reclaim", "OverviewQuick_caches")
+    if (Test-Present "OverviewQuick_benchmarks" 500) { throw "Compare speed is no longer a quick action." }
+}
+Test-UI "Overview: 'See what takes space' opens the Space map" {
+    winapp ui invoke "OverviewQuick_space" -a $AppPid 2>$null | Out-Null
+    winapp ui wait-for "SpaceFolderTree" -a $AppPid -t 5000 | Out-Null
+    Assert-Value "NavSpace" "IsSelected" "True"
+    Goto "NavDashboard" "OverviewDrives"
+}
+Test-UI "Overview: cancel is offered only while scanning" {
+    if (Test-Present "OverviewCancelScan") { throw "a cancel button is showing while nothing is scanning" }
 }
 
-# The chart draws only once two readings sit 30 minutes apart, which a fresh profile never has —
-# so accept either the plotted chart or the honest "not enough history yet" card.
-Test-UI "Overview: chart or not-enough-history" {
-    if (-not ((Test-Present "FreeSpaceChart") -or (Test-Present "TrendEmptyTitle"))) {
-        throw "the trend card rendered neither a chart nor its empty state"
-    }
-    winapp ui wait-for "TrendSubtitle" -a $AppPid -t 3000 | Out-Null
+# Every machine has at least its system drive, so a card for it is a hard requirement. The card's
+# name must carry free space, because that is the one figure the room exists to show.
+Test-UI "Overview: a card per drive" {
+    $card = Get-Selectors "OverviewScrollViewer" | Where-Object { $_ -clike 'OverviewDrive_*' } | Select-Object -First 1
+    if (-not $card) { throw "no drive cards rendered" }
+    $name = Get-Name $card
+    if ($name -notmatch 'free') { throw "$card does not say how much is free: '$name'" }
 }
 
-# Selecting a signal explains it in place; only the GOES TO chip leaves the room. Both halves are
-# asserted because one gesture doing both is exactly the defect this split fixed.
-Test-UI "Overview: selecting a signal explains it without navigating" {
-    # Signal ids are derived from the finding, so they are discovered rather than hard-coded.
-    $row = Get-Selectors "SignalsList" | Where-Object { $_ -clike 'Signal_*' } | Select-Object -First 1
-    if (-not $row) {
-        # A machine with nothing to report has no row to select; the empty state must be why.
-        if (-not (Test-Present "SignalsEmptyTitle")) { throw "no signal rows and no empty state" }
-        winapp ui wait-for "SignalsSubtitle" -a $AppPid -t 3000 | Out-Null
-        return
+# The suggestions list and its empty state are mutually exclusive, and which one shows depends on what
+# the machine actually has to offer — so assert that the room committed to one of them.
+Test-UI "Overview: opportunities or empty state" {
+    $row = Get-Selectors "OverviewScrollViewer" | Where-Object { $_ -clike 'Signal_*' } | Select-Object -First 1
+    if (-not $row -and -not (Test-Present "OverviewOpportunitiesEmpty")) {
+        throw "neither an opportunity nor the empty state rendered"
     }
-    if (-not (Select-Until $row "OverviewInspectorTitle" 'About this signal')) {
-        throw "selecting a signal did not fill the inspector"
-    }
-    if ([string]::IsNullOrWhiteSpace((Get-Name "OverviewSelectionDetail"))) {
-        throw "the inspector did not say why the signal is listed"
-    }
-    # Still in Overview — selection must not navigate.
-    winapp ui wait-for "SignalsSubtitle" -a $AppPid -t 3000 | Out-Null
 }
 
-Test-UI "Overview: the GOES TO chip opens that room" {
-    $chip = Get-Selectors "SignalsList" | Where-Object { $_ -clike 'SignalRoom_*' } | Select-Object -First 1
-    if (-not $chip) { winapp ui wait-for "SignalsSubtitle" -a $AppPid -t 3000 | Out-Null; return }
-    winapp ui invoke $chip -a $AppPid 2>$null | Out-Null
+Test-UI "Overview: an opportunity's action opens its room" {
+    $button = Get-Selectors "OverviewScrollViewer" | Where-Object { $_ -clike 'SignalRoom_*' } | Select-Object -First 1
+    if (-not $button) { winapp ui wait-for "OverviewDrives" -a $AppPid -t 3000 | Out-Null; return }
+    winapp ui invoke $button -a $AppPid 2>$null | Out-Null
     Start-Sleep -Milliseconds 700
     # Whichever room it landed in, Overview is no longer the one on screen.
-    if (Test-Present "SignalsSubtitle") { throw "$chip did not leave the Overview room" }
-    Goto "NavDashboard" "SignalsSubtitle"
+    if (Test-Present "OverviewDrives") { throw "$button did not leave the Overview room" }
+    Goto "NavDashboard" "OverviewDrives"
 }
 winapp ui screenshot -a $AppPid -o "screenshots\01-overview.png" 2>$null | Out-Null
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  (2b) Reclaim — the room the Storage Manager reframe is built around. Scanning is deliberately
-#       NOT started on navigation (a real scan is minutes of I/O), so these assert the resting
-#       state: the room renders, every category is listed, and Scan is offered rather than running.
+#  (2b) Clean up — the panel beside Space's map, the part the Storage Manager reframe is built around.
+#       Scanning is deliberately NOT started on navigation (a real scan is minutes of I/O), so these
+#       assert the resting state: the panel renders, says how to fill it, and Scan is offered.
 # ─────────────────────────────────────────────────────────────────────────────
-Test-UI "Navigate to Reclaim"                { Goto "NavReclaim" "ReclaimCategoryList" }
-Test-UI "Reclaim: Scan present"              { winapp ui wait-for "ScanBarScanButton"   -a $AppPid -t 3000 }
-Test-UI "Reclaim: found total present"       { winapp ui wait-for "ReclaimFoundBytes"   -a $AppPid -t 3000 }
-Test-UI "Reclaim: selected total present"    { winapp ui wait-for "ReclaimSelectedBytes" -a $AppPid -t 3000 }
-Test-UI "Reclaim: does not scan on entry" {
-    $s = Get-Value "ReclaimStatus"
-    if ($s -notmatch 'Nothing scanned yet') { throw "expected an unscanned resting state, got '$s'" }
-}
-# Both stop buttons are bound to Visibility, and a stop button offered when nothing is running is a
-# lie about what the app is doing. Collapsed controls have no UIA peer at all (verified), so absence
-# here is a real assertion: binding either one to something always-true turns this red.
-Test-UI "Reclaim: stop is offered only while something is running" {
-    if (-not (Test-Present "ReclaimReviewButton")) { throw "the reclaim button is missing entirely" }
-    if (Test-Present "ReclaimStopButton")     { throw "Stop is offered while no reclaim is running" }
-    if (Test-Present "ScanBarCancelButton")   { throw "Cancel is offered while no scan is running" }
-    if (Test-Present "ScanBarRing")           { throw "a progress ring is spinning while nothing is running" }
-}
-# Nothing is preselected. This is the room's most important safety property and the one thing about it
-# that a user could get wrong in a single click: the previous build ran SelectSafe() after every scan,
-# so a room opened to "let me look" arrived with 404 GB ticked and a live delete button. The resting
-# state is the cheap half of the assertion — the scanned half is at the end of the suite, because a
-# real scan is ~70 s of I/O and belongs nowhere near the fast structural passes.
-Test-UI "Reclaim: nothing is selected at rest" {
-    $selected = Get-Value "ReclaimSelectedBytes"
-    if ($selected -notmatch '(^|\s)(0 B|—)(\s|$)') {
-        throw "the room opened with something already ticked: '$selected'"
+Test-UI "Navigate to Space's clean-up panel" { Goto-Reclaim }
+Test-UI "Clean up: a panel on Space, not a tab or a room" {
+    Assert-Value "NavSpace" "IsSelected" "True"
+    Assert-Value "PageTitle" "Name" "Space"
+    foreach ($id in @("RoomTabs", "Tab_SpaceMap", "Tab_SpaceCleanUp", "ReclaimCategoryList")) {
+        if (Test-Present $id 1000) { throw "'$id' should not be present on Space." }
     }
-    if ((Get-UiaProperty "ReclaimReviewButton" "IsEnabled") -eq "True") {
-        throw "the delete button is live with nothing selected"
+}
+Test-UI "Clean up: Scan present"             { winapp ui wait-for "ScanBarScanButton"   -a $AppPid -t 3000 }
+Test-UI "Clean up: does not scan on entry" {
+    $s = Get-Name "SpaceCleanupEmpty"
+    if ($s -notmatch 'Scan a drive') { throw "expected an unscanned resting state, got '$s'" }
+}
+# Cancel is bound to Visibility, and a stop button offered when nothing is running is a lie about what
+# the app is doing. Collapsed controls have no UIA peer at all (verified), so absence here is a real
+# assertion: binding it to something always-true turns this red.
+Test-UI "Clean up: stop is offered only while something is running" {
+    if (Test-Present "SpaceCancelScan")         { throw "Cancel is offered while no scan is running" }
+    if (Test-Present "SpaceCancelProgressRing") { throw "a progress ring is spinning while nothing is running" }
+}
+# Nothing is preselected. This is the panel's most important safety property and the one thing about it
+# that a user could get wrong in a single click: an earlier build ran SelectSafe() after every scan, so
+# a page opened to "let me look" arrived with 404 GB ticked and a live delete button. The resting state
+# is the cheap half of the assertion — the scanned half is at the end of the suite, because a real scan
+# is ~70 s of I/O and belongs nowhere near the fast structural passes.
+Test-UI "Clean up: nothing is selected at rest" {
+    if (Test-Present "SpaceCleanupButton") {
+        $label = Get-Name "SpaceCleanupButton"
+        if ($label -ne "Clean up") { throw "the panel opened with something already ticked: '$label'" }
+        if ((Get-UiaProperty "SpaceCleanupButton" "IsEnabled") -eq "True") {
+            throw "the delete button is live with nothing selected"
+        }
     }
 }
 winapp ui screenshot -a $AppPid -o "screenshots\01b-reclaim.png" 2>$null | Out-Null
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  (2c) Space — the folder explorer. Like Reclaim it does not scan on entry (a cold full-volume scan
+#  (2c) Space — the folder explorer. Like the clean-up panel it does not scan on entry (a cold full-volume scan
 #       is minutes of I/O), so these assert the room's furniture and, crucially, the unmeasured
 #       contract: a folder nobody has measured must read "—", never "0 bytes". That distinction is
 #       the whole reason the unmeasured plumbing exists, and until now no UI test covered this room
 #       at all — it appeared in the suite only as a page the accessibility audit walked past.
 # ─────────────────────────────────────────────────────────────────────────────
-Test-UI "Navigate to Space"                  { Goto "NavSpace" "SpaceFolderTree" }
+Test-UI "Navigate to Space"                  { Goto-SpaceMap }
+Test-UI "Space: the shell owns the title, and there are no tabs" {
+    Assert-Value "PageTitle" "Name" "Space"
+    if (Test-Present "RoomTabs" 1000) { throw "Space is one page; the tab bar should be hidden." }
+    winapp ui wait-for "SpaceCleanupPanel" -a $AppPid -t 3000
+}
 Test-UI "Space: volume ComboBox"             { winapp ui wait-for "SpaceVolumeStrip"     -a $AppPid -t 3000 }
 Test-UI "Space: folder tree"                 { winapp ui wait-for "SpaceFolderTree"      -a $AppPid -t 3000 }
 Test-UI "Space: treemap"                     { winapp ui wait-for "SpaceTreemap"         -a $AppPid -t 3000 }
@@ -365,41 +426,23 @@ winapp ui screenshot -a $AppPid -o "screenshots\01c-space.png" 2>$null | Out-Nul
 # ─────────────────────────────────────────────────────────────────────────────
 #  (2d) The scan grammar, across rooms.
 #
-#  Overview, Reclaim and Space each used to invent their own scan affordance: three different labels,
-#  three different enablement rules, and — on Space alone — a volume chip that silently started a full
-#  volume scan when clicked. These assert the common interaction contract:
+#  Overview and Space each used to invent their own scan affordance: different labels, different
+#  enablement rules, and — on Space alone — a volume chip that silently started a full volume scan
+#  when clicked. These assert the common interaction contract:
 #
-#    · Rooms that do the identical thing say the identical thing.
-#    · Whole-machine actions name their scope; Space's ComboBox names its scope beside Scan.
+#    · The whole-machine action names its scope; Space's ComboBox names its scope beside Scan.
 #    · Selection never starts work; only the button does.
 # ─────────────────────────────────────────────────────────────────────────────
-Test-UI "Scan grammar: whole-machine rooms use one label" {
-    Goto "NavDashboard" "SignalsSubtitle"
+Test-UI "Scan grammar: the whole-machine scan names its scope" {
+    Goto "NavDashboard" "OverviewDrives"
     $overview = Get-Name "ScanBarScanButton"
-    Goto "NavReclaim" "ReclaimCategoryList"
-    $reclaim = Get-Name "ScanBarScanButton"
-
-    if ($overview -ne $reclaim) {
-        throw "two rooms that scan the whole machine disagree about what that is called: '$overview' vs '$reclaim'"
-    }
     if ($overview -notmatch '^Scan this PC$') {
         throw "expected the whole-machine label, got '$overview'"
     }
 }
-# The chip is a readout in a room with nothing to choose. It used to be a focusable, hoverable Button
-# on every page and act on exactly one of them — a promise made to everyone who tried it, and to a
-# keyboard or screen-reader user a tab stop that does nothing when pressed. Focusability is the
-# assertion because it is the behaviour; the spoken control type follows it in VolumeCard.Refresh(),
-# but LocalizedControlType is not a property this tool can read back.
-Test-UI "Scan grammar: an inert chip is not a tab stop" {
-    Goto "NavDashboard" "SignalsSubtitle"
-    if ((Get-UiaProperty "VolumeCard_C" "IsKeyboardFocusable") -eq "True") {
-        throw "an inert volume chip is still in the tab order"
-    }
-}
-# ...and where the chip IS the scope control, it is reachable from the keyboard.
+# The volume picker is the scope control, so it must be reachable from the keyboard.
 Test-UI "Scan grammar: the volume picker is a tab stop" {
-    Goto "NavSpace" "SpaceFolderTree"
+    Goto-SpaceMap
     if ((Get-UiaProperty "SpaceVolumeStrip" "IsKeyboardFocusable") -ne "True") {
         throw "the scope picker cannot be reached from the keyboard"
     }
@@ -407,7 +450,7 @@ Test-UI "Scan grammar: the volume picker is a tab stop" {
 # Picking a scope is not the same request as "scan it". Space used to conflate them, so a click meant
 # to change what you were looking at started minutes of I/O with no confirmation.
 Test-UI "Scan grammar: picking a scope does not start a scan" {
-    Goto "NavSpace" "SpaceFolderTree"
+    Goto-SpaceMap
     winapp ui invoke "SpaceVolumeStrip" -a $AppPid 2>$null | Out-Null
     winapp ui send-keys "down enter" --target "SpaceVolumeStrip" -a $AppPid 2>$null | Out-Null
     Start-Sleep -Milliseconds 900
@@ -416,29 +459,47 @@ Test-UI "Scan grammar: picking a scope does not start a scan" {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  (3) Package caches — two tabs over one table: Detected, then Not installed.
+#  (3) Package caches — the "Recommended for your Dev Drive" panel beside the Dev Drive page. It
+#      used to be a second tab; old "caches" links now open the Dev Drive page.
 # ─────────────────────────────────────────────────────────────────────────────
-Test-UI "Navigate to Package caches"         { Goto "NavPackageCaches" "PackageCachesScrollViewer" }
-Test-UI "Caches: page owns its title"          { winapp ui wait-for "PageTitle" -a $AppPid -t 3000 }
-# The Detected tab is where the room opens. Which ecosystems are installed, and which volume each cache
-# sits on, are facts about THIS PC — so both assertions below discover the set and check the rule.
-# They used to name Cargo and npm, which is the same scar that took MapPathInput_uv red (see below).
-Test-UI "Caches: tab strip present"          { winapp ui wait-for "CacheTab_Detected" -a $AppPid -t 3000 }
-Test-UI "Caches: every detected cache names the volume it is on" {
+Test-UI "Navigate to Dev Drive's cache panel" { Goto-Caches }
+Test-UI "Caches: a panel on Dev Drive, not a tab" {
+    Assert-Value "NavDrives" "IsSelected" "True"
+    Assert-Value "PageTitle" "Name" "Dev Drive"
+    foreach ($id in @("RoomTabs", "Tab_DevDriveOverview", "Tab_PackageCaches", "PackageCachesScrollViewer")) {
+        if (Test-Present $id 1000) { throw "'$id' should not be present on Dev Drive." }
+    }
+}
+# Which ecosystems are installed, and which volume each cache sits on, are facts about THIS PC — so
+# both assertions below discover the set and check the rule. They used to name Cargo and npm, which is
+# the same scar that took MapPathInput_uv red when uv was installed on this workstation.
+Test-UI "Caches: every listed cache names the volume it is on" {
     $cards = Find-Ids 'PackageCacheCard_[A-Za-z0-9]+'
-    if ($cards.Count -eq 0) { throw "No detected cache cards rendered" }
+    if ($cards.Count -eq 0) {
+        if (Test-Present "DevDriveCacheEmpty" 500) { return }
+        throw "No cache rows and no empty state"
+    }
     foreach ($c in $cards) {
         if ((Get-Name $c) -notmatch ',\s*On [A-Za-z]:$') { throw "$c does not name the volume it is on" }
     }
 }
 # The grouping rule stated AS a rule: CanMove = hasDevDrive && detected && !onDevDrive, so a cache
-# already on the Dev Drive must offer no move and every cache elsewhere must offer one. The Dev Drive
-# letter is read off the head chip rather than hard-coded, so this holds on any machine — and it is a
-# far stronger claim than the two "row present" checks it replaces, which only proved a row existed.
-Test-UI "Caches: only caches off the Dev Drive offer a move" {
-    if ((Get-Name "CachesStatus") -notmatch 'already on ([A-Za-z]):') { throw "Head chip does not name the Dev Drive" }
-    $dev   = $Matches[1]
-    $moves = @(Find-Ids 'MoveCache_[A-Za-z0-9]+' 1500 | ForEach-Object { $_ -replace '^MoveCache_', '' })
+# already on the Dev Drive must offer no tick box and every cache elsewhere must offer one. The Dev
+# Drive letter is read off the panel's summary once measuring settles, so this holds on any machine.
+Test-UI "Caches: only caches off the Dev Drive can be ticked to move" {
+    $deadline = (Get-Date).AddSeconds(30)
+    do {
+        $detail = Get-Name "DevDriveCacheDetail"
+        if ($detail -notmatch '^(Looking|Measuring)') { break }
+        Start-Sleep -Milliseconds 500
+    } while ((Get-Date) -lt $deadline)
+    $moves = @(Find-Ids 'SelectCache_[A-Za-z0-9]+' 1500 | ForEach-Object { $_ -replace '^SelectCache_', '' })
+    if ($detail -match 'Create a Dev Drive') {
+        if ($moves.Count -gt 0) { throw "a move is offered without a Dev Drive" }
+        return
+    }
+    if ($detail -notmatch '(?:to|on) ([A-Za-z]):\.$') { throw "The panel summary does not name the Dev Drive: '$detail'" }
+    $dev = $Matches[1]
     foreach ($card in (Find-Ids 'PackageCacheCard_[A-Za-z0-9]+')) {
         $eco    = $card -replace '^PackageCacheCard_', ''
         $onDev  = (Get-Name $card) -match ",\s*On $dev`:"
@@ -447,50 +508,28 @@ Test-UI "Caches: only caches off the Dev Drive offer a move" {
         if (-not $onDev -and -not $offers) { throw "$eco is not on ${dev}: yet offers no move" }
     }
 }
-# Undetected tools are on their own tab now, so reaching one means switching first. That makes this a
-# stronger assertion than it used to be: it proves the tab actually filters, not just that a row exists.
-# `invoke` rather than `click` — click simulates a mouse and silently no-ops on a locked workstation.
-#
-# The row is DISCOVERED, not named. This used to wait for MapPathInput_uv, and it went red the day uv
-# was installed on this workstation — the product was fine, the tool had simply moved to the other tab.
-# Which ecosystems are undetected is a property of the machine, so pinning one turns "the developer
-# installed something" into a test failure. Any map-path row proves the tab rendered; the next test
-# proves it filtered.
-Test-UI "Caches: Not-installed tab switches" {
-    winapp ui invoke "CacheTab_NotInstalled" -a $AppPid
-    $deadline = (Get-Date).AddMilliseconds(4000)
-    $seen = $false
-    while (-not $seen -and (Get-Date) -lt $deadline) {
-        $tree = winapp ui inspect -a $AppPid --interactive 2>$null | Out-String
-        if ($tree -match 'MapPathInput_') { $seen = $true } else { Start-Sleep -Milliseconds 200 }
+# The old tab's table furniture, its hidden "Not installed" view, inspector and footer are all gone.
+Test-UI "Caches: no table, tab strip, inspector or footer" {
+    foreach ($id in @("CachesTableTitle", "CachesStatus", "CacheTabStrip", "CacheTab_Detected",
+                      "CacheTab_NotInstalled", "CachesInspectorName", "CachesStatusBar", "DevDriveCachesLink")) {
+        if (Test-Present $id 500) { throw "'$id' should be gone." }
     }
-    if (-not $seen) { throw "No MapPathInput_* row appeared on the Not installed tab" }
 }
-# ...and Cargo must be gone from that tab, which is the half the presence check cannot prove.
-# --interactive, NOT --json: at the root, --json reports slugified selectors (txt-mappathinput-9f2c),
-# never the raw AutomationId, so a --json grep for an AutomationId matches nothing whether the row is
-# on screen or not. This assertion used --json and was therefore vacuous — it could not fail.
-Test-UI "Caches: Not-installed tab excludes detected rows" {
-    $found = winapp ui inspect -a $AppPid --interactive 2>$null | Out-String
-    if ($found -notmatch 'MapPathInput_') { throw "Not installed tab is not rendered; the exclusion check would be vacuous" }
-    if ($found -match 'MoveCache_')       { throw "A detected cache's move action is still visible on the Not installed tab" }
-}
-Test-UI "Caches: back to Detected" {
-    winapp ui invoke "CacheTab_Detected" -a $AppPid
-    if ((Find-Ids 'PackageCacheCard_[A-Za-z0-9]+').Count -eq 0) { throw "Detected tab did not come back" }
-}
-Test-UI "Caches: Move all present"           { winapp ui wait-for "MoveAllButton"     -a $AppPid -t 3000 }
 Test-UI "Caches: cache-move guide link"      { winapp ui wait-for "LearnWhatThisDoes" -a $AppPid -t 3000 }
-Test-UI "Caches: no inspector or footer" {
-    winapp ui wait-for "CachesInspectorName" -a $AppPid --gone -t 1000
-    winapp ui wait-for "CachesStatusBar"     -a $AppPid --gone -t 1000
+# Move is offered only when something can move, so the tests below are skipped when nothing can.
+Test-UI "Caches: movable caches start ticked, with one Move button and no per-row Move" {
+    $boxes = @(Find-Ids 'SelectCache_[A-Za-z0-9]+' 1500)
+    if ($boxes.Count -eq 0) { return }
+    foreach ($b in $boxes) { Assert-Value $b "ToggleState" "On" }
+    if (@(Find-Ids 'MoveCache_[A-Za-z0-9]+' 500).Count -gt 0) { throw "Rows should no longer have their own Move button." }
+    Assert-Present @("MoveAllButton")
 }
-Test-UI "Caches: Move all opens a dialog; Cancel preserves the list" {
-    $before = @(Find-Ids 'MoveCache_[A-Za-z0-9]+' 1500).Count
+Test-UI "Caches: Move opens a dialog; Cancel keeps the ticked caches" {
+    if (-not (Test-Present "MoveAllButton" 3000)) { return }
+    $before = @(Find-Ids 'SelectCache_[A-Za-z0-9]+' 1500).Count
     winapp ui invoke "MoveAllButton" -a $AppPid
     try {
         winapp ui wait-for "MoveAllConfirmDialog" -a $AppPid -t 3000
-        winapp ui wait-for "MoveAllConfirmPanel"  -a $AppPid --gone -t 1000
     }
     finally {
         if (Test-Present "MoveAllConfirmDialog") {
@@ -498,32 +537,58 @@ Test-UI "Caches: Move all opens a dialog; Cancel preserves the list" {
         }
     }
     winapp ui wait-for "MoveAllButton" -a $AppPid -t 3000
-    if (@(Find-Ids 'MoveCache_[A-Za-z0-9]+' 1500).Count -ne $before) {
-        throw "Cancelling Move all changed the available cache moves"
+    if (@(Find-Ids 'SelectCache_[A-Za-z0-9]+' 1500).Count -ne $before) {
+        throw "Cancelling Move changed the caches that can move"
     }
-}
-Test-UI "Caches: an individual move also opens a dialog" {
-    $move = @(Find-Ids 'MoveCache_[A-Za-z0-9]+' 1500 | Select-Object -First 1)
-    if ($move.Count -eq 0) { throw "No movable cache was found for the confirmation test" }
-    $dialogId = $move[0] -replace '^MoveCache_', 'MoveConfirm_'
-    winapp ui invoke $move[0] -a $AppPid
-    try {
-        winapp ui wait-for $dialogId -a $AppPid -t 3000
-    }
-    finally {
-        if (Test-Present $dialogId) {
-            winapp ui invoke "CloseButton" -a $AppPid 2>$null | Out-Null
-        }
-    }
-    winapp ui wait-for $move[0] -a $AppPid -t 3000
 }
 winapp ui screenshot -a $AppPid -o "screenshots\02-caches.png" 2>$null | Out-Null
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  (4) Benchmarks — strip / tabbed table / measured-runs chart / inspector.
-#      Two tabs: how fast it is today, and what would change that.
+#  (3b) Dev Drive — one page, no tabs. Its furniture depends on whether this PC already has a Dev
+#       Drive: an empty state holding the one Create button, or the drive cards, the "Set up"
+#       section and "Create another". Either way its links route to the room's sub-pages.
 # ─────────────────────────────────────────────────────────────────────────────
-Test-UI "Navigate to Benchmarks"             { Goto "NavBenchmarks" "WorkloadsList" }
+Test-UI "Navigate to Dev Drive"              { Goto-DevDrive }
+Test-UI "Dev Drive: the shell owns the title, and there are no tabs" {
+    Assert-Value "NavDrives" "IsSelected" "True"
+    Assert-Value "PageTitle" "Name" "Dev Drive"
+    if (Test-Present "RoomTabs" 1000) { throw "Dev Drive is one page; the tab bar should be hidden." }
+}
+Test-UI "Dev Drive: more heading"            { Assert-Present @("DevDriveMoreHead") }
+# DevDriveStorageSettingsLink opens ms-settings:storage — it is checked for presence, never invoked.
+Test-UI "Dev Drive: links to speed, volumes and Storage settings" {
+    Assert-Present @("DevDriveCompareSpeedLink", "DevDriveVolumesLink", "DevDriveStorageSettingsLink")
+}
+# Whether this PC has a Dev Drive is a fact about the machine, so assert the rule rather than a side:
+# exactly one of cards / empty state, and exactly one way to Create.
+Test-UI "Dev Drive: drive cards or the empty state, never both" {
+    $cards = Test-Present "DevDriveCards" 1500
+    $empty = Test-Present "DevDriveEmptyState" 500
+    if ($cards -eq $empty) { throw "Expected exactly one of DevDriveCards / DevDriveEmptyState (cards=$cards, empty=$empty)." }
+    if ($empty) {
+        Assert-Present @("CreateDevDriveButton")
+        foreach ($id in @("DevDriveCreateAnother", "DevDrivePerformanceMode", "DevDriveSetupHead")) {
+            if (Test-Present $id 500) { throw "'$id' needs an existing Dev Drive." }
+        }
+    } else {
+        if (Test-Present "CreateDevDriveButton" 500) { throw "CreateDevDriveButton belongs to the empty state only." }
+        Assert-Present @("DevDriveSetupHead", "DevDriveCreateAnother", "DevDrivePerformanceMode")
+    }
+}
+winapp ui screenshot -a $AppPid -o "screenshots\04a-devdrive.png" 2>$null | Out-Null
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  (4) Benchmarks — "Compare speed", a sub-page of Dev Drive reached from its Overview tab.
+#      Strip / tabbed table / measured-runs chart / inspector. Two tabs: how fast it is today, and
+#      what would change that.
+# ─────────────────────────────────────────────────────────────────────────────
+Test-UI "Navigate to Dev Drive > Compare speed" { Goto-DevDriveLink "DevDriveCompareSpeedLink" "WorkloadsList" }
+Test-UI "Benchmarks: Dev Drive stays selected and the header is a breadcrumb" {
+    Assert-Value "NavDrives" "IsSelected" "True"
+    Assert-Present @("PageBreadcrumb")
+    if (Test-Present "PageTitle" 500) { throw "The plain page title should give way to the breadcrumb." }
+    if (Test-Present "RoomTabs" 500)  { throw "Room tabs should be hidden on a sub-page." }
+}
 Test-UI "Benchmarks: Run all present"        { winapp ui wait-for "RunAllTestsButton" -a $AppPid -t 4000 }
 Test-UI "Benchmarks: tab strip present"      { winapp ui wait-for "BenchTab_Workloads" -a $AppPid -t 3000 }
 Test-UI "Benchmarks: git-clone workload row" { winapp ui wait-for "BenchRow_git-clone" -a $AppPid -t 4000 }
@@ -580,9 +645,15 @@ Test-UI "Benchmarks: back to Workloads" {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  (5) Drives — volumes / filter drivers tabs over one table. G: is the real ReFS Dev Drive.
+#  (5) Drives and filters — a Dev Drive sub-page: volumes / filter drivers tabs over one table.
+#      G: is the real ReFS Dev Drive. Creating one is no longer offered here (see section 6).
 # ─────────────────────────────────────────────────────────────────────────────
-Test-UI "Navigate to Drives"                 { Goto "NavDrives" "VolumesList" }
+Test-UI "Navigate to Dev Drive > Drives and filters" { Goto-DevDriveLink "DevDriveVolumesLink" "VolumesList" }
+Test-UI "Drives: a breadcrumb under Dev Drive, with no Create button" {
+    Assert-Value "NavDrives" "IsSelected" "True"
+    Assert-Present @("PageBreadcrumb")
+    if (Test-Present "CreateDevDriveButton" 500) { throw "Create belongs to the Dev Drive overview, not Drives and filters." }
+}
 Test-UI "Drives: tab strip present"          { winapp ui wait-for "DriveTab_Volumes"     -a $AppPid -t 3000 }
 Test-UI "Drives: 'Manage in Storage'"        { winapp ui wait-for "ManageInStorageButton" -a $AppPid -t 4000 }
 Test-UI "Drives: G: row present"             { winapp ui wait-for "VolumeRow_G"     -a $AppPid -t 4000 }
@@ -627,10 +698,15 @@ Test-UI "Drives: back to Volumes" {
 winapp ui screenshot -a $AppPid -o "screenshots\04-drives.png" 2>$null | Out-Null
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  (6) Create Dev Drive — the form is a field list, not a wizard, and one confirmation
-#      verifies and executes through the safe in-memory seam.
+#  (6) Create Dev Drive — a sub-page of Dev Drive, not a rail room. The form is a field list, not a
+#      wizard, and one confirmation verifies and executes through the safe in-memory seam.
 # ─────────────────────────────────────────────────────────────────────────────
-Test-UI "Navigate to Create Dev Drive"       { Goto "NavCreate" "CreateFormHead" }
+Test-UI "Navigate to Create Dev Drive"       { Goto-Create }
+Test-UI "Create: Dev Drive stays selected and the header is a breadcrumb" {
+    Assert-Value "NavDrives" "IsSelected" "True"
+    Assert-Present @("PageBreadcrumb")
+    if (Test-Present "PageTitle" 500) { throw "The plain page title should give way to the breadcrumb." }
+}
 Test-UI "Create: room grammar is present" {
     Assert-Present @("CreateFormHead", "AfterCreateHead")
 }
@@ -696,6 +772,14 @@ Test-UI "Create: the done card offers the two next rooms" {
 }
 winapp ui screenshot -a $AppPid -o "screenshots\08-create-complete.png" 2>$null | Out-Null
 
+# The breadcrumb's first crumb is the room: it leaves the sub-page for the Dev Drive overview.
+Test-UI "Create: the first crumb returns to Dev Drive" {
+    Invoke-Crumb "Dev Drive"
+    winapp ui wait-for "DevDriveScrollViewer" -a $AppPid -t 5000 2>$null | Out-Null
+    Assert-Value "PageTitle" "Name" "Dev Drive"
+    if (Test-Present "PageBreadcrumb" 500) { throw "The breadcrumb should give way to the room title." }
+}
+
 # ─────────────────────────────────────────────────────────────────────────────
 #  (7) Settings — native cards and expanders, every preference reaches a real decision.
 #      The suite changes each preference, asserts the control reflects it, then puts it back, so a
@@ -732,7 +816,11 @@ Test-UI "Settings: obsolete content removed" {
 }
 Test-UI "Settings: expand preference groups" {
     Expand-SettingsGroup CacheSignalsExpander
-    Expand-SettingsGroup HistorySettingsExpander
+}
+Test-UI "Settings: free-space history removed" {
+    foreach ($id in @("HistorySettingsExpander", "RecordHistoryToggle", "RetentionCombo", "ClearHistoryButton")) {
+        if (Test-Present $id) { throw "'$id' should not be present in Settings." }
+    }
 }
 Test-UI "Settings: reset present"            { winapp ui wait-for "ResetPreferencesButton" -a $AppPid -t 3000 }
 winapp ui screenshot -a $AppPid -o "screenshots\09-settings.png" 2>$null | Out-Null
@@ -740,7 +828,6 @@ winapp ui screenshot -a $AppPid -o "screenshots\09-settings.png" 2>$null | Out-N
 # Every preference control is reachable. A settings page whose controls do not resolve is the one
 # failure mode that looks identical to a working page in a screenshot.
 foreach ($pref in @("WatchCachesToggle", "LowFreeCombo", "RollupCombo",
-                    "RecordHistoryToggle", "RetentionCombo", "ClearHistoryButton",
                     "CreationMethodCombo")) {
     Test-UI "Settings: $pref present" { winapp ui wait-for $pref -a $AppPid -t 3000 }
 }
@@ -751,11 +838,10 @@ Select-Combo "LowFreeCombo" "LowFree25"
 # Recreate the page to verify the preference reached the store, not only the ComboBox.
 Test-UI "Preference: low-free threshold -> 25%, retained across navigation" {
     winapp ui invoke "NavDrives" -a $AppPid | Out-Null
-    winapp ui wait-for "VolumesList" -a $AppPid -t 3000 | Out-Null
+    winapp ui wait-for "DevDriveScrollViewer" -a $AppPid -t 3000 | Out-Null
     winapp ui invoke "SettingsItem" -a $AppPid | Out-Null
     winapp ui wait-for "LowFreeCombo" -a $AppPid --value "25%" -t 3000
     Expand-SettingsGroup CacheSignalsExpander
-    Expand-SettingsGroup HistorySettingsExpander
 }
 Select-Combo "LowFreeCombo" "LowFree15"
 Test-UI "Preference: low-free threshold restored" {
@@ -799,121 +885,89 @@ Test-UI "Theme override -> System default (restored)" {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  (7b) The Reclaim scan — opt-in, because it is minutes of real disk I/O.
+#  (7b) The Space scan's clean-up check — opt-in, because it is minutes of real disk I/O.
 #
-#  This is the only place the room's post-scan state can be observed. The property it exists to hold
-#  is a safety one: a scan finds hundreds of gigabytes across seven categories, and the room must
-#  arrive at the end of it with NOTHING ticked. The previous build ran SelectSafe() automatically, so
+#  This is the only place the clean-up panel's post-scan state can be observed. The property it exists
+#  to hold is a safety one: a scan finds hundreds of gigabytes across seven categories, and the panel
+#  must arrive at the end of it with NOTHING ticked. An earlier build ran SelectSafe() automatically, so
 #  "let me see what's here" produced 404 GB selected and a live delete button one misread click away.
 #
-#  It also covers the scan affordance in its running state, which no resting-state test can: the
-#  button disables and keeps its label, progress appears, and Cancel is offered.
+#  It also covers the scan affordance in its running state, which no resting-state test can: Scan
+#  steps aside, Cancel takes its place with progress inside it.
 # ─────────────────────────────────────────────────────────────────────────────
 if ($IncludeSlowScans) {
-    Test-UI "Reclaim: a scan runs, and reports itself while it does" {
-        Goto "NavReclaim" "ReclaimCategoryList"
-        $label = Get-Name "ScanBarScanButton"
+    Test-UI "Clean up: a Space scan also looks for things to clean up, and reports itself while it does" {
+        Goto-Reclaim
         winapp ui invoke "ScanBarScanButton" -a $AppPid 2>$null | Out-Null
         Start-Sleep -Milliseconds 1500
 
-        if (-not (Test-Present "ScanBarCancelButton")) { throw "no way to stop a running scan" }
-        if (-not (Test-Present "ScanBarRing"))         { throw "a running scan shows no progress" }
-        if ((Get-UiaProperty "ScanBarScanButton" "IsEnabled") -eq "True") {
+        if (-not (Test-Present "SpaceCancelScan"))         { throw "no way to stop a running scan" }
+        if (-not (Test-Present "SpaceCancelProgressRing")) { throw "a running scan shows no progress" }
+        # Scan is collapsed while busy; if it is still on screen it must at least be dead.
+        if ((Test-Present "ScanBarScanButton" 500) -and
+            (Get-UiaProperty "ScanBarScanButton" "IsEnabled") -eq "True") {
             throw "the scan button is still live during its own scan"
-        }
-        # The label names the scope, and a scope does not change because work started on it.
-        if ((Get-Name "ScanBarScanButton") -ne $label) {
-            throw "the button relabelled itself mid-scan: '$label' -> '$(Get-Name "ScanBarScanButton")'"
         }
     }
 
-    Test-UI "Reclaim: the scan finishes" {
+    Test-UI "Clean up: the scan finishes" {
         # Worktrees gate the run at ~70 s on a developer machine; allow generous headroom for a cold
-        # cache without waiting forever on a genuinely wedged scan.
+        # cache without waiting forever on a genuinely wedged scan. Cancel stays up until both the
+        # map's scan and the clean-up check beside it are done.
         $deadline = (Get-Date).AddMinutes(8)
-        while ((Test-Present "ScanBarCancelButton" 1000) -and (Get-Date) -lt $deadline) {
+        while ((Test-Present "SpaceCancelScan" 1000) -and (Get-Date) -lt $deadline) {
             Start-Sleep -Seconds 5
         }
-        if (Test-Present "ScanBarCancelButton" 1000) { throw "the scan did not finish within 8 minutes" }
-        $found = Get-Value "ReclaimFoundBytes"
-        if ($found -match '^\s*(0 B|—)\s*$') { throw "the scan finished having found nothing at all: '$found'" }
+        if (Test-Present "SpaceCancelScan" 1000) { throw "the scan did not finish within 8 minutes" }
+        $found = Get-Name "SpaceCleanupHeadline"
+        if ($found -match '^\s*(0 B|—)?\s*$') {
+            throw "the scan finished having found nothing at all: '$(Get-Name "SpaceCleanupEmpty")'"
+        }
     }
 
     # THE assertion. A scan is a question, not an instruction.
-    Test-UI "Reclaim: a finished scan selects nothing" {
-        $selected = Get-Value "ReclaimSelectedBytes"
-        if ($selected -notmatch '(^|\s)(0 B|—)(\s|$)') {
-            throw "the scan pre-selected $selected for deletion"
+    Test-UI "Clean up: a finished scan selects nothing" {
+        $label = Get-Name "SpaceCleanupButton"
+        if ($label -ne "Clean up") {
+            throw "the scan pre-selected something for deletion: '$label'"
         }
-        if ((Get-UiaProperty "ReclaimReviewButton" "IsEnabled") -eq "True") {
+        if ((Get-UiaProperty "SpaceCleanupButton" "IsEnabled") -eq "True") {
             throw "the delete button is live immediately after a scan, with nothing knowingly chosen"
         }
     }
 
     # ...and choosing is still one click away, so the default is a choice rather than an obstacle.
-    Test-UI "Reclaim: selecting the safe tier is one click" {
-        winapp ui invoke "ReclaimSelectSafeButton" -a $AppPid 2>$null | Out-Null
+    # The panel has no Clear button; the rescan below clears the selection (every scan does).
+    Test-UI "Clean up: selecting the safe tier is one click" {
+        winapp ui invoke "SpaceCleanupSelectSafe" -a $AppPid 2>$null | Out-Null
         Start-Sleep -Milliseconds 800
-        $selected = Get-Value "ReclaimSelectedBytes"
-        if ($selected -match '(^|\s)(0 B|—)(\s|$)') { throw "Select safe selected nothing: '$selected'" }
-        if ((Get-UiaProperty "ReclaimReviewButton" "IsEnabled") -ne "True") {
-            throw "something is selected but the reclaim button is dead"
+        $label = Get-Name "SpaceCleanupButton"
+        if ($label -notmatch '^Clean up \S') { throw "Select safe selected nothing: '$label'" }
+        if ((Get-UiaProperty "SpaceCleanupButton" "IsEnabled") -ne "True") {
+            throw "something is selected but the clean-up button is dead"
         }
-        winapp ui invoke "ReclaimClearButton" -a $AppPid 2>$null | Out-Null
-        Start-Sleep -Milliseconds 500
     }
 
-    # Picking a category has to fill the row table, and that table has to survive leaving the room.
-    #
-    # Two changes meet here. ReclaimRowList used to follow SelectedCategory.Rows in OneWay mode, and
-    # a OneWay binding stays live on an unloaded page -- it would re-attach the list to the shared
-    # ViewModel the moment a scan changed the selection, undoing the leak fix on every scan. So the
-    # page assigns ItemsSource itself. Releasing it on Unloaded then cost the selection: a ListView
-    # drops SelectedItem when its items go away, and SelectedItem was a TwoWay binding, so the null
-    # went straight into the app-lifetime ViewModel.
-    #
-    # Measured across a real scan before this was written: 30 rows before leaving the room and 0 on
-    # return, against 30 on the build without the release. The round trip is therefore the assertion
-    # that matters -- picking alone passed throughout.
-    #
-    # Rows are counted as ListItems rather than by AutomationId. ReclaimPage is the one room with no
-    # ContainerContentChanging hook, so ReclaimCategory_* and ReclaimRow_* never reach UIA at all;
-    # a test grepping for them would report PASS against an empty table.
-    Test-UI "Reclaim: a picked category fills the row table, and survives leaving the room" {
-        # Slugs are generated per inspect and are not stable, so discovery and invocation have to be
-        # adjacent -- a slug from an earlier inspect resolves to nothing.
-        $categories = winapp ui inspect "ReclaimCategoryList" --depth 1 -a $AppPid 2>$null |
-            Select-String -Pattern '^\s*(itm-\S+)' -AllMatches |
-            ForEach-Object { $_.Matches[0].Groups[1].Value }
-        if (-not $categories) { throw "the scan produced no categories to pick from" }
+    # The groups are copied off the app-lifetime ViewModel when the page loads, so leaving Space and
+    # coming back has to rebuild the same list rather than an empty one.
+    Test-UI "Clean up: the groups survive leaving the room" {
+        $before = @(Find-Ids 'SpaceCleanupGroup_[A-Za-z0-9_-]+' 1500).Count
+        if ($before -eq 0) { throw "the scan produced no groups, so the round trip proves nothing" }
 
-        # Some categories legitimately find nothing on a given machine, so prove the table follows
-        # the selection rather than demanding that the first pick be populated.
-        $before = 0
-        foreach ($c in $categories) {
-            winapp ui invoke $c -a $AppPid 2>$null | Out-Null
-            Start-Sleep -Milliseconds 700
-            $before = Get-RowCount "ReclaimRowList"
-            if ($before -gt 0) { break }
-        }
-        if ($before -eq 0) {
-            throw "no category filled the row table, across all $($categories.Count) of them"
-        }
-
-        Goto "NavSpace" "SpaceFolderTree"
-        Goto "NavReclaim" "ReclaimCategoryList"
+        Goto "NavDashboard" "OverviewDrives"
+        Goto-Reclaim
         Start-Sleep -Milliseconds 800
 
-        $after = Get-RowCount "ReclaimRowList"
+        $after = @(Find-Ids 'SpaceCleanupGroup_[A-Za-z0-9_-]+' 1500).Count
         if ($after -ne $before) {
-            throw "the room lost its candidates on the way out and back: $before rows -> $after"
+            throw "the panel lost its groups on the way out and back: $before -> $after"
         }
     }
     winapp ui screenshot -a $AppPid -o "screenshots\01b-reclaim-scanned.png" 2>$null | Out-Null
 
     # A populated shared hierarchy survives navigation even though the visible breadcrumb is gone.
     Test-UI "Space: the hierarchy survives leaving the room and coming back" {
-        Goto "NavSpace" "SpaceFolderTree"
+        Goto-SpaceMap
         winapp ui invoke "ScanBarScanButton" -a $AppPid 2>$null | Out-Null
 
         $deadline = (Get-Date).AddMinutes(2)
@@ -930,8 +984,8 @@ if ($IncludeSlowScans) {
             Start-Sleep -Milliseconds 800
         }
 
-        Goto "NavDashboard" "NavSpace"
-        Goto "NavSpace" "SpaceFolderTree"
+        Goto "NavDashboard" "OverviewDrives"
+        Goto-SpaceMap
         Start-Sleep -Milliseconds 800
 
         $after = @(winapp ui inspect "SpaceFolderTree" -a $AppPid --depth 4 2>$null |
@@ -956,19 +1010,32 @@ if ($IncludeSlowScans) {
 #      open-ComboBox popup window is covered too.
 # ─────────────────────────────────────────────────────────────────────────────
 $auditPages = @(
-    @{ nav = "NavDashboard";     anchor = "SignalsSubtitle" },
-    @{ nav = "NavReclaim";       anchor = "ReclaimCategoryList" },
-    @{ nav = "NavSpace";         anchor = "SpaceFolderTree" },
-    @{ nav = "NavPackageCaches"; anchor = "PackageCachesScrollViewer" },
-    @{ nav = "NavBenchmarks";    anchor = "WorkloadsList" },
-    @{ nav = "NavDrives";        anchor = "VolumesList" },
-    @{ nav = "NavCreate";        anchor = "SourceComboBox" },
-    @{ nav = "SettingsItem";     anchor = "ThemeSelector" }
+    @{ nav = "NavDashboard";                                    anchor = "OverviewDrives" },
+    @{ nav = "NavSpace";                                        anchor = "SpaceFolderTree" },
+    @{ nav = "NavDrives";                                       anchor = "DevDriveScrollViewer" },
+    @{ nav = "NavDrives"; then = "DevDriveCompareSpeedLink"; anchor = "WorkloadsList" },
+    @{ nav = "NavDrives"; then = "DevDriveVolumesLink";      anchor = "VolumesList" },
+    @{ nav = "NavDrives"; then = "create";                   anchor = "CreateFormHead" },
+    @{ nav = "SettingsItem";                                    anchor = "ThemeSelector" }
 )
 $inaccessible = @()
 $auditedCount = 0
 foreach ($p in $auditPages) {
     winapp ui invoke $p.nav -a $AppPid 2>$null | Out-Null
+    if ($p.tab) {
+        # Invoking the room that is already selected keeps its current tab, so pick the tab explicitly.
+        winapp ui wait-for $p.tab -a $AppPid -t 4000 2>$null | Out-Null
+        winapp ui invoke $p.tab -a $AppPid 2>$null | Out-Null
+    }
+    if ($p.then) {
+        # Sub-pages are reached from links on the Dev Drive overview, not from the rail. Create is the
+        # empty state's button or "Create another", depending on whether this PC has a Dev Drive.
+        winapp ui wait-for "DevDriveScrollViewer" -a $AppPid -t 4000 2>$null | Out-Null
+        $link = if ($p.then -eq "create") { Get-CreateTrigger } else { $p.then }
+        winapp ui wait-for $link -a $AppPid -t 4000 2>$null | Out-Null
+        winapp ui invoke $link -a $AppPid 2>$null | Out-Null
+    }
+    $label = (@($p.nav, $p.tab, $p.then) | Where-Object { $_ }) -join " > "
     winapp ui wait-for $p.anchor -a $AppPid -t 4000 2>$null | Out-Null
     Start-Sleep -Milliseconds 300
     $obj = winapp ui inspect -a $AppPid --interactive --json --depth 14 2>$null | Out-String | ConvertFrom-Json
@@ -981,7 +1048,7 @@ foreach ($p in $auditPages) {
     })
     $auditedCount += $interactive.Count
     foreach ($e in ($interactive | Where-Object { -not $_.automationId -and [string]::IsNullOrWhiteSpace($_.name) })) {
-        $inaccessible += "$($p.nav): $($e.type) (no AutomationId, no Name)"
+        $inaccessible += "${label}: $($e.type) (no AutomationId, no Name)"
     }
 }
 if ($inaccessible.Count -eq 0) {

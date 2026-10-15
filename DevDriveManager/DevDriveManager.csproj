@@ -68,6 +68,8 @@
     <Content Include="Assets\StoreLogo.png" />
     <Content Include="Assets\AppIcon.ico" />
     <Content Include="Assets\Wide310x150Logo.scale-200.png" />
+    <Content Include="Assets\OverviewHero.png" />
+    <Content Include="Assets\OverviewHeroDark.png" />
     <Content Include="..\docs\PackageCacheMoves.md" Link="docs\PackageCacheMoves.md">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>

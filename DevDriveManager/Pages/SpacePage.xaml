@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8" ?>
+﻿<?xml version="1.0" encoding="utf-8" ?>
 <Page
     x:Class="DevDriveManager.Pages.SpacePage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -6,48 +6,22 @@
     xmlns:controls="using:DevDriveManager.Controls"
     xmlns:local="using:DevDriveManager.Pages"
     xmlns:storage="using:DevDriveStorage"
+    xmlns:vm="using:DevDriveManager.ViewModels"
     xmlns:animations="using:CommunityToolkit.WinUI.Animations"
     KeyDown="Page_KeyDown"
     Loaded="Page_Loaded">
 
     <Grid>
-        <VisualStateManager.VisualStateGroups>
-            <VisualStateGroup>
-                <VisualState>
-                    <VisualState.StateTriggers>
-                        <AdaptiveTrigger MinWindowWidth="700" />
-                    </VisualState.StateTriggers>
-                    <VisualState.Setters>
-                        <Setter Target="ScanToolbar.(Grid.Row)" Value="0" />
-                        <Setter Target="ScanToolbar.(Grid.Column)" Value="1" />
-                        <Setter Target="ScanToolbar.(Grid.ColumnSpan)" Value="1" />
-                        <Setter Target="ScanToolbar.Margin" Value="0" />
-                    </VisualState.Setters>
-                </VisualState>
-            </VisualStateGroup>
-        </VisualStateManager.VisualStateGroups>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <Grid Margin="18,24,18,16" ColumnSpacing="16"
-              AutomationProperties.AutomationId="SpaceHeader" AutomationProperties.Name="Space header">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
-            </Grid.RowDefinitions>
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
-            <TextBlock Text="{x:Bind PageTitle}" VerticalAlignment="Center"
-                       Style="{StaticResource TitleTextBlockStyle}"
-                       AutomationProperties.AutomationId="PageTitle"
-                       AutomationProperties.HeadingLevel="Level1" />
-            <Grid x:Name="ScanToolbar" Grid.Row="1" Grid.ColumnSpan="2" Margin="0,12,0,0"
-                  ColumnSpacing="12" HorizontalAlignment="Right">
+        <!-- The shell shows the room title and tabs above; this row is the Map's own toolbar. -->
+        <Grid Margin="18,4,18,12"
+              AutomationProperties.AutomationId="SpaceHeader" AutomationProperties.Name="Space toolbar">
+            <Grid x:Name="ScanToolbar" ColumnSpacing="12" HorizontalAlignment="Left">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" MaxWidth="360" />
                     <ColumnDefinition Width="Auto" />
@@ -88,7 +62,7 @@
                 <Button x:Name="ScanButton" Grid.Column="1" VerticalAlignment="Center" Height="48" MinWidth="112"
                         AutomationProperties.AutomationId="ScanBarScanButton" AutomationProperties.Name="Scan"
                         Click="ScanButton_Click" Style="{StaticResource AccentButtonStyle}"
-                        Visibility="{x:Bind local:SpacePage.OverlayMessageVisibility(IsScanning), Mode=OneWay}">
+                        Visibility="{x:Bind local:SpacePage.OverlayMessageVisibility(IsBusy), Mode=OneWay}">
                     <StackPanel Orientation="Horizontal" Spacing="8">
                         <FontIcon Glyph="&#xE768;" FontSize="16" />
                         <TextBlock Text="Scan" />
@@ -99,9 +73,9 @@
                         AutomationProperties.AutomationId="SpaceCancelScan"
                         AutomationProperties.Name="Cancel"
                         Click="CancelScanButton_Click"
-                        Visibility="{x:Bind local:SpacePage.BoolToVisibility(IsScanning), Mode=OneWay}">
+                        Visibility="{x:Bind local:SpacePage.BoolToVisibility(IsBusy), Mode=OneWay}">
                     <StackPanel Orientation="Horizontal" Spacing="8">
-                        <ProgressRing Width="16" Height="16" IsActive="{x:Bind IsScanning, Mode=OneWay}"
+                        <ProgressRing Width="16" Height="16" IsActive="{x:Bind IsBusy, Mode=OneWay}"
                                       AutomationProperties.AutomationId="SpaceCancelProgressRing" />
                         <TextBlock Text="Cancel" />
                     </StackPanel>
@@ -113,87 +87,108 @@
                  AutomationProperties.AutomationId="SpaceCoverageNotice"
                  IsClosable="False" />
 
-        <Grid x:Name="SpaceExplorerCard" Grid.Row="2" Margin="18,0,18,12" Padding="12" ColumnSpacing="16"
-              Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-              BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1"
-              CornerRadius="{ThemeResource ControlCornerRadius}">
+        <Grid Grid.Row="2" Margin="18,0,18,12" ColumnSpacing="12">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="2*" MinWidth="220" />
-                <ColumnDefinition Width="3*" MinWidth="160" />
+                <ColumnDefinition Width="*" MinWidth="400" />
+                <ColumnDefinition Width="320" />
             </Grid.ColumnDefinitions>
 
-            <TreeView
-                x:Name="FolderTree"
-                AutomationProperties.AutomationId="SpaceFolderTree"
-                AutomationProperties.Name="Files and folders, size on disk"
-                CanDragItems="False"
-                CanReorderItems="False"
-                Expanding="FolderTree_Expanding"
-                ItemsSource="{x:Bind ViewModel.TreeRoots}"
-                SelectionChanged="FolderTree_SelectionChanged"
-                SelectionMode="Single">
-                <TreeView.ItemTemplate>
-                    <DataTemplate x:DataType="storage:StorageTreeItemViewModel">
-                        <TreeViewItem
-                            Loaded="TreeItem_Loaded"
-                            Tag="{x:Bind}"
-                            HorizontalContentAlignment="Stretch"
-                            AutomationProperties.AutomationId="{x:Bind AutomationId}"
-                            AutomationProperties.Name="{x:Bind AccessibleName, Mode=OneWay}"
-                            HasUnrealizedChildren="{x:Bind HasUnrealizedChildren, Mode=OneWay}"
-                            IsExpanded="{x:Bind IsExpanded, Mode=TwoWay}"
-                            ItemsSource="{x:Bind MaterializedChildren}">
-                            <!-- WinUI's overlay scrollbar needs a gutter inside each stretched row. -->
-                            <Grid Margin="0,0,20,0" ColumnSpacing="8" ToolTipService.ToolTip="{x:Bind PhysicalPath}">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-                                <FontIcon
-                                    FontSize="16"
-                                    VerticalAlignment="Center"
-                                    Glyph="{x:Bind local:SpacePage.NodeGlyph(IsFolder)}"
-                                    Foreground="{x:Bind local:SpacePage.PaletteBrush(ColorIndex), Mode=OneWay}" />
-                                <TextBlock
-                                    Grid.Column="1"
-                                    VerticalAlignment="Center"
-                                    Text="{x:Bind Name, Mode=OneWay}"
-                                    TextTrimming="CharacterEllipsis" />
-                                <TextBlock
-                                    Grid.Column="2"
-                                    VerticalAlignment="Center"
-                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                    Text="{x:Bind SizeDisplay, Mode=OneWay}" />
-                            </Grid>
-                        </TreeViewItem>
-                    </DataTemplate>
-                </TreeView.ItemTemplate>
-            </TreeView>
+            <Grid x:Name="SpaceExplorerCard" Padding="12" ColumnSpacing="16"
+                  Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                  BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1"
+                  CornerRadius="{ThemeResource ControlCornerRadius}">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="2*" MinWidth="220" />
+                    <ColumnDefinition Width="3*" MinWidth="160" />
+                </Grid.ColumnDefinitions>
 
-            <Grid Grid.Column="1">
-                <controls:TreemapPane
-                    x:Name="StorageTreemap"
-                    AutomationProperties.AutomationId="SpaceTreemap"
-                    AutomationProperties.Name="Treemap of the current scope, area is size on disk"
-                    NavigateUpRequested="StorageTreemap_NavigateUpRequested"
-                    NodeInvoked="StorageTreemap_NodeInvoked"
+                <TreeView
+                    x:Name="FolderTree"
+                    AutomationProperties.AutomationId="SpaceFolderTree"
+                    AutomationProperties.Name="Files and folders, size on disk"
+                    CanDragItems="False"
+                    CanReorderItems="False"
+                    Expanding="FolderTree_Expanding"
+                    ItemsSource="{x:Bind ViewModel.TreeRoots}"
                     Opacity="{x:Bind local:SpacePage.ContentOpacity(ShowOverlay), Mode=OneWay}"
-                    Revision="{x:Bind ViewModel.ProjectionRevision, Mode=OneWay}"
-                    Rows="{x:Bind ViewModel.VisibleItems}"
-                    Scope="{x:Bind ViewModel.CurrentScope, Mode=OneWay}"
-                    SelectedRow="{x:Bind ViewModel.SelectedRow, Mode=OneWay}"
-                    Snapshot="{x:Bind ViewModel.Snapshot, Mode=OneWay}" />
+                    SelectionChanged="FolderTree_SelectionChanged"
+                    SelectionMode="Single">
+                    <TreeView.ItemTemplate>
+                        <DataTemplate x:DataType="storage:StorageTreeItemViewModel">
+                            <TreeViewItem
+                                Loaded="TreeItem_Loaded"
+                                Tag="{x:Bind}"
+                                HorizontalContentAlignment="Stretch"
+                                AutomationProperties.AutomationId="{x:Bind AutomationId}"
+                                AutomationProperties.Name="{x:Bind AccessibleName, Mode=OneWay}"
+                                HasUnrealizedChildren="{x:Bind HasUnrealizedChildren, Mode=OneWay}"
+                                IsExpanded="{x:Bind IsExpanded, Mode=TwoWay}"
+                                ItemsSource="{x:Bind MaterializedChildren}">
+                                <!-- WinUI's overlay scrollbar needs a gutter inside each stretched row. -->
+                                <Grid Margin="0,0,20,0" ColumnSpacing="8" ToolTipService.ToolTip="{x:Bind PhysicalPath}">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <FontIcon
+                                        FontSize="16"
+                                        VerticalAlignment="Center"
+                                        Glyph="{x:Bind local:SpacePage.NodeGlyph(IsFolder)}"
+                                        Foreground="{x:Bind local:SpacePage.PaletteBrush(ColorIndex), Mode=OneWay}" />
+                                    <TextBlock
+                                        Grid.Column="1"
+                                        VerticalAlignment="Center"
+                                        Text="{x:Bind Name, Mode=OneWay}"
+                                        TextTrimming="CharacterEllipsis" />
+                                    <TextBlock
+                                        Grid.Column="2"
+                                        VerticalAlignment="Center"
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                        Text="{x:Bind SizeDisplay, Mode=OneWay}" />
+                                </Grid>
+                            </TreeViewItem>
+                        </DataTemplate>
+                    </TreeView.ItemTemplate>
+                </TreeView>
 
+                <Grid Grid.Column="1">
+                    <controls:TreemapPane
+                        x:Name="StorageTreemap"
+                        AutomationProperties.AutomationId="SpaceTreemap"
+                        AutomationProperties.Name="Treemap of the current scope, area is size on disk"
+                        NavigateUpRequested="StorageTreemap_NavigateUpRequested"
+                        NodeInvoked="StorageTreemap_NodeInvoked"
+                        Opacity="{x:Bind local:SpacePage.ContentOpacity(ShowOverlay), Mode=OneWay}"
+                        Revision="{x:Bind ViewModel.ProjectionRevision, Mode=OneWay}"
+                        Rows="{x:Bind ViewModel.VisibleItems}"
+                        Scope="{x:Bind ViewModel.CurrentScope, Mode=OneWay}"
+                        SelectedRow="{x:Bind ViewModel.SelectedRow, Mode=OneWay}"
+                        Snapshot="{x:Bind ViewModel.Snapshot, Mode=OneWay}" />
+                </Grid>
+
+                <!-- Spans the tree and the map so the message sits in the middle of the card. -->
                 <Border
-                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    Grid.ColumnSpan="2"
+                    Background="Transparent"
                     Visibility="{x:Bind local:SpacePage.BoolToVisibility(ShowOverlay), Mode=OneWay}">
                     <StackPanel
-                        MaxWidth="420"
+                        MaxWidth="360"
                         HorizontalAlignment="Center"
                         VerticalAlignment="Center"
                         Visibility="{x:Bind local:SpacePage.OverlayMessageVisibility(IsScanning), Mode=OneWay}"
-                        Spacing="12">
+                        Spacing="4">
+                        <Border
+                            Width="64" Height="64" Margin="0,0,0,12"
+                            HorizontalAlignment="Center"
+                            CornerRadius="32"
+                            Background="{ThemeResource SubtleFillColorSecondaryBrush}">
+                            <FontIcon
+                                AutomationProperties.AccessibilityView="Raw"
+                                FontSize="28"
+                                Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                Glyph="{x:Bind OverlayGlyph, Mode=OneWay}" />
+                        </Border>
                         <TextBlock
                             HorizontalAlignment="Center"
                             AutomationProperties.AutomationId="SpaceOverlayTitle"
@@ -201,61 +196,217 @@
                             Text="{x:Bind OverlayTitle, Mode=OneWay}"
                             TextAlignment="Center" />
                         <TextBlock
+                            HorizontalAlignment="Center"
                             AutomationProperties.AutomationId="SpaceOverlayDetail"
                             Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                             Text="{x:Bind OverlayDetail, Mode=OneWay}"
                             TextAlignment="Center"
                             TextWrapping="Wrap" />
-                        <StackPanel HorizontalAlignment="Center" Orientation="Horizontal" Spacing="8">
-                            <Button
-                                AutomationProperties.AutomationId="SpaceRetryScan"
-                                Click="RetryScanButton_Click"
-                                Content="Try again"
-                                Style="{StaticResource AccentButtonStyle}"
-                                Visibility="{x:Bind local:SpacePage.BoolToVisibility(ViewModel.HasError), Mode=OneWay}" />
-                        </StackPanel>
+                        <Button
+                            Margin="0,12,0,0"
+                            HorizontalAlignment="Center"
+                            AutomationProperties.AutomationId="SpaceRetryScan"
+                            Click="RetryScanButton_Click"
+                            Content="Try again"
+                            Style="{StaticResource AccentButtonStyle}"
+                            Visibility="{x:Bind local:SpacePage.BoolToVisibility(ViewModel.HasError), Mode=OneWay}" />
                     </StackPanel>
                 </Border>
             </Grid>
-        </Grid>
 
-        <Border
-            x:Name="SpaceStatusBar"
-            Grid.Row="2" Padding="12,10" Margin="18,0,18,24" Visibility="Collapsed"
-            HorizontalAlignment="Center" VerticalAlignment="Bottom" MinWidth="320" MaxWidth="560"
-            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-            BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}" BorderThickness="1"
-            CornerRadius="{ThemeResource ControlCornerRadius}"
-            Translation="0,0,16"
-            AutomationProperties.AutomationId="SpaceStatusBar"
-            AutomationProperties.Name="Scan progress">
-            <Border.Shadow>
-                <ThemeShadow x:Name="SpaceProgressShadow" />
-            </Border.Shadow>
-            <animations:Implicit.ShowAnimations>
-                <animations:OpacityAnimation From="0" To="1" Duration="0:0:0.2" />
-                <animations:TranslationAnimation From="0,16,16" To="0,0,16" Duration="0:0:0.2" />
-            </animations:Implicit.ShowAnimations>
-            <animations:Implicit.HideAnimations>
-                <animations:OpacityAnimation To="0" Duration="0:0:0.15" />
-                <animations:TranslationAnimation To="0,16,16" Duration="0:0:0.15" />
-            </animations:Implicit.HideAnimations>
-            <Grid ColumnSpacing="12">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="2*" />
-                    <ColumnDefinition Width="3*" />
-                </Grid.ColumnDefinitions>
-                <TextBlock Text="{x:Bind ViewModel.ProgressLabel, Mode=OneWay}" FontSize="12"
-                           VerticalAlignment="Center"
-                           ToolTipService.ToolTip="{x:Bind ViewModel.ProgressLabel, Mode=OneWay}"
-                           TextTrimming="CharacterEllipsis"
-                           AutomationProperties.AutomationId="SpaceProgressLabel" />
-                <ProgressBar Grid.Column="1" MinWidth="80" VerticalAlignment="Center"
-                             AutomationProperties.AutomationId="SpaceScanProgress"
-                             AutomationProperties.Name="Scan progress"
-                             IsIndeterminate="{x:Bind local:SpacePage.IsIndeterminate(ViewModel.Progress), Mode=OneWay}"
-                             Maximum="1" Value="{x:Bind ViewModel.Progress, Mode=OneWay}" />
+            <Border
+                x:Name="SpaceStatusBar"
+                Padding="12,10" Margin="0,0,0,12" Visibility="Collapsed"
+                HorizontalAlignment="Center" VerticalAlignment="Bottom" MinWidth="320" MaxWidth="560"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}" BorderThickness="1"
+                CornerRadius="{ThemeResource ControlCornerRadius}"
+                Translation="0,0,16"
+                AutomationProperties.AutomationId="SpaceStatusBar"
+                AutomationProperties.Name="Scan progress">
+                <Border.Shadow>
+                    <ThemeShadow x:Name="SpaceProgressShadow" />
+                </Border.Shadow>
+                <animations:Implicit.ShowAnimations>
+                    <animations:OpacityAnimation From="0" To="1" Duration="0:0:0.2" />
+                    <animations:TranslationAnimation From="0,16,16" To="0,0,16" Duration="0:0:0.2" />
+                </animations:Implicit.ShowAnimations>
+                <animations:Implicit.HideAnimations>
+                    <animations:OpacityAnimation To="0" Duration="0:0:0.15" />
+                    <animations:TranslationAnimation To="0,16,16" Duration="0:0:0.15" />
+                </animations:Implicit.HideAnimations>
+                <Grid ColumnSpacing="12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="2*" />
+                        <ColumnDefinition Width="3*" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="{x:Bind ViewModel.ProgressLabel, Mode=OneWay}" FontSize="12"
+                               VerticalAlignment="Center"
+                               ToolTipService.ToolTip="{x:Bind ViewModel.ProgressLabel, Mode=OneWay}"
+                               TextTrimming="CharacterEllipsis"
+                               AutomationProperties.AutomationId="SpaceProgressLabel" />
+                    <ProgressBar Grid.Column="1" MinWidth="80" VerticalAlignment="Center"
+                                 AutomationProperties.AutomationId="SpaceScanProgress"
+                                 AutomationProperties.Name="Scan progress"
+                                 IsIndeterminate="{x:Bind local:SpacePage.IsIndeterminate(ViewModel.Progress), Mode=OneWay}"
+                                 Maximum="1" Value="{x:Bind ViewModel.Progress, Mode=OneWay}" />
+                </Grid>
+            </Border>
+
+            <!-- What can be removed from this drive. Filled by the clean-up scan that runs beside the map's scan. -->
+            <Grid x:Name="SpaceCleanupPanel" Grid.Column="1"
+                  Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                  BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1"
+                  CornerRadius="{ThemeResource ControlCornerRadius}"
+                  AutomationProperties.AutomationId="SpaceCleanupPanel"
+                  AutomationProperties.Name="Can be cleaned up">
+                <Grid.Resources>
+                    <ResourceDictionary>
+                        <!-- Rows read as list items, not as buttons, until the pointer is on them. -->
+                        <ResourceDictionary.ThemeDictionaries>
+                            <ResourceDictionary x:Key="Default">
+                                <StaticResource x:Key="ButtonBackground" ResourceKey="SubtleFillColorTransparentBrush" />
+                                <StaticResource x:Key="ButtonBackgroundPointerOver" ResourceKey="SubtleFillColorSecondaryBrush" />
+                                <StaticResource x:Key="ButtonBackgroundPressed" ResourceKey="SubtleFillColorTertiaryBrush" />
+                                <StaticResource x:Key="ButtonBorderBrush" ResourceKey="SubtleFillColorTransparentBrush" />
+                                <StaticResource x:Key="ButtonBorderBrushPointerOver" ResourceKey="SubtleFillColorTransparentBrush" />
+                                <StaticResource x:Key="ButtonBorderBrushPressed" ResourceKey="SubtleFillColorTransparentBrush" />
+                            </ResourceDictionary>
+                            <ResourceDictionary x:Key="Light">
+                                <StaticResource x:Key="ButtonBackground" ResourceKey="SubtleFillColorTransparentBrush" />
+                                <StaticResource x:Key="ButtonBackgroundPointerOver" ResourceKey="SubtleFillColorSecondaryBrush" />
+                                <StaticResource x:Key="ButtonBackgroundPressed" ResourceKey="SubtleFillColorTertiaryBrush" />
+                                <StaticResource x:Key="ButtonBorderBrush" ResourceKey="SubtleFillColorTransparentBrush" />
+                                <StaticResource x:Key="ButtonBorderBrushPointerOver" ResourceKey="SubtleFillColorTransparentBrush" />
+                                <StaticResource x:Key="ButtonBorderBrushPressed" ResourceKey="SubtleFillColorTransparentBrush" />
+                            </ResourceDictionary>
+                        </ResourceDictionary.ThemeDictionaries>
+
+                        <!-- Flat groups: the panel is already the card, so the expanders should not be cards too. -->
+                        <SolidColorBrush x:Key="ExpanderHeaderBackground" Color="Transparent" />
+                        <SolidColorBrush x:Key="ExpanderHeaderBorderBrush" Color="Transparent" />
+                        <SolidColorBrush x:Key="ExpanderContentBackground" Color="Transparent" />
+                        <SolidColorBrush x:Key="ExpanderContentBorderBrush" Color="Transparent" />
+                        <x:Double x:Key="ExpanderMinHeight">40</x:Double>
+
+                        <DataTemplate x:Key="CleanupRowTemplate" x:DataType="vm:ReclaimRowViewModel">
+                        <Grid ColumnSpacing="2">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <CheckBox MinWidth="0" Padding="0" VerticalAlignment="Center"
+                                      IsChecked="{x:Bind IsSelected, Mode=TwoWay}"
+                                      AutomationProperties.AutomationId="{x:Bind AutomationId}"
+                                      AutomationProperties.Name="{x:Bind AccessibleDescription}" />
+                            <Button Grid.Column="1" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                                    Padding="8,5" Tag="{x:Bind}" Click="CleanupRow_Click"
+                                    AutomationProperties.Name="{x:Bind local:SpacePage.RevealName(DisplayName)}"
+                                    ToolTipService.ToolTip="{x:Bind local:SpacePage.CleanupRowTip(Path, ReasonText)}">
+                                <Grid ColumnSpacing="8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="{x:Bind DisplayName}" TextTrimming="CharacterEllipsis"
+                                               VerticalAlignment="Center" />
+                                    <TextBlock Grid.Column="1" Text="{x:Bind RiskText}" VerticalAlignment="Center"
+                                               Style="{StaticResource CaptionTextBlockStyle}"
+                                               Foreground="{ThemeResource SystemFillColorCautionBrush}"
+                                               Visibility="{x:Bind local:SpacePage.RiskLabelVisibility(Candidate.Risk)}" />
+                                    <TextBlock Grid.Column="2" Text="{x:Bind SizeText}" VerticalAlignment="Center"
+                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                </Grid>
+                            </Button>
+                        </Grid>
+                        </DataTemplate>
+                    </ResourceDictionary>
+                </Grid.Resources>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <StackPanel Padding="16,14,16,12" Spacing="2">
+                    <TextBlock Text="Can be cleaned up" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                    <TextBlock x:Name="CleanupHeadline" Style="{StaticResource SubtitleTextBlockStyle}"
+                               Visibility="Collapsed"
+                               AutomationProperties.AutomationId="SpaceCleanupHeadline" />
+                    <TextBlock x:Name="CleanupDetail" Style="{StaticResource CaptionTextBlockStyle}"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"
+                               AutomationProperties.AutomationId="SpaceCleanupDetail" />
+                    <ProgressBar x:Name="CleanupProgress" Margin="0,8,0,0" IsIndeterminate="True"
+                                 Visibility="Collapsed"
+                                 AutomationProperties.Name="Looking for things to clean up" />
+                    <TextBlock x:Name="CleanupRunSummary" Margin="0,6,0,0" Visibility="Collapsed"
+                               Style="{StaticResource CaptionTextBlockStyle}" TextWrapping="Wrap"
+                               AutomationProperties.AutomationId="SpaceCleanupRunSummary" />
+                </StackPanel>
+
+                <ScrollViewer Grid.Row="1" x:Name="CleanupScroller" Padding="8,0,8,8"
+                              HorizontalScrollBarVisibility="Disabled">
+                    <ItemsRepeater x:Name="CleanupList"
+                                   AutomationProperties.AutomationId="SpaceCleanupList"
+                                   AutomationProperties.Name="Things that can be removed">
+                        <ItemsRepeater.Layout>
+                            <StackLayout Spacing="2" />
+                        </ItemsRepeater.Layout>
+                        <ItemsRepeater.ItemTemplate>
+                            <DataTemplate x:DataType="local:SpaceCleanupGroup">
+                                <Expander HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                                          Padding="4,0,4,8"
+                                          IsExpanded="{x:Bind IsExpanded, Mode=TwoWay}"
+                                          AutomationProperties.AutomationId="{x:Bind AutomationId}"
+                                          AutomationProperties.Name="{x:Bind AutomationName}">
+                                    <Expander.Header>
+                                        <Grid ColumnSpacing="12">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <FontIcon Glyph="{x:Bind Glyph}" FontSize="16" VerticalAlignment="Center" />
+                                            <TextBlock Grid.Column="1" Text="{x:Bind Title}" VerticalAlignment="Center"
+                                                       TextTrimming="CharacterEllipsis" />
+                                            <TextBlock Grid.Column="2" Text="{x:Bind TotalText}" VerticalAlignment="Center"
+                                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        </Grid>
+                                    </Expander.Header>
+                                    <ItemsRepeater ItemsSource="{x:Bind Rows}"
+                                                   ItemTemplate="{StaticResource CleanupRowTemplate}" />
+                                </Expander>
+                            </DataTemplate>
+                        </ItemsRepeater.ItemTemplate>
+                    </ItemsRepeater>
+                </ScrollViewer>
+
+                <StackPanel x:Name="CleanupEmpty" Grid.Row="1" Padding="24" Spacing="12"
+                            HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <FontIcon x:Name="CleanupEmptyIcon" Glyph="&#xE74D;" FontSize="32"
+                              Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                    <TextBlock x:Name="CleanupEmptyText" TextAlignment="Center" TextWrapping="Wrap"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                               AutomationProperties.AutomationId="SpaceCleanupEmpty" />
+                </StackPanel>
+
+                <Grid x:Name="CleanupFooter" Grid.Row="2" Padding="16,12" ColumnSpacing="8" Visibility="Collapsed"
+                      BorderThickness="0,1,0,0" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <HyperlinkButton Content="Select safe" Padding="4,5" VerticalAlignment="Center"
+                                     Command="{x:Bind Reclaim.SelectSafeCommand}"
+                                     AutomationProperties.AutomationId="SpaceCleanupSelectSafe"
+                                     ToolTipService.ToolTip="Tick everything that is safe to remove" />
+                    <Button x:Name="CleanupButton" Grid.Column="1" Style="{StaticResource AccentButtonStyle}"
+                            Command="{x:Bind Reclaim.ReclaimCommand}"
+                            IsEnabled="{x:Bind Reclaim.CanReclaim, Mode=OneWay}"
+                            AutomationProperties.AutomationId="SpaceCleanupButton" />
+                </Grid>
             </Grid>
-        </Border>
+        </Grid>
     </Grid>
 </Page>

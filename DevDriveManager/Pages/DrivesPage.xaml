@@ -18,26 +18,7 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <!-- Page commands; volume details and selection remain in the table. -->
-        <Grid
-            Grid.Row="0"
-            Padding="18,10"
-            ColumnSpacing="14"
-            BorderBrush="{ThemeResource SmDividerBrush}"
-            BorderThickness="0,0,0,1">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
-
-            <Button
-                Grid.Column="1"
-                VerticalAlignment="Center"
-                AutomationProperties.AutomationId="CreateDevDriveButton"
-                Command="{x:Bind ViewModel.CreateDevDriveCommand}"
-                Content="Create Dev Drive"
-                Style="{StaticResource AccentButtonStyle}" />
-        </Grid>
+        <!-- No command row: creating a Dev Drive lives on the Dev Drive page, which owns this one. -->
 
         <!--
             The room. Two columns, same grammar as Caches: the centre answers "which ones", the

@@ -275,6 +275,41 @@ public sealed class AttentionSignalBuilderTests
         Assert.HasCount(1, signals);
         Assert.AreEqual("NoDevDrive", signals[0].Id);
     }
+
+    [TestMethod]
+    public void Build_NamesTheCachesThatWouldMoveOntoANewDevDrive()
+    {
+        AttentionInputs inputs = Healthy(Volume('C', 1000, 500)) with
+        {
+            CachesOffDevDrive =
+            [
+                new CacheSignalInput("pip", @"C:\pip", 1 * Gb, false),
+                new CacheSignalInput("npm", @"C:\npm", 2 * Gb, false),
+            ],
+        };
+
+        AttentionSignal signal = AttentionSignalBuilder.Build(inputs).Single();
+
+        Assert.AreEqual("npm and pip caches (3.0 GB) could move onto one, out of the antivirus filter's way", signal.Detail);
+        Assert.AreEqual(0, signal.ImpactBytes);
+    }
+
+    [TestMethod]
+    public void Build_KeepsTheGenericDevDriveDetailWhenCacheWatchingIsOff()
+    {
+        AttentionInputs inputs = Healthy(Volume('C', 1000, 500)) with
+        {
+            CachesOffDevDrive = [new CacheSignalInput("pip", @"C:\pip", 3 * Gb, false)],
+            WatchCachesOffDevDrive = false,
+        };
+
+        AttentionSignal signal = AttentionSignalBuilder.Build(inputs).Single();
+
+        Assert.AreEqual(
+            "Source and package caches are all on volumes the antivirus filter scans inline",
+            signal.Detail);
+    }
+
     [TestMethod]
     public void Build_RoutesTheMissingDevDriveSignalToCreate()
     {

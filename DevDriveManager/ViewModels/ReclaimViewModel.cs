@@ -354,7 +354,37 @@ public sealed partial class ReclaimViewModel : ObservableObject
     partial void OnSelectedRiskMixChanged(ReclaimRiskMix value) => RaiseActionState();
 
     [RelayCommand]
-    private async Task ScanAsync()
+    private Task ScanAsync() => RunScanAsync(_contextFactory, scopeRoot: null);
+
+    /// <summary>
+    /// Scans one volume only. This is the clean-up scan the Space map runs beside its own scan of
+    /// the same drive, so the list next to the map only offers what is on the map.
+    /// </summary>
+    /// <param name="volumeRoot">The volume, e.g. <c>D:\</c>.</param>
+    /// <param name="includeWholeVolume">
+    /// Look for repos anywhere on the volume, not only in the conventional code folders. Right for a
+    /// Dev Drive or a data drive; too slow for the system drive.
+    /// </param>
+    public Task ScanVolumeAsync(string volumeRoot, bool includeWholeVolume)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(volumeRoot);
+        return RunScanAsync(
+            () => ReclaimRegistry.CreateVolumeContext(volumeRoot, includeWholeVolume), volumeRoot);
+    }
+
+    /// <summary>
+    /// The volume the current results belong to, e.g. <c>D:\</c>, or null when they cover the whole
+    /// PC. Set when a scan starts, because that is when the rows from the previous scope go away.
+    /// </summary>
+    [ObservableProperty]
+    public partial string? ScopeRoot { get; set; }
+
+    /// <summary>"D:" for a volume scan, "this PC" for a machine scan.</summary>
+    public string ScopeText => ScopeRoot is { } root ? root.TrimEnd('\\', '/') : "this PC";
+
+    partial void OnScopeRootChanged(string? value) => OnPropertyChanged(nameof(ScopeText));
+
+    private async Task RunScanAsync(Func<ReclaimScanContext> contextFactory, string? scopeRoot)
     {
         // Both, not just IsScanning. A scan starting mid-reclaim empties the rows the executor's
         // outcome is about to be written onto — see CanScan. The button is bound to match, but the
@@ -369,6 +399,7 @@ public sealed partial class ReclaimViewModel : ObservableObject
         CancellationToken token = _scanCts.Token;
 
         IsScanning = true;
+        ScopeRoot = scopeRoot;
         ScanError = null;
         StatusText = "Scanning…";
         LastRunSummary = null;
@@ -396,7 +427,12 @@ public sealed partial class ReclaimViewModel : ObservableObject
         try
         {
             ReclaimResult result = await Task.Run(
-                () => _engine.ScanAsync(_contextFactory(), progress, token), token);
+                () => _engine.ScanAsync(contextFactory(), progress, token), token);
+
+            if (scopeRoot is not null)
+            {
+                result = result.Within(scopeRoot);
+            }
 
             Apply(result);
 

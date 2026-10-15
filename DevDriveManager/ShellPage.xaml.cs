@@ -8,16 +8,19 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Xaml.Navigation;
 using Windows.System;
 
 namespace DevDriveManager;
 
 /// <summary>
-/// The application shell: a <see cref="NavigationView"/> that splits the (formerly single, endless-scroll)
-/// experience into focused pages — Dashboard, Package caches, Benchmarks, Drives, Create Dev Drive, and
-/// Settings (footer). Every page binds to the one shared <see cref="App.Shared"/> view model, so the
-/// expensive volume / Dev Drive / package-cache load runs once and all pages reflect the same live state.
+/// The application shell: a <see cref="NavigationView"/> with three rooms — Home, Space, and Dev Drive —
+/// plus Settings in the footer. A room with more than one page shows them as tabs under its title
+/// (Space: Map | Clean up; Dev Drive: Overview | Package caches). Tasks such as Create Dev Drive open
+/// as sub-pages: the rail keeps the room selected and the header becomes a breadcrumb back to it.
+/// Every page binds to the one shared <see cref="App.Shared"/> view model, so the expensive volume /
+/// Dev Drive / package-cache load runs once and all pages reflect the same live state.
 /// </summary>
 /// <remarks>
 /// The shell owns the genuinely global, dialog-bearing flows that used to live on the old MainPage:
@@ -27,6 +30,15 @@ namespace DevDriveManager;
 public sealed partial class ShellPage : Page
 {
     private bool _isDialogOpen;
+
+    /// <summary>The room or sub-page tag currently shown in <c>ContentFrame</c>.</summary>
+    private string? _currentTag;
+
+    /// <summary>The room whose tabs <c>RoomTabs</c> currently holds.</summary>
+    private Room? _tabsRoom;
+
+    /// <summary>Set while the shell selects a tab itself, so that selection does not navigate again.</summary>
+    private bool _isSyncingTabs;
 
     public MainPageViewModel ViewModel => App.Shared;
 
@@ -65,7 +77,7 @@ public sealed partial class ShellPage : Page
 
             var item = new NavigationViewItem
             {
-                Content = RailLabel(room.Title),
+                Content = room.Title,
                 Icon = new FontIcon { Glyph = room.Glyph, FontSize = 20 },
                 Style = (Style)Application.Current.Resources["StoreNavigationViewItemStyle"],
                 Tag = room.Tag,
@@ -79,30 +91,25 @@ public sealed partial class ShellPage : Page
     }
 
     /// <summary>
-    /// Shortens a room title to something that fits the rail without ellipsing. Only titles
-    /// that genuinely do not fit are shortened; the full title stays on the tooltip and the
-    /// accessible name.
+    /// Open any destination by its tag, updating the rail, the tabs, and the content frame. A room tag
+    /// (e.g. "space") opens its first tab; a tab tag (e.g. "caches") opens that tab of its room; a
+    /// sub-page tag (e.g. "create") opens that page. The rail always selects the owning room.
     /// </summary>
-    private static string RailLabel(string title) => title switch
-    {
-        "Package caches" => "Caches",
-        "Create Dev Drive" => "Create",
-        _ => title,
-    };
-
-    /// <summary>Select a top-level nav item by its tag (e.g. "caches"), updating the rail and the content frame.</summary>
     public void SelectNavItem(string tag)
     {
+        string? railTag = RoomOf(tag);
         NavigationViewItem? item = ShellNavView.MenuItems
             .Concat(ShellNavView.FooterMenuItems)
             .OfType<NavigationViewItem>()
-            .FirstOrDefault(item => item.Tag as string == tag);
+            .FirstOrDefault(item => item.Tag as string == railTag);
         if (item is null) return;
 
         // All callers (including attention signals and the shared Create request) use the same
         // selection path. Re-selecting the current destination never reconstructs its page.
-        ShellNavView.SelectedItem = item;
+        // Navigate first, so the SelectionChanged raised for a sub-page's parent room sees the
+        // sub-page already open instead of replacing it with the room.
         Navigate(tag);
+        ShellNavView.SelectedItem = item;
     }
 
     /// <summary>
@@ -115,11 +122,46 @@ public sealed partial class ShellPage : Page
         {
             AutomationProperties.SetItemStatus(item, ReferenceEquals(item, args.SelectedItem) ? "Selected" : string.Empty);
         }
-        if (args.SelectedItem is NavigationViewItem { Tag: string tag })
+        // SelectNavItem navigates before it selects, so a selection raised for the room that already
+        // owns the open page (a tab, or a sub-page) must not replace that page with the room's first tab.
+        if (args.SelectedItem is NavigationViewItem { Tag: string tag } && RoomOf(_currentTag) != tag)
         {
             Navigate(tag);
         }
     }
+
+    /// <summary>
+    /// Invoking the already-selected room raises no SelectionChanged, so this is what takes a
+    /// sub-page (Dev Drive › Create Dev Drive) back to its room when the room's rail item is clicked.
+    /// </summary>
+    private void ShellNavView_ItemInvoked(NavigationView sender, NavigationViewItemInvokedEventArgs args)
+    {
+        if (args.InvokedItemContainer is NavigationViewItem { Tag: string tag }
+            && RoomRegistry.FindSubPage(_currentTag)?.ParentTag == tag)
+        {
+            Navigate(tag);
+        }
+    }
+
+    /// <summary>The first breadcrumb segment is the parent room; the last is the page already open.</summary>
+    private void PageBreadcrumb_ItemClicked(BreadcrumbBar sender, BreadcrumbBarItemClickedEventArgs args)
+    {
+        if (args.Index == 0 && RoomRegistry.FindSubPage(_currentTag) is { } subPage)
+        {
+            SelectNavItem(subPage.ParentTag);
+        }
+    }
+
+    private void RoomTabs_SelectionChanged(SelectorBar sender, SelectorBarSelectionChangedEventArgs args)
+    {
+        if (!_isSyncingTabs && sender.SelectedItem is SelectorBarItem { Tag: string tag })
+        {
+            Navigate(tag);
+        }
+    }
+
+    /// <summary>The rail room a tag belongs to: the room itself, the room owning a tab, or a sub-page's parent.</summary>
+    private static string? RoomOf(string? tag) => RoomRegistry.Resolve(tag)?.Room.Tag ?? tag;
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
@@ -147,17 +189,109 @@ public sealed partial class ShellPage : Page
 
     private void Navigate(string tag)
     {
-        Type? target = tag == "settings" ? typeof(SettingsPage) : RoomRegistry.Find(tag)?.PageType;
-
-        if (target is not null && ContentFrame.CurrentSourcePageType != target)
+        if (tag == "settings")
         {
-            PageTitle.Text = tag == "settings" ? "Settings" : RoomRegistry.Find(tag)!.Title;
-            // These pages own their title/action rows so the controls can wrap at narrow widths.
-            bool pageOwnsHeader = target == typeof(SpacePage) || target == typeof(PackageCachesPage);
-            PageTitle.Visibility = pageOwnsHeader ? Visibility.Collapsed : Visibility.Visible;
-            AutomationProperties.SetAutomationId(PageTitle,
-                pageOwnsHeader ? "ShellPageTitle" : tag == "settings" ? "SettingsTitle" : "PageTitle");
-            ContentFrame.Navigate(target, null, new Microsoft.UI.Xaml.Media.Animation.SuppressNavigationTransitionInfo());
+            if (ContentFrame.CurrentSourcePageType != typeof(SettingsPage))
+            {
+                _currentTag = tag;
+                ShowTitle("Settings", "SettingsTitle");
+                ShowTabs(null, null);
+                ContentFrame.Navigate(typeof(SettingsPage), null, new SuppressNavigationTransitionInfo());
+            }
+
+            return;
+        }
+
+        if (RoomRegistry.Resolve(tag) is not { } route || ContentFrame.CurrentSourcePageType == route.PageType)
+        {
+            return;
+        }
+
+        // Moving between tabs of one room slides the page the way the tab moved; everything else cuts.
+        NavigationTransitionInfo transition = new SuppressNavigationTransitionInfo();
+        if (route.Tab is { } tab && RoomRegistry.Resolve(_currentTag) is { Tab: { } fromTab } from && from.Room == route.Room)
+        {
+            var tabs = route.Room.Tabs.ToList();
+            transition = new SlideNavigationTransitionInfo
+            {
+                Effect = tabs.IndexOf(tab) > tabs.IndexOf(fromTab)
+                    ? SlideNavigationTransitionEffect.FromRight
+                    : SlideNavigationTransitionEffect.FromLeft,
+            };
+        }
+
+        _currentTag = tag;
+
+        if (route.SubPage is { } subPage)
+        {
+            PageHeader.Visibility = Visibility.Visible;
+            PageBreadcrumb.ItemsSource = new[] { route.Room.Title, subPage.Title };
+            PageBreadcrumb.Visibility = Visibility.Visible;
+            PageTitle.Visibility = Visibility.Collapsed;
+            AutomationProperties.SetAutomationId(PageTitle, "ShellPageTitle");
+            ShowTabs(null, null);
+        }
+        else if (route.Room.OwnsHeader)
+        {
+            // Home draws its own hero title; the shell header would only repeat it.
+            PageHeader.Visibility = Visibility.Collapsed;
+            AutomationProperties.SetAutomationId(PageTitle, "ShellPageTitle");
+            ShowTabs(null, null);
+        }
+        else
+        {
+            ShowTitle(route.Room.Title, "PageTitle");
+            ShowTabs(route.Room, route.Tab);
+        }
+
+        ContentFrame.Navigate(route.PageType, null, transition);
+    }
+
+    private void ShowTitle(string title, string automationId)
+    {
+        PageHeader.Visibility = Visibility.Visible;
+        PageBreadcrumb.Visibility = Visibility.Collapsed;
+        PageTitle.Text = title;
+        PageTitle.Visibility = Visibility.Visible;
+        AutomationProperties.SetAutomationId(PageTitle, automationId);
+    }
+
+    /// <summary>
+    /// Shows the room's tabs with <paramref name="selected"/> selected, or hides the bar for a room
+    /// with one page, a sub-page, or Settings. The items are rebuilt only when the room changes.
+    /// </summary>
+    private void ShowTabs(Room? room, RoomTab? selected)
+    {
+        _isSyncingTabs = true;
+        try
+        {
+            if (room is not { HasTabs: true })
+            {
+                RoomTabs.Visibility = Visibility.Collapsed;
+                RoomTabs.Items.Clear();
+                _tabsRoom = null;
+                return;
+            }
+
+            if (!ReferenceEquals(_tabsRoom, room))
+            {
+                RoomTabs.Items.Clear();
+                foreach (RoomTab tab in room.Tabs)
+                {
+                    var item = new SelectorBarItem { Text = tab.Title, Tag = tab.Tag };
+                    AutomationProperties.SetAutomationId(item, tab.AutomationId);
+                    RoomTabs.Items.Add(item);
+                }
+
+                _tabsRoom = room;
+            }
+
+            RoomTabs.SelectedItem = RoomTabs.Items.FirstOrDefault(i => i.Tag as string == selected?.Tag);
+            RoomTabs.Visibility = Visibility.Visible;
+        }
+        finally
+        {
+            _isSyncingTabs = false;
         }
     }
 
@@ -179,7 +313,7 @@ public sealed partial class ShellPage : Page
         };
     }
 
-    /// <summary>"Create Dev Drive" raised from a page (e.g. the Dashboard empty state): select the nav item.</summary>
+    /// <summary>"Create Dev Drive" raised from a page (e.g. the Dashboard empty state): open it under Dev Drive.</summary>
     private void OnNavigateToCreateRequested() => SelectNavItem("create");
 
     /// <summary>Launches a shell URI (e.g. <c>ms-settings:storage</c>). Best-effort and safe.</summary>

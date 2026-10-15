@@ -31,8 +31,6 @@ namespace DevDriveManager.Pages;
 /// </remarks>
 public sealed partial class SettingsPage : Page, INotifyPropertyChanged
 {
-    private readonly IFreeSpaceHistoryStore _history = new JsonFreeSpaceHistoryStore();
-
     // Set once the constructor has finished seeding the controls. Every SelectionChanged handler
     // gates on it, because assigning SelectedIndex raises the same event a user click does and would
     // otherwise persist the value we only just read.
@@ -41,9 +39,6 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
     // Guards ContentDialog re-entrancy: WinUI allows one dialog at a time and a second ShowAsync
     // throws, which a double-click on any of this page's explainer buttons would otherwise reach.
     private bool _isDialogOpen;
-
-    private int _historyCount;
-    private DateTimeOffset? _historyOldest;
 
     public SettingsPage()
     {
@@ -60,12 +55,9 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
 
         SelectByTag(LowFreeCombo, prefs.LowFreePercent);
         SelectByTag(RollupCombo, prefs.CacheRollupThreshold);
-        SelectByTag(RetentionCombo, prefs.HistoryRetentionDays);
         CreationMethodCombo.SelectedIndex = prefs.PreferResizeOverVhdx ? 0 : 1;
 
         _isReady = true;
-
-        ReadHistory();
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -104,36 +96,6 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
         }
     }
 
-    /// <summary>Whether free-space readings are appended on every Overview load.</summary>
-    public bool RecordFreeSpaceHistory
-    {
-        get => PreferencesService.Current.RecordFreeSpaceHistory;
-        set
-        {
-            if (value == PreferencesService.Current.RecordFreeSpaceHistory)
-            {
-                return;
-            }
-
-            PreferencesService.Update(p => p with { RecordFreeSpaceHistory = value });
-        }
-    }
-
-    // ---- Free-space history --------------------------------------------------------------------
-
-    /// <summary>True when there is anything to clear.</summary>
-    public bool HasHistory => _historyCount > 0;
-
-    /// <summary>
-    /// What is on disk right now. A count alone does not answer "is this worth keeping", so the date
-    /// of the oldest reading comes with it — that is the number the retention setting acts on.
-    /// </summary>
-    public string HistorySummaryText => _historyCount == 0
-        ? "No readings recorded yet"
-        : _historyOldest is { } oldest
-            ? $"{_historyCount} {(_historyCount == 1 ? "reading" : "readings")}, oldest {oldest.ToLocalTime():d MMM yyyy}"
-            : $"{_historyCount} {(_historyCount == 1 ? "reading" : "readings")}";
-
     // ---- Handlers ------------------------------------------------------------------------------
 
     private void ThemeSelector_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -167,14 +129,6 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
         }
     }
 
-    private void RetentionCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (_isReady && TagOf(RetentionCombo) is { } days)
-        {
-            PreferencesService.Update(p => p with { HistoryRetentionDays = days });
-        }
-    }
-
     private void CreationMethodCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_isReady)
@@ -185,22 +139,6 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
     }
 
     /// <summary>
-    /// Deletes saved readings only after explicit confirmation. Past readings cannot be recreated.
-    /// </summary>
-    private async void ClearHistory_Click(object sender, RoutedEventArgs e)
-    {
-        if (!await ConfirmAsync("Clear free-space history?",
-            $"{HistorySummaryText}. All saved readings will be permanently deleted. New readings can still be recorded.",
-            "Clear history", "ClearHistoryConfirmDialog"))
-        {
-            return;
-        }
-
-        _history.Clear();
-        ReadHistory();
-    }
-
-    /// <summary>
     /// Puts every preference back to its shipped default, and re-seeds the controls to match — the
     /// combos are the source of truth for what the user sees, and a reset that left them showing the
     /// old values would look like it had failed.
@@ -208,7 +146,7 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
     private async void ResetPreferences_Click(object sender, RoutedEventArgs e)
     {
         if (!await ConfirmAsync("Reset app preferences?",
-            "Restore warning thresholds, cache signals, history recording and retention, and the default creation method. Your theme and saved history will not change.",
+            "Restore warning thresholds, cache signals, and the default creation method. Your theme will not change.",
             "Reset", "ResetPreferencesConfirmDialog"))
         {
             return;
@@ -220,7 +158,6 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
         _isReady = false;
         SelectByTag(LowFreeCombo, prefs.LowFreePercent);
         SelectByTag(RollupCombo, prefs.CacheRollupThreshold);
-        SelectByTag(RetentionCombo, prefs.HistoryRetentionDays);
         CreationMethodCombo.SelectedIndex = prefs.PreferResizeOverVhdx ? 0 : 1;
         _isReady = true;
 
@@ -228,7 +165,6 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
         // left alone: someone who pinned the app to Light did not ask for that to be undone by a
         // button labelled "reset to defaults" sitting under a list of signal thresholds.
         Raise(nameof(WatchCachesOffDevDrive));
-        Raise(nameof(RecordFreeSpaceHistory));
     }
 
     private async void Source_Click(object sender, RoutedEventArgs e)
@@ -253,15 +189,6 @@ public sealed partial class SettingsPage : Page, INotifyPropertyChanged
     }
 
     // ---- Plumbing ------------------------------------------------------------------------------
-
-    private void ReadHistory()
-    {
-        IReadOnlyList<FreeSpaceSample> samples = _history.Load();
-        _historyCount = samples.Count;
-        _historyOldest = samples.Count == 0 ? null : samples.Min(s => s.TakenAtUtc);
-        Raise(nameof(HasHistory));
-        Raise(nameof(HistorySummaryText));
-    }
 
     private async Task<bool> ConfirmAsync(string title, string message, string action, string automationId)
     {

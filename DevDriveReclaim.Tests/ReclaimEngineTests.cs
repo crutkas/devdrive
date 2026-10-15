@@ -179,6 +179,46 @@ public sealed class ReclaimEngineTests
         }
     }
 
+    [TestMethod]
+    public void WithinKeepsOnlyCandidatesOnThatVolume()
+    {
+        var result = new ReclaimResult(
+        [
+            new ReclaimCategoryResult(BuildOutputReclaimProvider.ReclaimCategory,
+            [
+                new("c", @"D:\repo\bin", "bin", 100, ReclaimRisk.Safe, "r", "h"),
+                new("c", @"C:\Users\me\.nuget", "nuget", 200, ReclaimRisk.Safe, "r", "h"),
+                new("c", @"DD:\other", "other", 400, ReclaimRisk.Safe, "r", "h"),
+            ]),
+        ], DateTimeOffset.UtcNow);
+
+        ReclaimResult scoped = result.Within(@"D:\");
+
+        Assert.HasCount(1, scoped.AllCandidates);
+        Assert.AreEqual(@"D:\repo\bin", scoped.AllCandidates[0].Path);
+        Assert.AreEqual(100, scoped.TotalBytes);
+        Assert.AreEqual(result.ScannedAtUtc, scoped.ScannedAtUtc);
+    }
+
+    [TestMethod]
+    public void AVolumeContextScopesBothRootsToThatVolume()
+    {
+        using var fixture = new ReclaimFixture();
+        string volume = fixture.Dir("vol");
+        string src = fixture.Dir("vol", "src");
+
+        ReclaimScanContext whole = ReclaimRegistry.CreateVolumeContext(volume, includeWholeVolume: true);
+        ReclaimScanContext conventional = ReclaimRegistry.CreateVolumeContext(volume, includeWholeVolume: false);
+
+        string root = volume.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        CollectionAssert.AreEqual(new[] { root }, whole.VolumeRoots.ToArray());
+        CollectionAssert.AreEqual(new[] { root }, whole.SourceRoots.ToArray());
+
+        // Profile folders such as %USERPROFILE%\source are on another volume and must not leak in.
+        CollectionAssert.AreEqual(new[] { root }, conventional.VolumeRoots.ToArray());
+        CollectionAssert.AreEqual(new[] { src }, conventional.SourceRoots.ToArray());
+    }
+
     private static ReclaimScanContext Context() =>
         new([@"C:\"], [], minimumCandidateBytes: 1);
 

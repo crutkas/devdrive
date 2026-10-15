@@ -18,6 +18,7 @@
         AutomationProperties.AutomationId="ShellNavView"
         AutomationProperties.Name="Rooms"
         IsTitleBarAutoPaddingEnabled="False"
+        ItemInvoked="ShellNavView_ItemInvoked"
         SelectionChanged="ShellNavView_SelectionChanged"
         Style="{StaticResource StoreNavigationViewStyle}">
         <NavigationView.FooterMenuItems>
@@ -56,10 +57,40 @@
                     Text="Safe-mutation test mode — nothing on this machine will actually change." />
             </Border>
 
-            <TextBlock x:Name="PageTitle" Grid.Row="1" Margin="18,24,18,16"
-                       Style="{StaticResource TitleTextBlockStyle}"
-                       AutomationProperties.AutomationId="PageTitle"
-                       AutomationProperties.HeadingLevel="Level1" />
+            <!--
+                Room title, or a breadcrumb back to the room while one of its sub-pages is open
+                (Dev Drive › Create Dev Drive), the way Windows Settings titles nested pages.
+                Rooms with more than one page show their tabs underneath.
+            -->
+            <StackPanel x:Name="PageHeader" Grid.Row="1" Padding="0,24,0,12">
+                <TextBlock x:Name="PageTitle"
+                           Margin="18,0"
+                           Style="{StaticResource TitleTextBlockStyle}"
+                           AutomationProperties.AutomationId="PageTitle"
+                           AutomationProperties.HeadingLevel="Level1" />
+                <BreadcrumbBar
+                    x:Name="PageBreadcrumb"
+                    Margin="18,0"
+                    AutomationProperties.AutomationId="PageBreadcrumb"
+                    AutomationProperties.HeadingLevel="Level1"
+                    ItemClicked="PageBreadcrumb_ItemClicked"
+                    Visibility="Collapsed">
+                    <BreadcrumbBar.Resources>
+                        <x:Double x:Key="BreadcrumbBarItemThemeFontSize">28</x:Double>
+                        <FontWeight x:Key="BreadcrumbBarItemFontWeight">SemiBold</FontWeight>
+                        <x:Double x:Key="BreadcrumbBarChevronFontSize">14</x:Double>
+                        <Thickness x:Key="BreadcrumbBarChevronPadding">11,0</Thickness>
+                    </BreadcrumbBar.Resources>
+                </BreadcrumbBar>
+                <!-- Left margin lines the first tab's text up with the title (bar + item border + padding = 14). -->
+                <SelectorBar
+                    x:Name="RoomTabs"
+                    Margin="4,8,18,0"
+                    AutomationProperties.AutomationId="RoomTabs"
+                    AutomationProperties.Name="Pages in this room"
+                    SelectionChanged="RoomTabs_SelectionChanged"
+                    Visibility="Collapsed" />
+            </StackPanel>
 
             <Frame
                 x:Name="ContentFrame"
