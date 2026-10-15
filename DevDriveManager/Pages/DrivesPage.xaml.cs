@@ -57,6 +57,8 @@ public sealed partial class DrivesPage : Page, INotifyPropertyChanged
 
     public MainPageViewModel ViewModel => App.Shared;
 
+    public string PageTitle => RoomRegistry.Find("drives")!.Title;
+
     /// <summary>The two views of this machine's storage, in head order.</summary>
     public ObservableCollection<DriveTabViewModel> Tabs { get; } =
     [

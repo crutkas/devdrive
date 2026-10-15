@@ -58,6 +58,8 @@ public sealed partial class BenchmarksPage : Page, INotifyPropertyChanged
 
     public MainPageViewModel ViewModel => App.Shared;
 
+    public string PageTitle => RoomRegistry.Find("benchmarks")!.Title;
+
     /// <summary>The two questions this room answers, in head order.</summary>
     public ObservableCollection<BenchTabViewModel> Tabs { get; } =
     [

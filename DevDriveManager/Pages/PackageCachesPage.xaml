@@ -10,7 +10,7 @@
     xmlns:vm="using:DevDriveManager.ViewModels"
     mc:Ignorable="d">
 
-    <Grid Margin="18,24,18,24">
+    <Grid Margin="18,12,18,12">
         <VisualStateManager.VisualStateGroups>
             <VisualStateGroup>
                 <VisualState>
@@ -31,7 +31,7 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <StackPanel Grid.Row="0" Margin="0,0,0,14" Spacing="10">
+        <StackPanel Grid.Row="0" Margin="0,0,0,12" Spacing="10">
             <Grid ColumnSpacing="16">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
@@ -77,33 +77,34 @@
                 </Grid>
             </Grid>
 
-            <TextBlock
-                AutomationProperties.AutomationId="CachesWarning"
-                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                Style="{StaticResource BodyTextBlockStyle}"
-                Text="{x:Bind Caches.WarningMessage, Mode=OneWay}"
-                TextWrapping="Wrap" />
-
+            <!--
+                A closed InfoBar is zero-height but still a visible child, so the stack's Spacing
+                would still be added for it. Each one is collapsed while closed for that reason.
+            -->
             <InfoBar
                 AutomationProperties.AutomationId="CachesNoDevDriveNotice"
                 IsClosable="False"
                 IsOpen="{x:Bind Caches.ShowNoDevDriveNotice, Mode=OneWay}"
                 Message="{x:Bind Caches.DevDriveNoticeMessage, Mode=OneWay}"
                 Severity="Informational"
-                Title="No Dev Drive" />
+                Title="No Dev Drive"
+                Visibility="{x:Bind local:UiHelpers.BoolToVisibility(Caches.ShowNoDevDriveNotice), Mode=OneWay}" />
             <InfoBar
                 AutomationProperties.AutomationId="MoveAllResult"
                 IsClosable="True"
                 IsOpen="{x:Bind Caches.ShowMoveAllResult, Mode=TwoWay}"
                 Message="{x:Bind Caches.MoveAllResultText, Mode=OneWay}"
                 Severity="{x:Bind MoveAllSeverity, Mode=OneWay}"
-                Title="Package cache move" />
+                Title="Package cache move"
+                Visibility="{x:Bind local:UiHelpers.BoolToVisibility(Caches.ShowMoveAllResult), Mode=OneWay}" />
             <InfoBar
                 x:Name="CachesActionError"
                 AutomationProperties.AutomationId="CachesActionError"
+                Closed="CachesActionError_Closed"
                 IsClosable="True"
                 Severity="Error"
-                Title="Package cache action failed" />
+                Title="Package cache action failed"
+                Visibility="Collapsed" />
         </StackPanel>
 
         <Border

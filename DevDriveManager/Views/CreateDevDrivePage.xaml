@@ -14,52 +14,36 @@
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
         <!--
-            The strip carries the volumes this room is about to change, and the room's verbs.
+            Header: the title and the room's verbs share a row, as in every room. Cancel sits beside
+            Create because this is the one room whose work is not saved as you go.
 
             The comp draws this room as a modal dialog, and it stays a room here: the rail already
             has a Create entry that six other rooms' primary action points at, and the app's version
             of the form carries three fields the comp's does not (the VHDX path, the disk type, the
             unit). Turning it into a dialog would mean rewriting the primary action everywhere else
             to gain a shape that then could not carry the room grammar's status bar.
-
-            Cancel sits beside Create because this is the one room whose work is not saved as you go.
         -->
         <Grid
             Grid.Row="0"
-            Padding="18,10"
-            ColumnSpacing="14"
-            BorderBrush="{ThemeResource SmDividerBrush}"
-            BorderThickness="0,0,0,1">
+            Margin="18,12,18,0"
+            ColumnSpacing="16">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
 
-            <ItemsControl
-                Grid.Column="0"
-                AutomationProperties.AutomationId="CreateVolumeStrip"
-                AutomationProperties.Name="Volumes on this machine"
-                ItemsSource="{x:Bind VolumeStripEntries, Mode=OneWay}">
-                <ItemsControl.ItemsPanel>
-                    <ItemsPanelTemplate>
-                        <StackPanel Orientation="Horizontal" Spacing="10" />
-                    </ItemsPanelTemplate>
-                </ItemsControl.ItemsPanel>
-                <ItemsControl.ItemTemplate>
-                    <DataTemplate x:DataType="storage:VolumeStripEntry">
-                        <controls:VolumeCard
-                            AccentRole="{x:Bind AccentRole}"
-                            IsSystemVolume="{x:Bind IsSystemVolume}"
-                            ReclaimableBytes="{x:Bind ReclaimableBytes}"
-                            Volume="{x:Bind Volume}" />
-                    </DataTemplate>
-                </ItemsControl.ItemTemplate>
-            </ItemsControl>
+            <TextBlock
+                VerticalAlignment="Center"
+                AutomationProperties.AutomationId="PageTitle"
+                AutomationProperties.HeadingLevel="Level1"
+                Style="{StaticResource TitleTextBlockStyle}"
+                Text="{x:Bind PageTitle}" />
 
             <StackPanel
                 Grid.Column="1"
@@ -67,11 +51,13 @@
                 Orientation="Horizontal"
                 Spacing="9">
                 <Button
+                    Height="48"
                     AutomationProperties.AutomationId="CancelButton"
                     Command="{x:Bind ViewModel.CancelCommand}"
                     Content="Cancel"
                     Visibility="{x:Bind local:CreateDevDrivePage.InvertBoolToVisibility(ViewModel.IsComplete), Mode=OneWay}" />
                 <Button
+                    Height="48"
                     AutomationProperties.AutomationId="CreateButton"
                     Command="{x:Bind ViewModel.CreateCommand}"
                     Content="{x:Bind ViewModel.PrimaryActionText, Mode=OneWay}"
@@ -79,6 +65,7 @@
                     Style="{StaticResource AccentButtonStyle}"
                     Visibility="{x:Bind local:CreateDevDrivePage.InvertBoolToVisibility(ViewModel.IsComplete), Mode=OneWay}" />
                 <Button
+                    Height="48"
                     AutomationProperties.AutomationId="GoToManagementButton"
                     Command="{x:Bind ViewModel.BackToManagementCommand}"
                     Content="Done"
@@ -88,13 +75,36 @@
             </StackPanel>
         </Grid>
 
+        <!--  The volumes this room is about to change, on the room's 11px gutter.  -->
+        <ItemsControl
+            Grid.Row="1"
+            Margin="18,11,18,0"
+            AutomationProperties.AutomationId="CreateVolumeStrip"
+            AutomationProperties.Name="Volumes on this machine"
+            ItemsSource="{x:Bind VolumeStripEntries, Mode=OneWay}">
+            <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                    <StackPanel Orientation="Horizontal" Spacing="10" />
+                </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="storage:VolumeStripEntry">
+                    <controls:VolumeCard
+                        AccentRole="{x:Bind AccentRole}"
+                        IsSystemVolume="{x:Bind IsSystemVolume}"
+                        ReclaimableBytes="{x:Bind ReclaimableBytes}"
+                        Volume="{x:Bind Volume}" />
+                </DataTemplate>
+            </ItemsControl.ItemTemplate>
+        </ItemsControl>
+
         <!--
             The room. The form on the left, the disk you end up with on the right. The default view is
             just the volume, the size and Create; the method and the name sit behind More options
             because the defaults are right for almost everyone.
         -->
         <Grid
-            Grid.Row="1"
+            Grid.Row="2"
             Padding="18,11"
             ColumnSpacing="11">
             <Grid.ColumnDefinitions>
@@ -517,7 +527,7 @@
 
         <controls:RoomStatusBar
             x:Name="StatusBar"
-            Grid.Row="2"
+            Grid.Row="3"
             AutomationProperties.AutomationId="CreateStatusBar"
             AutomationProperties.Name="Create status" />
     </Grid>

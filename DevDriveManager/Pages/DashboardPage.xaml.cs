@@ -78,6 +78,8 @@ public sealed partial class DashboardPage : Page, INotifyPropertyChanged
 
     public MainPageViewModel ViewModel => App.Shared;
 
+    public string PageTitle => RoomRegistry.Find("overview")!.Title;
+
     /// <summary>The reclaim scan, shared with its own room so a scan started here survives navigation.</summary>
     public ReclaimViewModel Reclaim => App.SharedReclaim;
 

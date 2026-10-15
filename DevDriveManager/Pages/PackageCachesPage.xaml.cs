@@ -499,8 +499,12 @@ public sealed partial class PackageCachesPage : Page, INotifyPropertyChanged
         System.Diagnostics.Debug.WriteLine($"[caches] {action} failed: {exception}");
         CachesActionError.Title = $"{action} failed";
         CachesActionError.Message = exception.Message;
+        CachesActionError.Visibility = Visibility.Visible;
         CachesActionError.IsOpen = true;
     }
+
+    private void CachesActionError_Closed(InfoBar sender, InfoBarClosedEventArgs args) =>
+        sender.Visibility = Visibility.Collapsed;
 
     private bool _pickerOpen;
 

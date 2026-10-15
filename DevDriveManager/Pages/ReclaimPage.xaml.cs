@@ -23,6 +23,8 @@ public sealed partial class ReclaimPage : Page, INotifyPropertyChanged
 
     public ReclaimViewModel ViewModel { get; } = App.SharedReclaim;
 
+    public string PageTitle => RoomRegistry.Find("reclaim")!.Title;
+
     public event PropertyChangedEventHandler? PropertyChanged;
 
     /// <summary>

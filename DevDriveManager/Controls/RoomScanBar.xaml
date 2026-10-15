@@ -35,6 +35,7 @@
         functions in markup is harder to read than the one Refresh() that decides them together.
     -->
     <Grid
+        x:Name="PartRoot"
         Padding="18,10"
         ColumnSpacing="14"
         BorderBrush="{ThemeResource SmDividerBrush}"

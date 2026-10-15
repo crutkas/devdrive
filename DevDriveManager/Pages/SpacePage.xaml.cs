@@ -279,7 +279,9 @@ public sealed partial class SpacePage : Page, INotifyPropertyChanged
         bool partial = ViewModel.Snapshot?.Completion == SnapshotCompletion.Partial;
         CoverageNotice.IsOpen = !IsScanning && ViewModel.Snapshot is not null &&
             (partial || ViewModel.HasCoverageDetail);
-        CoverageNotice.Severity = partial ? InfoBarSeverity.Warning : InfoBarSeverity.Informational;
+        // Closed, the bar is zero-height but would keep its 12px margin under the card, doubling
+        // the room's bottom gutter.
+        CoverageNotice.Visibility = BoolToVisibility(CoverageNotice.IsOpen);
         CoverageNotice.Title = ViewModel.CoverageDetail;
         CoverageNotice.Message = ViewModel.CoverageSummary;
 

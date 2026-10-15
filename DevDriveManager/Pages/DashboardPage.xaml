@@ -20,20 +20,32 @@
         </Grid.RowDefinitions>
 
         <!--
-            The same context strip every room carries. Here it is genuinely context rather than
-            subject: the table below is about what to do, and the strip is the machine it is about.
-
-            Overview acts on the whole machine, so there is no scope to pick and the chips are
-            inert. The label is the identical string Reclaim uses, because it is the identical act.
+            Same header grammar as Space: the title and the room's one action share a row. Overview
+            acts on the whole machine, so the scan bar has no strip, only its button, and the label
+            is the identical string Reclaim uses, because it is the identical act. No bottom margin:
+            the room's own 11px top padding is the gap, so it is not counted twice.
         -->
-        <controls:RoomScanBar
-            x:Name="ScanBar"
-            Grid.Row="0"
-            CanScan="True"
-            IsScanning="{x:Bind Reclaim.IsScanning, Mode=OneWay}"
-            ScanLabel="Scan this PC"
-            ScanRequested="ScanBar_ScanRequested"
-            SelectionMode="None" />
+        <Grid Grid.Row="0" Margin="18,12,18,0" ColumnSpacing="16">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock
+                VerticalAlignment="Center"
+                AutomationProperties.AutomationId="PageTitle"
+                AutomationProperties.HeadingLevel="Level1"
+                Style="{StaticResource TitleTextBlockStyle}"
+                Text="{x:Bind PageTitle}" />
+            <controls:RoomScanBar
+                x:Name="ScanBar"
+                Grid.Column="1"
+                VerticalAlignment="Center"
+                CanScan="True"
+                IsScanning="{x:Bind Reclaim.IsScanning, Mode=OneWay}"
+                ScanLabel="Scan this PC"
+                ScanRequested="ScanBar_ScanRequested"
+                SelectionMode="None" />
+        </Grid>
 
         <Grid
             Grid.Row="1"
