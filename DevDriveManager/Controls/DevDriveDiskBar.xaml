@@ -91,10 +91,10 @@
             </Style>
 
             <Style x:Key="DiskBarFreeSwatchStyle" TargetType="Border">
-                <Setter Property="Width" Value="10" />
-                <Setter Property="Height" Value="10" />
+                <Setter Property="Width" Value="8" />
+                <Setter Property="Height" Value="8" />
                 <Setter Property="VerticalAlignment" Value="Center" />
-                <Setter Property="CornerRadius" Value="2" />
+                <Setter Property="CornerRadius" Value="4" />
                 <Setter Property="BorderThickness" Value="1" />
                 <Setter Property="BorderBrush" Value="{ThemeResource DiskBarSeamBrush}" />
                 <Setter Property="Background" Value="{ThemeResource DiskBarFreeBrush}" />
@@ -106,111 +106,103 @@
                 TargetType="Border">
                 <Setter Property="Background" Value="{ThemeResource DiskBarFreeLowBrush}" />
             </Style>
+
+            <Style x:Key="DiskBarSwatchStyle" TargetType="Border">
+                <Setter Property="Width" Value="8" />
+                <Setter Property="Height" Value="8" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+                <Setter Property="CornerRadius" Value="4" />
+            </Style>
+
+            <Style
+                x:Key="DiskBarLegendNameStyle"
+                BasedOn="{StaticResource CaptionTextBlockStyle}"
+                TargetType="TextBlock">
+                <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
+                <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+            </Style>
+
+            <Style
+                x:Key="DiskBarLegendValueStyle"
+                BasedOn="{StaticResource BodyStrongTextBlockStyle}"
+                TargetType="TextBlock">
+                <Setter Property="Margin" Value="14,0,0,0" />
+                <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+            </Style>
         </ResourceDictionary>
     </UserControl.Resources>
 
-    <StackPanel Spacing="8">
+    <StackPanel Spacing="12">
 
         <!--  Read-only visualization: used + protected | free | carved Dev Drive.
               Non-interactive on purpose — the page's Slider + NumberBox change the size.
 
-              The Dev Drive is drawn as its own rounded chunk with a gap before it, not as a third
-              flush band. It is about to become a separate volume, and a bar that renders it flush
-              with C: says the opposite — that it is one more region of the same disk.  -->
-        <Border
-            Height="32"
-            Background="{ThemeResource ControlFillColorDefaultBrush}"
-            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-            BorderThickness="1"
-            CornerRadius="{StaticResource ControlCornerRadius}">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition x:Name="UsedColumn" Width="0*" />
-                    <ColumnDefinition x:Name="RemainingColumn" Width="0*" />
-                    <ColumnDefinition x:Name="DevColumn" Width="1*" />
-                </Grid.ColumnDefinitions>
-                <Border
-                    Grid.Column="0"
-                    Background="{ThemeResource DiskBarUsedBrush}"
-                    BorderBrush="{ThemeResource DiskBarSeamBrush}"
-                    BorderThickness="0,0,1,0" />
-                <Border
-                    x:Name="FreeSegment"
-                    Grid.Column="1"
-                    Style="{StaticResource DiskBarFreeSegmentStyle}" />
-                <!--  Inset and fully rounded so it reads as a separate drive sitting in the space
-                      carved for it. MinWidth keeps a tiny selection visible as a sliver rather than
-                      collapsing to nothing at the low end of the slider.  -->
-                <Border
-                    x:Name="DevSegment"
-                    Grid.Column="2"
-                    MinWidth="6"
-                    Margin="3"
-                    Background="{ThemeResource DiskBarDevBrush}"
-                    CornerRadius="{StaticResource ControlCornerRadius}" />
-            </Grid>
-        </Border>
+              Every segment is its own rounded block of the same height, separated by an even gap,
+              with no track or frame around them. The old bar put flush, square Used/Free bands in a
+              bordered track and inset only the Dev Drive, so the three pieces had different heights,
+              corners and edges and read as misaligned rather than as one chart. The gaps (applied in
+              code so a zero-width segment doesn't leave a double gap) still say the Dev Drive is a
+              separate volume.  -->
+        <Grid Height="16">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition x:Name="UsedColumn" Width="0*" />
+                <ColumnDefinition x:Name="RemainingColumn" Width="1*" />
+                <ColumnDefinition x:Name="DevColumn" Width="0*" />
+            </Grid.ColumnDefinitions>
+            <Border
+                x:Name="UsedSegment"
+                Grid.Column="0"
+                Background="{ThemeResource DiskBarUsedBrush}"
+                CornerRadius="4" />
+            <Border
+                x:Name="FreeSegment"
+                Grid.Column="1"
+                CornerRadius="4"
+                Style="{StaticResource DiskBarFreeSegmentStyle}" />
+            <!--  MinWidth keeps a tiny selection visible as a sliver rather than collapsing to
+                  nothing at the low end of the slider.  -->
+            <Border
+                x:Name="DevSegment"
+                Grid.Column="2"
+                MinWidth="6"
+                Background="{ThemeResource DiskBarDevBrush}"
+                CornerRadius="4" />
+        </Grid>
 
         <!--
-            Legend (swatches match the bar's segment fills). Laid out as a grid rather than one
-            horizontal run, because this bar lives in a 336px column and three labels carrying byte
-            counts do not fit on one line there — a horizontal StackPanel hands its children
-            unconstrained width, so the third entry is silently cut by the card edge instead of
-            wrapping.
+            Legend: one column per segment, in bar order, name over value. Three equal columns fit
+            the 336px column this bar can live in without wrapping, and the size on its own line in
+            a stronger weight makes the numbers the reader came for scannable at a glance.
         -->
-        <Grid ColumnSpacing="14" RowSpacing="5">
+        <Grid ColumnSpacing="12">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
-            </Grid.RowDefinitions>
 
-            <StackPanel
-                Grid.Row="0"
-                Grid.Column="0"
-                Orientation="Horizontal"
-                Spacing="6">
-                <Border
-                    Width="10"
-                    Height="10"
-                    VerticalAlignment="Center"
-                    Background="{ThemeResource DiskBarUsedBrush}"
-                    CornerRadius="2" />
-                <TextBlock
-                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                    Style="{StaticResource CaptionTextBlockStyle}"
-                    Text="{x:Bind UsedLabel, Mode=OneWay}" />
+            <StackPanel Grid.Column="0" Spacing="2">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <Border Background="{ThemeResource DiskBarUsedBrush}" Style="{StaticResource DiskBarSwatchStyle}" />
+                    <TextBlock x:Name="UsedName" Style="{StaticResource DiskBarLegendNameStyle}" />
+                </StackPanel>
+                <TextBlock x:Name="UsedValue" Style="{StaticResource DiskBarLegendValueStyle}" />
             </StackPanel>
-            <StackPanel
-                Grid.Row="0"
-                Grid.Column="1"
-                Orientation="Horizontal"
-                Spacing="6">
-                <Border x:Name="FreeSwatch" Style="{StaticResource DiskBarFreeSwatchStyle}" />
-                <TextBlock
-                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                    Style="{StaticResource CaptionTextBlockStyle}"
-                    Text="{x:Bind RemainingLabel, Mode=OneWay}" />
+
+            <StackPanel Grid.Column="1" Spacing="2">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <Border x:Name="FreeSwatch" Style="{StaticResource DiskBarFreeSwatchStyle}" />
+                    <TextBlock x:Name="FreeName" Style="{StaticResource DiskBarLegendNameStyle}" />
+                </StackPanel>
+                <TextBlock x:Name="FreeValue" Style="{StaticResource DiskBarLegendValueStyle}" />
             </StackPanel>
-            <StackPanel
-                Grid.Row="1"
-                Grid.Column="0"
-                Grid.ColumnSpan="2"
-                Orientation="Horizontal"
-                Spacing="6">
-                <Border
-                    Width="10"
-                    Height="10"
-                    VerticalAlignment="Center"
-                    Background="{ThemeResource DiskBarDevBrush}"
-                    CornerRadius="2" />
-                <TextBlock
-                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                    Style="{StaticResource CaptionTextBlockStyle}"
-                    Text="{x:Bind DevDriveLabel, Mode=OneWay}" />
+
+            <StackPanel Grid.Column="2" Spacing="2">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <Border Background="{ThemeResource DiskBarDevBrush}" Style="{StaticResource DiskBarSwatchStyle}" />
+                    <TextBlock x:Name="DevName" Style="{StaticResource DiskBarLegendNameStyle}" />
+                </StackPanel>
+                <TextBlock x:Name="DevValue" Style="{StaticResource DiskBarLegendValueStyle}" />
             </StackPanel>
         </Grid>
     </StackPanel>

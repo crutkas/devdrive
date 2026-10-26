@@ -18,8 +18,14 @@ public sealed partial class DevDriveDiskBar : UserControl
     public DevDriveDiskBar()
     {
         InitializeComponent();
-        Loaded += (_, _) => UpdateVisual();
+        Loaded += (_, _) =>
+        {
+            UpdateVisual();
+            UpdateLegend();
+        };
     }
+
+    private const double SegmentGap = 3d;
 
     /// <summary>Total capacity of the source/host volume in bytes (the whole bar).</summary>
     public static readonly DependencyProperty TotalBytesProperty = DependencyProperty.Register(
@@ -63,7 +69,7 @@ public sealed partial class DevDriveDiskBar : UserControl
 
     /// <summary>Legend caption for the used + protected segment.</summary>
     public static readonly DependencyProperty UsedLabelProperty = DependencyProperty.Register(
-        nameof(UsedLabel), typeof(string), typeof(DevDriveDiskBar), new PropertyMetadata("Used + protected"));
+        nameof(UsedLabel), typeof(string), typeof(DevDriveDiskBar), new PropertyMetadata("Used + protected", OnLabelChanged));
 
     public string UsedLabel
     {
@@ -73,7 +79,7 @@ public sealed partial class DevDriveDiskBar : UserControl
 
     /// <summary>Legend caption for the remaining free/shrinkable segment.</summary>
     public static readonly DependencyProperty RemainingLabelProperty = DependencyProperty.Register(
-        nameof(RemainingLabel), typeof(string), typeof(DevDriveDiskBar), new PropertyMetadata("Remaining"));
+        nameof(RemainingLabel), typeof(string), typeof(DevDriveDiskBar), new PropertyMetadata("Remaining", OnLabelChanged));
 
     public string RemainingLabel
     {
@@ -83,7 +89,7 @@ public sealed partial class DevDriveDiskBar : UserControl
 
     /// <summary>Legend caption for the carved Dev Drive segment.</summary>
     public static readonly DependencyProperty DevDriveLabelProperty = DependencyProperty.Register(
-        nameof(DevDriveLabel), typeof(string), typeof(DevDriveDiskBar), new PropertyMetadata("Dev Drive"));
+        nameof(DevDriveLabel), typeof(string), typeof(DevDriveDiskBar), new PropertyMetadata("Dev Drive", OnLabelChanged));
 
     public string DevDriveLabel
     {
@@ -113,6 +119,60 @@ public sealed partial class DevDriveDiskBar : UserControl
     private static void OnVisualChanged(DependencyObject d, DependencyPropertyChangedEventArgs e) =>
         ((DevDriveDiskBar)d).UpdateVisual();
 
+    private static void OnLabelChanged(DependencyObject d, DependencyPropertyChangedEventArgs e) =>
+        ((DevDriveDiskBar)d).UpdateLegend();
+
+    /// <summary>
+    /// Shows each "Name · Size" caption as a name over a stronger size, so the numbers scan as a row.
+    /// </summary>
+    private void UpdateLegend()
+    {
+        Set(UsedLabel, UsedName, UsedValue);
+        Set(RemainingLabel, FreeName, FreeValue);
+        Set(DevDriveLabel, DevName, DevValue);
+
+        static void Set(string? label, TextBlock name, TextBlock value)
+        {
+            (string n, string v) = SplitLabel(label);
+            name.Text = n;
+            value.Text = v;
+            value.Visibility = v.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+        }
+    }
+
+    internal static (string Name, string Value) SplitLabel(string? label)
+    {
+        if (string.IsNullOrEmpty(label))
+        {
+            return (string.Empty, string.Empty);
+        }
+
+        int i = label.IndexOf('\u00B7');
+        return i < 0
+            ? (label.Trim(), string.Empty)
+            : (label[..i].Trim(), label[(i + 1)..].Trim());
+    }
+
+    /// <summary>
+    /// Hides zero-width segments and puts one even gap between each visible neighbour, so an empty
+    /// segment never leaves a doubled gap or a stray margin at the bar's edge.
+    /// </summary>
+    private void ApplyGaps(double usedFraction, double remainingFraction, double devFraction)
+    {
+        Border[] segments = [UsedSegment, FreeSegment, DevSegment];
+        bool[] visible = [usedFraction > 0d, remainingFraction > 0d, devFraction > 0d];
+
+        int first = Array.IndexOf(visible, true);
+        int last = Array.LastIndexOf(visible, true);
+        double half = SegmentGap / 2d;
+
+        for (int i = 0; i < segments.Length; i++)
+        {
+            segments[i].Visibility = visible[i] ? Visibility.Visible : Visibility.Collapsed;
+            segments[i].Margin = new Thickness(i > first ? half : 0d, 0d, i < last ? half : 0d, 0d);
+        }
+    }
+
     private void UpdateVisual()
     {
         double total = TotalBytes;
@@ -138,6 +198,7 @@ public sealed partial class DevDriveDiskBar : UserControl
         RemainingColumn.Width = new GridLength(remainingFraction, GridUnitType.Star);
         DevColumn.Width = new GridLength(devFraction, GridUnitType.Star);
 
+        ApplyGaps(usedFraction, remainingFraction, devFraction);
         ApplyFreeStyle();
 
         AutomationProperties.SetName(this, $"Dev Drive size {ByteSizeFormatter.Format(ToBytes(SelectedBytes))}");
