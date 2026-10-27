@@ -138,10 +138,21 @@ public sealed record ReclaimCandidate
     public string? Detail { get; }
 
     /// <summary>
-    /// False for things the Recycle Bin cannot hold (the Recycle Bin itself, and anything large
-    /// enough that recycling it would reclaim nothing). Drives whether deletion is reversible.
+    /// False for things the Recycle Bin cannot hold (the Recycle Bin itself), and for anything the
+    /// user has explicitly agreed to delete permanently. Drives whether deletion is reversible.
     /// </summary>
     public bool SupportsRecycleBin { get; }
+
+    /// <summary>
+    /// The same candidate, marked for permanent deletion. Only <see cref="ReclaimPlan.ConsentedSelection"/>
+    /// should call this: it is the record that the confirmation named the item as permanent.
+    /// </summary>
+    public ReclaimCandidate WithoutRecycleBin() =>
+        SupportsRecycleBin
+            ? new ReclaimCandidate(
+                CategoryId, Path, DisplayName, SizeBytes, Risk, Reason, RecoveryHint,
+                LastUsedUtc, ItemCount, Detail, supportsRecycleBin: false)
+            : this;
 
     /// <summary>The volume root this path lives on, e.g. <c>C:\</c>. Drives the per-volume projection.</summary>
     public string VolumeRoot =>

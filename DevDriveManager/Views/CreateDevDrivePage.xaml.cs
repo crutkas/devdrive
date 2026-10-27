@@ -124,7 +124,6 @@ public sealed partial class CreateDevDrivePage : Page, INotifyPropertyChanged
         _isSubscribed = true;
         ViewModel.ConfirmRequested += OnConfirmRequested;
         ViewModel.BrowseVhdPathRequested += OnBrowseVhdPathRequested;
-        ViewModel.DevDriveCreated += RefreshAfterCreationAsync;
         ViewModel.NavigateBackRequested += OnNavigateBack;
         ViewModel.PropertyChanged += OnViewModelPropertyChanged;
         App.SharedReclaim.PropertyChanged += OnReclaimPropertyChanged;
@@ -142,7 +141,6 @@ public sealed partial class CreateDevDrivePage : Page, INotifyPropertyChanged
         App.SharedReclaim.PropertyChanged -= OnReclaimPropertyChanged;
         ViewModel.ConfirmRequested -= OnConfirmRequested;
         ViewModel.BrowseVhdPathRequested -= OnBrowseVhdPathRequested;
-        ViewModel.DevDriveCreated -= RefreshAfterCreationAsync;
         ViewModel.NavigateBackRequested -= OnNavigateBack;
     }
 
@@ -325,10 +323,6 @@ public sealed partial class CreateDevDrivePage : Page, INotifyPropertyChanged
             _isConfirmOpen = false;
         }
     }
-
-    // All top-level pages bind to App.Shared, so this is the same reload as the Overview refresh and
-    // updates drives, caches, benchmarks and health.
-    private static Task RefreshAfterCreationAsync() => App.Shared.LoadCommand.ExecuteAsync(null);
 
     private async void OnBrowseVhdPathRequested()
     {

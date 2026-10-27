@@ -822,7 +822,8 @@ if ($IncludeSlowScans) {
 
     Test-UI "Reclaim: the scan finishes" {
         # Worktrees gate the run at ~70 s on a developer machine; allow generous headroom for a cold
-        # cache without waiting forever on a genuinely wedged scan.
+        # cache without waiting forever on a genuinely wedged scan. The bar now reports the whole
+        # shared scan (Reclaim + the Space walk it starts), so Cancel stays until both halves end.
         $deadline = (Get-Date).AddMinutes(8)
         while ((Test-Present "ScanBarCancelButton" 1000) -and (Get-Date) -lt $deadline) {
             Start-Sleep -Seconds 5

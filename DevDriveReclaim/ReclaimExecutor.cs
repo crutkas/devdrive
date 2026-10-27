@@ -15,11 +15,16 @@ namespace DevDriveReclaim;
 /// that in fact succeeded.
 /// </para>
 /// <para>
-/// <b>The Recycle Bin is preferred and its limits are not hidden.</b> <c>FOF_ALLOWUNDO</c> silently
+/// <b>The Recycle Bin is preferred, and a promise of it is kept.</b> <c>FOF_ALLOWUNDO</c> silently
 /// degrades to a permanent delete when an item is too large for the bin or the volume has recycling
-/// disabled. Recycling <em>moves</em> the item into <c>$Recycle.Bin</c>, so the original path is gone
-/// in both cases and cannot tell them apart; the bin's item count is compared across the operation
-/// instead. The row says which actually happened rather than which was asked for.
+/// disabled. So every item that asks for the bin is checked against the volume's bin settings first
+/// (<see cref="RecycleBinPreflight"/>), and one the shell would not recycle is <em>left in place</em>
+/// and reported, never nuked: the confirmation told the user it could be restored, and only
+/// <see cref="ReclaimPlan.ConsentedSelection"/> — which marks items the confirmation named as permanent —
+/// licenses a permanent delete. For the cases no setting predicts, <c>FOF_WANTNUKEWARNING</c> makes the
+/// shell ask before destroying anything it could not recycle. Recycling <em>moves</em> the item into
+/// <c>$Recycle.Bin</c>, so the original path is gone either way; the bin's item count is compared
+/// across the operation to say which actually happened.
 /// </para>
 /// <para>
 /// <b>Recycle Bins are emptied before anything is recycled into them.</b> A bin candidate's path is
@@ -35,6 +40,23 @@ namespace DevDriveReclaim;
 /// </remarks>
 public sealed class ReclaimExecutor : IReclaimExecutor
 {
+    private readonly Func<string, RecycleBinVolumeSettings?> _readBinSettings;
+
+    public ReclaimExecutor()
+        : this(RecycleBinPreflight.ReadSettings)
+    {
+    }
+
+    /// <param name="readBinSettings">
+    /// Where the Recycle Bin settings come from. Injectable so tests can describe a bin that would
+    /// refuse an item without changing the developer's real settings.
+    /// </param>
+    public ReclaimExecutor(Func<string, RecycleBinVolumeSettings?> readBinSettings)
+    {
+        ArgumentNullException.ThrowIfNull(readBinSettings);
+        _readBinSettings = readBinSettings;
+    }
+
     public Task<ReclaimOutcome> ExecuteAsync(
         IReadOnlyList<ReclaimCandidate> selection,
         IProgress<ReclaimExecutionProgress>? progress,
@@ -50,11 +72,15 @@ public sealed class ReclaimExecutor : IReclaimExecutor
         var completion = new TaskCompletionSource<ReclaimOutcome>(
             TaskCreationOptions.RunContinuationsAsynchronously);
 
+        // Fresh per run: the settings are read again rather than trusted from the confirmation, in
+        // case the bin was resized or switched off while the dialog was open.
+        Func<ReclaimCandidate, RecycleBinCheck> preflight = RecycleBinPreflight.CreateChecker(_readBinSettings);
+
         var thread = new Thread(() =>
         {
             try
             {
-                completion.SetResult(Run(selection, progress, cancellationToken));
+                completion.SetResult(Run(selection, preflight, progress, cancellationToken));
             }
             catch (Exception exception)
             {
@@ -74,6 +100,7 @@ public sealed class ReclaimExecutor : IReclaimExecutor
 
     private static ReclaimOutcome Run(
         IReadOnlyList<ReclaimCandidate> selection,
+        Func<ReclaimCandidate, RecycleBinCheck> preflight,
         IProgress<ReclaimExecutionProgress>? progress,
         CancellationToken cancellationToken)
     {
@@ -84,6 +111,7 @@ public sealed class ReclaimExecutor : IReclaimExecutor
         var outcomes = new List<ReclaimItemOutcome>(selection.Count);
         var rootOutcomes = new Dictionary<string, ReclaimItemOutcome>(StringComparer.OrdinalIgnoreCase);
         long freed = 0;
+        long recycled = 0;
         int completed = 0;
         bool cancelled = false;
 
@@ -116,18 +144,16 @@ public sealed class ReclaimExecutor : IReclaimExecutor
                 continue;
             }
 
-            ReclaimItemOutcome outcome = Remove(candidate);
+            ReclaimItemOutcome outcome = Remove(candidate, preflight);
             outcomes.Add(outcome);
             rootOutcomes[candidate.Path] = outcome;
 
-            if (outcome.Removed)
-            {
-                freed += outcome.BytesFreed;
-            }
+            freed += outcome.BytesFreed;
+            recycled += outcome.BytesRecycled;
 
             completed++;
             progress?.Report(new ReclaimExecutionProgress(
-                completed, roots.Count, candidate.DisplayName, freed));
+                completed, roots.Count, candidate.DisplayName, freed, recycled));
         }
 
         // Everything that was not a root went with its container — IF the container actually went.
@@ -174,7 +200,8 @@ public sealed class ReclaimExecutor : IReclaimExecutor
     private static bool IsRecycleBin(ReclaimCandidate candidate) =>
         string.Equals(candidate.CategoryId, "recycle-bin", StringComparison.OrdinalIgnoreCase);
 
-    private static ReclaimItemOutcome Remove(ReclaimCandidate candidate)
+    private static ReclaimItemOutcome Remove(
+        ReclaimCandidate candidate, Func<ReclaimCandidate, RecycleBinCheck> preflight)
     {
         ReclaimGuardVerdict verdict = ReclaimPathGuard.Inspect(candidate);
 
@@ -201,9 +228,25 @@ public sealed class ReclaimExecutor : IReclaimExecutor
                 return EmptyRecycleBin(candidate, path);
             }
 
-            return candidate.SupportsRecycleBin
-                ? Recycle(candidate, path)
-                : DeletePermanently(candidate, path, verdict.Kind);
+            if (!candidate.SupportsRecycleBin)
+            {
+                return DeletePermanently(candidate, path, verdict.Kind);
+            }
+
+            // The confirmation promised this one could be restored. If the bin would not take it,
+            // keeping it is the only answer that honours that promise; deleting it is not ours to
+            // decide after the fact.
+            RecycleBinCheck check = preflight(candidate);
+            if (check.WillDeletePermanently)
+            {
+                return new ReclaimItemOutcome(
+                    candidate,
+                    ReclaimItemStatus.Failed,
+                    0,
+                    $"kept — {check.Reason}, and it was promised to go to the Recycle Bin");
+            }
+
+            return Recycle(candidate, path);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -254,6 +297,12 @@ public sealed class ReclaimExecutor : IReclaimExecutor
         const ushort NoConfirmMkDir = 0x0200;
         const ushort NoErrorUi = 0x0400;
 
+        // The backstop behind the preflight. FOF_NOCONFIRMATION on its own makes the shell answer its
+        // own "this is too big for the Recycle Bin — delete permanently?" prompt with yes. This flag
+        // partially overrides that, for that one question: anything the preflight did not predict is
+        // put to the user before it is destroyed, rather than destroyed and reported afterwards.
+        const ushort WantNukeWarning = 0x4000;
+
         var operation = new ShFileOpStruct
         {
             Func = Delete,
@@ -262,7 +311,7 @@ public sealed class ReclaimExecutor : IReclaimExecutor
             // marshaller; the other has to be written here, and without it the API reads past the
             // string looking for the terminator.
             From = path + '\0' + '\0',
-            Flags = (ushort)(Silent | NoConfirmation | AllowUndo | NoConfirmMkDir | NoErrorUi),
+            Flags = (ushort)(Silent | NoConfirmation | AllowUndo | NoConfirmMkDir | NoErrorUi | WantNukeWarning),
         };
 
         long? before = TryCountRecycleBin(path);
@@ -275,12 +324,13 @@ public sealed class ReclaimExecutor : IReclaimExecutor
         {
             // These are shell codes, not Win32 codes, so they are translated by an explicit closed
             // mapping rather than FormatMessage — which would describe 0x79 as ERROR_SEM_TIMEOUT.
+            // Declining the shell's permanent-delete prompt lands here too, as an aborted operation.
             return new ReclaimItemOutcome(
                 candidate,
                 ReclaimItemStatus.Failed,
                 0,
                 operation.AnyOperationsAborted != 0
-                    ? "the shell stopped partway through"
+                    ? "kept — the operation was stopped (declining Windows' permanent-delete prompt does this)"
                     : ShellFileOperationError.Explain(result));
         }
 
@@ -293,25 +343,24 @@ public sealed class ReclaimExecutor : IReclaimExecutor
                 candidate, ReclaimItemStatus.Failed, 0, "the shell reported success but it is still there");
         }
 
-        // FOF_ALLOWUNDO is a request, not a guarantee: an item too large for the bin, or a volume
-        // with recycling turned off, is deleted outright and still reported as success. Combined with
-        // FOF_NOCONFIRMATION and no FOF_WANTNUKEWARNING, the shell auto-answers its own "this is too
-        // big for the Recycle Bin, delete permanently?" prompt with yes.
-        //
         // The original path is gone in BOTH cases — recycling MOVES the item into $Recycle.Bin — so
         // "did the path disappear" cannot tell them apart. Counting the bin across the operation can.
+        // A permanent delete reaching this point went through the shell's own prompt and was agreed to.
         bool recycled = after is long a && before is long b && a > b;
 
         return recycled
             ? new ReclaimItemOutcome(
-                candidate, ReclaimItemStatus.Recycled, candidate.SizeBytes, "moved to the Recycle Bin")
+                candidate,
+                ReclaimItemStatus.Recycled,
+                candidate.SizeBytes,
+                "moved to the Recycle Bin — frees space when the bin is emptied")
             : new ReclaimItemOutcome(
                 candidate,
                 ReclaimItemStatus.Deleted,
                 candidate.SizeBytes,
                 before is null || after is null
                     ? "removed — could not confirm it reached the Recycle Bin"
-                    : "too large for the Recycle Bin, so it was removed permanently");
+                    : "could not go to the Recycle Bin, so it was removed permanently after Windows asked");
     }
 
     /// <summary>

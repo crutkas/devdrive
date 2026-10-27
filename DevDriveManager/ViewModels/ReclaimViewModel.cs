@@ -171,7 +171,9 @@ public sealed partial class ReclaimViewModel : ObservableObject
     private readonly Func<ReclaimScanContext> _contextFactory;
     private readonly IVolumeProvider _volumeProvider;
     private readonly IReclaimExecutor _executor;
+    private readonly Func<string, RecycleBinVolumeSettings?> _readBinSettings;
     private IReadOnlyList<StorageVolume>? _cachedVolumes;
+    private Func<ReclaimCandidate, RecycleBinCheck>? _cachedBinCheck;
     private CancellationTokenSource? _scanCts;
     private CancellationTokenSource? _reclaimCts;
 
@@ -191,12 +193,14 @@ public sealed partial class ReclaimViewModel : ObservableObject
         ReclaimEngine engine,
         Func<ReclaimScanContext> contextFactory,
         IVolumeProvider? volumeProvider = null,
-        IReclaimExecutor? executor = null)
+        IReclaimExecutor? executor = null,
+        Func<string, RecycleBinVolumeSettings?>? readBinSettings = null)
     {
         _engine = engine;
         _contextFactory = contextFactory;
         _volumeProvider = volumeProvider ?? new SystemVolumeProvider();
         _executor = executor ?? MutationComposition.CreateReclaimExecutor();
+        _readBinSettings = readBinSettings ?? RecycleBinPreflight.ReadSettings;
 
         foreach (ReclaimCategory category in engine.Categories)
         {
@@ -499,10 +503,17 @@ public sealed partial class ReclaimViewModel : ObservableObject
             return;
         }
 
-        if (!await confirm(BuildConfirmation(selection)))
+        // The plan is built from fresh Recycle Bin settings and is the one thing both the dialog and
+        // the run read from. Anything the bin would refuse is named as permanent before the user
+        // agrees, and only those items are released for permanent deletion afterwards.
+        ReclaimPlan plan = ReclaimPlan.Create(selection, RecycleBinPreflight.CreateChecker(_readBinSettings));
+
+        if (!await confirm(ReclaimConfirmationRequest.FromPlan(plan, VolumeSplitText)))
         {
             return;
         }
+
+        IReadOnlyList<ReclaimCandidate> consented = plan.ConsentedSelection(selection);
 
         _reclaimCts?.Dispose();
         _reclaimCts = new CancellationTokenSource();
@@ -514,14 +525,12 @@ public sealed partial class ReclaimViewModel : ObservableObject
         StatusText = "Removing…";
 
         var progress = new Progress<ReclaimExecutionProgress>(p =>
-            ReclaimProgressText = p.Total <= 1
-                ? $"Removing {p.CurrentItem}…"
-                : $"{p.Completed:N0} of {p.Total:N0} — {ReclaimFormat.Bytes(p.BytesFreedSoFar)} freed");
+            ReclaimProgressText = ReclaimNarration.DescribeProgress(p));
 
         try
         {
             ReclaimOutcome outcome = await _executor.ExecuteAsync(
-                selection, progress, _reclaimCts.Token);
+                consented, progress, _reclaimCts.Token);
 
             ApplyOutcome(outcome);
         }
@@ -541,27 +550,6 @@ public sealed partial class ReclaimViewModel : ObservableObject
 
     [RelayCommand]
     private void CancelReclaim() => _reclaimCts?.Cancel();
-
-    /// <summary>
-    /// Assembles the facts the confirmation needs: how many, how much, which tier is the worst one
-    /// included, and — the fact that decides whether this is reversible — how much of it the Recycle
-    /// Bin will not be holding afterwards.
-    /// </summary>
-    private ReclaimConfirmationRequest BuildConfirmation(IReadOnlyList<ReclaimCandidate> selection)
-    {
-        IReadOnlyList<ReclaimCandidate> roots = ReclaimOverlapResolver.Roots(selection);
-        List<ReclaimCandidate> permanent = [.. roots.Where(c => !c.SupportsRecycleBin)];
-
-        return new ReclaimConfirmationRequest(
-            ItemCount: roots.Count,
-            Bytes: roots.Sum(c => c.SizeBytes),
-            HighestRisk: roots.Count == 0 ? ReclaimRisk.Safe : roots.Max(c => c.Risk),
-            CarefulCount: roots.Count(c => c.Risk == ReclaimRisk.Careful),
-            PermanentCount: permanent.Count,
-            PermanentBytes: permanent.Sum(c => c.SizeBytes),
-            PermanentNames: [.. permanent.OrderByDescending(c => c.SizeBytes).Take(4).Select(c => c.DisplayName)],
-            VolumeSplitText: VolumeSplitText);
-    }
 
     /// <summary>
     /// Folds a finished run back into the room: removed rows leave, failures stay and say why, and
@@ -798,8 +786,18 @@ public sealed partial class ReclaimViewModel : ObservableObject
                     .OrderByDescending(kv => kv.Value)
                     .Select(kv => $"{ReclaimFormat.Bytes(kv.Value)} on {kv.Key.TrimEnd('\\')}"));
 
-        RefreshVolumeImpacts(byVolume);
+        // The after-picture uses the same plan the confirmation will: only what is deleted outright
+        // (or emptied from a bin) moves the free-space needle. Recycled bytes stay on the volume.
+        RefreshVolumeImpacts(candidates.Count == 0 ? ReclaimPlan.Empty : ReclaimPlan.Create(candidates, BinCheck()));
     }
+
+    /// <summary>
+    /// A Recycle Bin checker that reads each volume's settings once per volume refresh. Built lazily
+    /// and dropped by <see cref="InvalidateVolumes"/>, because this runs once per checkbox tick and
+    /// the settings only change outside the app.
+    /// </summary>
+    private Func<ReclaimCandidate, RecycleBinCheck> BinCheck() =>
+        _cachedBinCheck ??= RecycleBinPreflight.CreateChecker(_readBinSettings);
 
     /// <summary>
     /// Rebuilds the per-volume impact rows from a cached enumeration.
@@ -811,7 +809,7 @@ public sealed partial class ReclaimViewModel : ObservableObject
     /// machine there was blocking the interaction to learn nothing. Free space only moves when a
     /// scan or a reclaim run does something, which is what <see cref="InvalidateVolumes"/> is for.
     /// </remarks>
-    private void RefreshVolumeImpacts(IReadOnlyDictionary<string, long>? reclaimableByVolume = null)
+    private void RefreshVolumeImpacts(ReclaimPlan? plan = null)
     {
         IReadOnlyList<StorageVolume>? volumes = _cachedVolumes;
 
@@ -825,37 +823,42 @@ public sealed partial class ReclaimViewModel : ObservableObject
             {
                 // A volume disappearing mid-session is a real event, not a bug. The room is still usable
                 // without impact rows, so this degrades rather than taking the page down.
-                RebuildImpacts(reclaimableByVolume, []);
+                RebuildImpacts(plan, []);
                 return;
             }
             catch (UnauthorizedAccessException)
             {
-                RebuildImpacts(reclaimableByVolume, []);
+                RebuildImpacts(plan, []);
                 return;
             }
 
             _cachedVolumes = volumes;
         }
 
-        RebuildImpacts(reclaimableByVolume, volumes);
+        RebuildImpacts(plan, volumes);
     }
 
     /// <summary>
     /// Drops the cached volume enumeration so the next impact rebuild re-reads the machine. Call
     /// after anything that can actually move free space — a completed scan, or a reclaim run.
     /// </summary>
-    private void InvalidateVolumes() => _cachedVolumes = null;
+    private void InvalidateVolumes()
+    {
+        _cachedVolumes = null;
+        _cachedBinCheck = null;
+    }
 
     /// <summary>
     /// A volume the enumeration could not describe is dropped rather than drawn with invented
     /// geometry — a bar with no capacity behind it is a lie told confidently, which is worse in a
     /// delete tool than a missing row.
     /// </summary>
-    private void RebuildImpacts(
-        IReadOnlyDictionary<string, long>? reclaimableByVolume,
-        IReadOnlyList<StorageVolume> volumes)
+    private void RebuildImpacts(ReclaimPlan? plan, IReadOnlyList<StorageVolume> volumes)
     {
         VolumeImpacts.Clear();
+
+        IReadOnlyDictionary<string, long>? freedByVolume = plan?.FreedBytesByVolume;
+        IReadOnlyDictionary<string, long>? recycledByVolume = plan?.RecycledBytesByVolume;
 
         // Driven by the volumes, not by the selection. A volume that would free nothing still belongs
         // in the after-picture: "C: is unchanged by this" is a fact the user needs when deciding
@@ -869,7 +872,9 @@ public sealed partial class ReclaimViewModel : ObservableObject
             }
 
             long bytes = 0;
-            reclaimableByVolume?.TryGetValue(volume.RootPath, out bytes);
+            long recycledBytes = 0;
+            freedByVolume?.TryGetValue(volume.RootPath, out bytes);
+            recycledByVolume?.TryGetValue(volume.RootPath, out recycledBytes);
 
             long freed = Math.Clamp(bytes, 0, volume.UsedBytes);
             long stillUsed = Math.Max(0, volume.UsedBytes - freed);
@@ -884,7 +889,10 @@ public sealed partial class ReclaimViewModel : ObservableObject
                 VolumeCapacity.AfterReclaim(volume, freed),
                 ReclaimFormat.Bytes(volume.FreeBytes),
                 ReclaimFormat.Bytes(freeAfter),
-                $"{ReclaimFormat.Bytes(stillUsed)} still in use of {ReclaimFormat.Bytes(volume.CapacityBytes)}"));
+                $"{ReclaimFormat.Bytes(stillUsed)} still in use of {ReclaimFormat.Bytes(volume.CapacityBytes)}")
+            {
+                RecycledBytes = Math.Max(0, recycledBytes),
+            });
         }
     }
 
@@ -916,6 +924,12 @@ public sealed record ReclaimVolumeImpact(
     string FreeAfterText,
     string StillInUseText)
 {
+    /// <summary>
+    /// Selected bytes on this volume that will go to its Recycle Bin. Not in <see cref="Bytes"/> and not
+    /// in the bar: the bin is on the same volume, so they free nothing until it is emptied.
+    /// </summary>
+    public long RecycledBytes { get; init; }
+
     public string BytesText => ReclaimFormat.Bytes(Bytes);
 
     /// <summary>Free space before and after, as one phrase. The arrow is the whole point of the row.</summary>
@@ -923,13 +937,23 @@ public sealed record ReclaimVolumeImpact(
 
     /// <summary>
     /// Right-hand end of the footer line. Says nothing selected rather than "+0 B", because zero
-    /// bytes freed is a state the user chose, not a measurement.
+    /// bytes freed is a state the user chose, not a measurement. Recycled bytes are named apart, so a
+    /// selection that only fills the bin does not read as space gained.
     /// </summary>
-    public string GainText => Bytes > 0 ? $"+{BytesText} freed" : "nothing selected here";
+    public string GainText => (Bytes > 0, RecycledBytes > 0) switch
+    {
+        (true, true) => $"+{BytesText} freed · {ReclaimFormat.Bytes(RecycledBytes)} to Recycle Bin",
+        (true, false) => $"+{BytesText} freed",
+        (false, true) => $"{ReclaimFormat.Bytes(RecycledBytes)} to Recycle Bin — frees when emptied",
+        _ => "nothing selected here",
+    };
 
     /// <summary>Reads as one sentence to a screen reader, which cannot see a bar.</summary>
     public string AccessibleDescription =>
-        $"{Name} ({Letter}:), {StillInUseText}, {FreeBeforeText} free before, {FreeAfterText} free after";
+        $"{Name} ({Letter}:), {StillInUseText}, {FreeBeforeText} free before, {FreeAfterText} free after"
+        + (RecycledBytes > 0
+            ? $", {ReclaimFormat.Bytes(RecycledBytes)} moved to the Recycle Bin, which frees space only when emptied"
+            : string.Empty);
 
     public string AutomationId => $"ReclaimImpact_{VolumeRoot.TrimEnd('\\', ':')}";
 }

@@ -41,10 +41,12 @@
                 Grid.Column="1"
                 VerticalAlignment="Center"
                 CanScan="True"
-                IsScanning="{x:Bind Reclaim.IsScanning, Mode=OneWay}"
+                CancelRequested="ScanBar_CancelRequested"
+                IsScanning="{x:Bind Scans.IsScanning, Mode=OneWay}"
                 ScanLabel="Scan this PC"
                 ScanRequested="ScanBar_ScanRequested"
-                SelectionMode="None" />
+                SelectionMode="None"
+                StatusText="{x:Bind Scans.StatusText, Mode=OneWay}" />
         </Grid>
 
         <Grid

@@ -95,6 +95,10 @@ public sealed class ReclaimRecycleTests
         try
         {
             Assert.AreEqual(ReclaimItemStatus.Recycled, outcome.Items[0].Status);
+
+            // In the bin is not off the volume: the bytes moved, they were not freed.
+            Assert.AreEqual(outcome.Items[0].Candidate.SizeBytes, outcome.BytesRecycled);
+            Assert.AreEqual(0, outcome.BytesFreed);
         }
         finally
         {

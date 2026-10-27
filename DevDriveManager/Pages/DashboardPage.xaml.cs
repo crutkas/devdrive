@@ -85,6 +85,9 @@ public sealed partial class DashboardPage : Page, INotifyPropertyChanged
 
     public StorageExplorerViewModel Space => App.SharedSpace;
 
+    /// <summary>The shared scan, so this room's bar reports and cancels both halves of "Scan this PC".</summary>
+    public ScanCoordinator Scans => App.Scans;
+
     public IReadOnlyList<AttentionSignalViewModel> Signals => _signals;
 
     public IReadOnlyList<InspectorFactViewModel> BiggestFolders => _biggest;
@@ -385,6 +388,9 @@ public sealed partial class DashboardPage : Page, INotifyPropertyChanged
     /// together, exactly as the buttons in those rooms do.
     /// </summary>
     private void ScanBar_ScanRequested(object? sender, EventArgs e) => App.ScanEverything();
+
+    // The bar showed a Cancel wired to nothing. It now stops both halves of the scan it started.
+    private void ScanBar_CancelRequested(object? sender, EventArgs e) => App.Scans.Cancel();
 
     /// <summary>
     /// Opens the room a signal belongs to. Selecting a row explains it; this is the separate gesture

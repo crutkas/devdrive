@@ -166,4 +166,73 @@ public sealed class ReclaimNarrationTests
 
         StringAssert.Contains(line, $"{expected} could not be removed");
     }
+
+    private static ReclaimOutcome Recycled(long bytes, long deletedBytes = 0, bool cancelled = false)
+    {
+        List<ReclaimItemOutcome> items =
+        [
+            new(Candidate("build-output", @"C:\recycled", bytes), ReclaimItemStatus.Recycled, bytes, "moved"),
+        ];
+
+        if (deletedBytes > 0)
+        {
+            items.Add(new(
+                Candidate("recycle-bin", @"C:\bin", deletedBytes), ReclaimItemStatus.Emptied, deletedBytes, "emptied"));
+        }
+
+        return new ReclaimOutcome(items, cancelled);
+    }
+
+    /// <summary>
+    /// The headline defect: recycling moves an item into the same volume's bin, so a run that only
+    /// recycled must not announce space freed. It says where the bytes went and when they come back.
+    /// </summary>
+    [TestMethod]
+    public void ARecycleOnlyRunDoesNotClaimItFreedAnything()
+    {
+        string line = ReclaimNarration.SummarizeRun(Recycled(4_000_000_000));
+
+        StringAssert.StartsWith(line, "Moved ");
+        StringAssert.Contains(line, "to the Recycle Bin");
+        Assert.DoesNotContain("Freed", line, StringComparison.Ordinal);
+        StringAssert.Contains(line, ReclaimNarration.RecycledSpaceNote);
+    }
+
+    [TestMethod]
+    public void AMixedRunReportsFreedAndRecycledSeparately()
+    {
+        ReclaimOutcome outcome = Recycled(4_000_000_000, deletedBytes: 1_000_000_000);
+        string line = ReclaimNarration.SummarizeRun(outcome);
+
+        StringAssert.StartsWith(line, $"Freed {ReclaimFormat.Bytes(1_000_000_000)} and moved {ReclaimFormat.Bytes(4_000_000_000)}");
+        Assert.AreEqual(1_000_000_000, outcome.BytesFreed);
+        Assert.AreEqual(4_000_000_000, outcome.BytesRecycled);
+    }
+
+    [TestMethod]
+    public void AStoppedRecycleOnlyRunSaysMovingNotFreeing()
+    {
+        string line = ReclaimNarration.SummarizeRun(Recycled(4096, cancelled: true));
+
+        StringAssert.StartsWith(line, "Stopped after moving");
+        Assert.DoesNotContain("freeing", line, StringComparison.Ordinal);
+    }
+
+    [TestMethod]
+    public void ProgressNamesBinBytesApartFromFreedBytes()
+    {
+        string line = ReclaimNarration.DescribeProgress(new ReclaimExecutionProgress(3, 10, "obj", 1_000, 4_000));
+
+        StringAssert.StartsWith(line, "3 of 10 — ");
+        StringAssert.Contains(line, $"{ReclaimFormat.Bytes(1_000)} freed");
+        StringAssert.Contains(line, $"{ReclaimFormat.Bytes(4_000)} to the Recycle Bin");
+    }
+
+    [TestMethod]
+    public void ProgressForARecycleOnlyRunDoesNotSayFreed()
+    {
+        string line = ReclaimNarration.DescribeProgress(new ReclaimExecutionProgress(3, 10, "obj", 0, 4_000));
+
+        Assert.DoesNotContain("freed", line, StringComparison.Ordinal);
+    }
 }

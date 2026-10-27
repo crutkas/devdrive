@@ -30,14 +30,20 @@ public enum ReclaimItemStatus
 
 /// <summary>The result for one candidate.</summary>
 /// <remarks>
-/// <paramref name="BytesFreed"/> is the size measured during the scan, not a re-measurement. There
-/// is nothing left to measure once the delete succeeds, and reading free space instead would credit
-/// this run with every other write the machine made while it ran.
+/// <paramref name="Bytes"/> is the size measured during the scan, not a re-measurement. There is
+/// nothing left to measure once the item is gone, and reading free space instead would credit this
+/// run with every other write the machine made while it ran.
+/// <para>
+/// Where those bytes went is the status's business, not the number's: <see cref="BytesFreed"/> and
+/// <see cref="BytesRecycled"/> split them. Recycling moves an item into <c>$Recycle.Bin</c> on the
+/// same volume, so it frees nothing until the bin is emptied — counting it as freed is how a run that
+/// recycled 40 GB announced 40 GB of space that the volume never got back.
+/// </para>
 /// </remarks>
 public sealed record ReclaimItemOutcome(
     ReclaimCandidate Candidate,
     ReclaimItemStatus Status,
-    long BytesFreed,
+    long Bytes,
     string Message)
 {
     /// <summary>True when the thing the user selected is gone, by any route.</summary>
@@ -49,6 +55,12 @@ public sealed record ReclaimItemOutcome(
 
     /// <summary>True when the user asked for something and did not get it.</summary>
     public bool NeedsAttention => Status is ReclaimItemStatus.Refused or ReclaimItemStatus.Failed;
+
+    /// <summary>Bytes the volume got back now: deleted outright, or emptied from a bin.</summary>
+    public long BytesFreed => Status is ReclaimItemStatus.Deleted or ReclaimItemStatus.Emptied ? Bytes : 0;
+
+    /// <summary>Bytes moved into the Recycle Bin. Restorable, and still occupying the volume.</summary>
+    public long BytesRecycled => Status is ReclaimItemStatus.Recycled ? Bytes : 0;
 }
 
 /// <summary>Progress through a reclaim run.</summary>
@@ -56,15 +68,19 @@ public sealed record ReclaimExecutionProgress(
     int Completed,
     int Total,
     string CurrentItem,
-    long BytesFreedSoFar);
+    long BytesFreedSoFar,
+    long BytesRecycledSoFar = 0);
 
 /// <summary>Everything a reclaim run did.</summary>
 public sealed record ReclaimOutcome(IReadOnlyList<ReclaimItemOutcome> Items, bool Cancelled)
 {
     public static readonly ReclaimOutcome Empty = new([], Cancelled: false);
 
-    /// <summary>Bytes returned to the volumes, counting nested selections once.</summary>
-    public long BytesFreed => Items.Where(i => i.Removed).Sum(i => i.BytesFreed);
+    /// <summary>Bytes returned to the volumes now, counting nested selections once.</summary>
+    public long BytesFreed => Items.Sum(i => i.BytesFreed);
+
+    /// <summary>Bytes moved into a Recycle Bin. They come back when the bin is emptied, not before.</summary>
+    public long BytesRecycled => Items.Sum(i => i.BytesRecycled);
 
     public int RemovedCount => Items.Count(i => i.Removed);
 
@@ -72,9 +88,9 @@ public sealed record ReclaimOutcome(IReadOnlyList<ReclaimItemOutcome> Items, boo
 
     public IEnumerable<ReclaimItemOutcome> Failures => Items.Where(i => i.NeedsAttention);
 
-    /// <summary>Bytes freed per volume root, for the after-picture.</summary>
+    /// <summary>Bytes freed now per volume root, for the after-picture. Recycled bytes are excluded.</summary>
     public IReadOnlyDictionary<string, long> BytesFreedByVolume =>
-        Items.Where(i => i.Removed)
+        Items.Where(i => i.BytesFreed > 0)
             .GroupBy(i => i.Candidate.VolumeRoot, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(g => g.Key, g => g.Sum(i => i.BytesFreed), StringComparer.OrdinalIgnoreCase);
 }

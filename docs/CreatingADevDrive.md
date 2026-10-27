@@ -35,6 +35,17 @@ Key implementation points:
 `SelectedBytes` is the single size value behind the slider, number box, unit picker, and disk bar.
 `DevDriveSizeMath` applies the 50 GiB platform minimum and clamps the request to the selected source.
 
+**More options** (method, letter, label, VHDX file) stays collapsed by default. What Create will do is
+always visible as one line under the size — for example *Shrink C: to 838 GB and create D: at 50 GB* —
+and the slider's caption says what its maximum is. For a resize that maximum is free space, not the
+verified shrink limit; the caption says the real limit is checked before anything changes. When the
+chosen size would leave the source under the low-free threshold from Settings, the disk bar turns amber
+**and** says so in text.
+
+Revisiting Create re-reads the volumes, so space freed in Reclaim raises the ceiling without a restart.
+The method, letter, label, VHDX path and type, and a size the user chose are kept; the size is re-clamped
+if the new ceiling is lower.
+
 ## 2. Confirmation and elevation
 
 Editing options changes nothing.
@@ -42,6 +53,10 @@ Editing options changes nothing.
 - VHDX creation has one explicit confirmation followed by one UAC prompt.
 - Resize has one explicit **Create** confirmation showing the planned final source and target sizes,
   followed by one UAC prompt. The elevated helper verifies the live disk before making any change.
+- While either runs, the room cannot be left: its Cancel is disabled, every other rail item is
+  disabled, and the shell refuses programmatic navigation away from Create. The refresh of drives,
+  caches, and benchmarks after a verified creation is wired at app level, so it does not depend on the
+  page still being loaded.
 - `DDM_UITEST_SAFE_MUTATIONS=1` replaces both production engines with safe fakes.
 
 The elevated helper accepts base64-encoded JSON plans on its command line, not mutable plan files. A

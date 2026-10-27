@@ -65,7 +65,11 @@ Below a 700-DIP window width they wrap together beneath the title rather than co
 Unknown capacity is stated, not drawn as an empty disk. Selection survives navigation
 without starting work; the adjacent play-icon **Scan** button starts the selected scan.
 During a scan the picker is disabled, and **Scan** is hidden and replaced in the same
-header slot by a **Cancel** button with a live progress ring. Progress floats over
+header slot by a **Cancel** button with a live progress ring. Every room's Scan starts
+both the Space walk and the Reclaim scan (`App.ScanEverything`), so every room's Cancel
+stops both through one `ScanCoordinator` (`App.Scans`). Overview and Reclaim show that
+combined state in their scan bar — a ring, which half is still running, and Cancel —
+until both halves finish. Progress floats over
 the bottom of the card on a native elevated, shadowed surface, centered with a
 maximum width of 560 DIPs; it never reserves a footer row. Its 12-DIP status text
 and progress bar (indeterminate when unmeasured) share one horizontal row. Toolkit
@@ -183,6 +187,25 @@ The finished snapshot's `ScanCoverage.Statistics` carries the headline numbers
 drive's used space, cloud-only bytes, query and total time). The redesigned
 Space room does not display them yet; `StorageExplorerViewModel.ScanStatisticsSummary`
 still exposes them.
+
+## Reclaim: removed is not freed
+
+The Reclaim room sits beside Space and reads the same volumes, so its numbers have to
+agree with what Space will measure afterwards. Two rules keep them honest
+(`DevDriveReclaim/ReclaimPlan.cs`, `RecycleBinPreflight.cs`, `ReclaimExecution.cs`):
+
+- **Recycling frees nothing yet.** `$Recycle.Bin` lives on the same volume, so an item
+  moved there still occupies it. Outcomes split `BytesFreed` (deleted outright, or a bin
+  emptied) from `BytesRecycled`. The confirmation, progress line, run summary, and
+  per-volume after-picture only move free space by the freed part; recycled bytes are
+  reported as "to the Recycle Bin — frees when emptied".
+- **A promise of the Recycle Bin is kept.** Before the confirmation, each item that asks
+  for the bin is checked against that volume's bin settings (its size limit, "don't move
+  files to the Recycle Bin", the `NoRecycleFiles` policy, volumes with no bin). Anything
+  the bin would refuse is listed as permanent, with the reason, before the user agrees.
+  At run time the executor re-reads the settings and **keeps** — rather than deletes — any
+  item it promised to recycle that the bin now refuses, and asks the shell
+  (`FOF_WANTNUKEWARNING`) to warn before any permanent delete nothing predicted.
 
 ## Swapping a source
 

@@ -42,6 +42,80 @@ public sealed class ReclaimConfirmationTests
             "A fully recyclable batch must not carry the word 'permanently' anywhere in its headline.");
     }
 
+    /// <summary>
+    /// Moving something into the same volume's Recycle Bin frees nothing until the bin is emptied, so
+    /// a batch that only recycles must not promise freed space anywhere a person reads before agreeing.
+    /// </summary>
+    [TestMethod]
+    public void ARecycleOnlyBatchDoesNotPromiseFreedSpace()
+    {
+        ReclaimConfirmationRequest request = Request();
+
+        StringAssert.Contains(request.Headline, "Recycle Bin");
+        Assert.DoesNotContain("free", request.Headline, StringComparison.OrdinalIgnoreCase);
+        StringAssert.Contains(request.SpaceText, "when the Recycle Bin is emptied");
+        StringAssert.Contains(request.RecoveryText, "without asking you first");
+    }
+
+    [TestMethod]
+    public void AMixedBatchSaysWhichPartIsFreedNow()
+    {
+        ReclaimConfirmationRequest request = Request(
+            bytes: 5_000_000_000,
+            permanentCount: 1,
+            permanentBytes: 2_000_000_000,
+            permanentNames: ["Recycle Bin on C:"]);
+
+        StringAssert.StartsWith(request.SpaceText, $"{request.PermanentBytesText} is freed now");
+        StringAssert.Contains(request.SpaceText, request.RecycledBytesText);
+    }
+
+    [TestMethod]
+    public void AFullyPermanentBatchSaysItFreesTheSpace()
+    {
+        ReclaimConfirmationRequest request = Request(
+            itemCount: 1, bytes: 1_000, permanentCount: 1, permanentBytes: 1_000, permanentNames: ["x"]);
+
+        StringAssert.StartsWith(request.Headline, "Permanently delete");
+        StringAssert.Contains(request.SpaceText, "freed as soon as this finishes");
+    }
+
+    /// <summary>
+    /// The trust fix: an item the bin would refuse is named as permanent — with the reason — before
+    /// the user agrees, rather than being silently nuked by the shell after a promise of the bin.
+    /// </summary>
+    [TestMethod]
+    public void AnItemTooLargeForTheBinIsNamedAsPermanentBeforeConfirming()
+    {
+        ReclaimCandidate small = Candidate(@"C:\src\a\obj", 1_000);
+        ReclaimCandidate huge = Candidate(@"C:\src\b\node_modules", 5_000_000);
+
+        ReclaimPlan plan = ReclaimPlan.Create(
+            [small, huge], RecycleBinPreflight.CreateChecker(TestBins.HoldsUpTo(1_000_000)));
+        ReclaimConfirmationRequest request = ReclaimConfirmationRequest.FromPlan(plan, string.Empty);
+
+        Assert.AreEqual(1, request.PermanentCount);
+        StringAssert.Contains(request.RecoveryText, "node_modules");
+        StringAssert.Contains(request.RecoveryText, "too large for the Recycle Bin on C:");
+        StringAssert.Contains(request.Headline, "permanently");
+    }
+
+    [TestMethod]
+    public void PermanentNamesBeyondTheListAreCountedNotDropped()
+    {
+        ReclaimConfirmationRequest request = Request(
+            itemCount: 9,
+            permanentCount: 6,
+            permanentBytes: 1_000,
+            permanentNames: ["a", "b", "c", "d"]);
+
+        StringAssert.Contains(request.RecoveryText, "and 2 more");
+    }
+
+    private static ReclaimCandidate Candidate(string path, long size) =>
+        new("build-output", path, Path.GetFileName(path), size, ReclaimRisk.Safe, "r", "h",
+            supportsRecycleBin: true);
+
     [TestMethod]
     public void AFullyPermanentBatchSaysItCannotBeUndone()
     {
@@ -174,7 +248,7 @@ public sealed class SafeFakeReclaimExecutorTests
         Directory.CreateDirectory(folder);
         try
         {
-            SafeFakeReclaimExecutor executor = new();
+            SafeFakeReclaimExecutor executor = new(TestBins.Recycles);
 
             ReclaimOutcome outcome = await executor.ExecuteAsync([Candidate(folder, "obj")], null, default);
 
@@ -196,7 +270,7 @@ public sealed class SafeFakeReclaimExecutorTests
     [TestMethod]
     public async Task AProtectedPathIsStillRefused()
     {
-        SafeFakeReclaimExecutor executor = new();
+        SafeFakeReclaimExecutor executor = new(TestBins.Recycles);
         string windows = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
 
         ReclaimOutcome outcome = await executor.ExecuteAsync([Candidate(windows, "Windows")], null, default);
@@ -220,7 +294,7 @@ public sealed class SafeFakeReclaimExecutorTests
         Directory.CreateDirectory(inner);
         try
         {
-            SafeFakeReclaimExecutor executor = new();
+            SafeFakeReclaimExecutor executor = new(TestBins.Recycles);
 
             ReclaimOutcome outcome = await executor.ExecuteAsync(
                 [Candidate(outer, "repo"), Candidate(inner, "bin")],
@@ -229,11 +303,60 @@ public sealed class SafeFakeReclaimExecutorTests
 
             Assert.HasCount(1, executor.Removed);
             Assert.AreEqual(outer, executor.Removed[0]);
-            Assert.AreEqual(1_000_000, outcome.BytesFreed, "Only the containing root's bytes count once.");
+            Assert.AreEqual(1_000_000, outcome.BytesRecycled, "Only the containing root's bytes count once.");
         }
         finally
         {
             Directory.Delete(root, recursive: true);
+        }
+    }
+
+    /// <summary>
+    /// The fake keeps an item the bin would refuse, exactly as the real executor does, so the UI
+    /// suite sees the same "kept" row a user would rather than a success the real run never reports.
+    /// </summary>
+    [TestMethod]
+    public async Task AnItemTheBinWouldRefuseIsKeptNotDeleted()
+    {
+        SafeFakeReclaimExecutor executor = new(TestBins.HoldsUpTo(10));
+        string path = Path.Combine(Path.GetTempPath(), "ddm-safe-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(path);
+        try
+        {
+            ReclaimOutcome outcome = await executor.ExecuteAsync([Candidate(path, "big")], null, default);
+
+            Assert.AreEqual(0, outcome.RemovedCount);
+            Assert.AreEqual(ReclaimItemStatus.Failed, outcome.Items.Single().Status);
+            StringAssert.Contains(outcome.Items.Single().Message, "kept");
+            Assert.IsEmpty(executor.Removed);
+        }
+        finally
+        {
+            Directory.Delete(path, recursive: true);
+        }
+    }
+
+    /// <summary>Something the confirmation named as permanent is reported as freed, not recycled.</summary>
+    [TestMethod]
+    public async Task AConsentedPermanentItemCountsAsFreed()
+    {
+        SafeFakeReclaimExecutor executor = new(TestBins.HoldsUpTo(10));
+        string path = Path.Combine(Path.GetTempPath(), "ddm-safe-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(path);
+        try
+        {
+            ReclaimCandidate big = Candidate(path, "big");
+            ReclaimPlan plan = ReclaimPlan.Create([big], RecycleBinPreflight.CreateChecker(TestBins.HoldsUpTo(10)));
+
+            ReclaimOutcome outcome = await executor.ExecuteAsync(plan.ConsentedSelection([big]), null, default);
+
+            Assert.AreEqual(ReclaimItemStatus.Deleted, outcome.Items.Single().Status);
+            Assert.AreEqual(1_000_000, outcome.BytesFreed);
+            Assert.AreEqual(0, outcome.BytesRecycled);
+        }
+        finally
+        {
+            Directory.Delete(path, recursive: true);
         }
     }
 

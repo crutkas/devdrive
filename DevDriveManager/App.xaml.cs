@@ -69,9 +69,17 @@ public partial class App : Application
     public static bool IsSpaceFixture { get; private set; }
 
     /// <summary>
+    /// The shared scan's state and its one Cancel, for every room's scan bar. Declared after
+    /// <see cref="SharedReclaim"/> and <see cref="SharedSpace"/> because static initialisers run in
+    /// textual order and this reads both.
+    /// </summary>
+    public static ScanCoordinator Scans { get; } = new(SharedReclaim, SharedSpace);
+
+    /// <summary>
     /// The one Scan. Overview, Reclaim and Space each have a Scan button, and they used to start
     /// different scans — Overview and Reclaim the reclaim scan, Space the volume walk — so seeing
-    /// the whole picture took two clicks in two rooms. Every button now starts both.
+    /// the whole picture took two clicks in two rooms. Every button now starts both, and every
+    /// room's Cancel stops both through <see cref="Scans"/>.
     /// </summary>
     /// <param name="spaceRoot">
     /// The volume Space should walk. When null, Space re-walks whatever it last scanned, or the
@@ -109,11 +117,20 @@ public partial class App : Application
     public static CreateDevDriveViewModel SharedCreate { get; } = CreateDevDriveViewModel.CreateDefault();
 
     /// <summary>
+    /// Refreshes shared app state after a verified creation. Wired here, once, rather than by the
+    /// Create page: the page unsubscribes when it unloads, so a page-owned handler meant a creation
+    /// that finished while the room was not on screen never refreshed drives, caches or benchmarks.
+    /// </summary>
+    private static Task RefreshAfterCreationAsync() => Shared.LoadCommand.ExecuteAsync(null);
+
+    /// <summary>
     /// Initializes the singleton application object.
     /// </summary>
     public App()
     {
         InitializeComponent();
+
+        SharedCreate.DevDriveCreated += RefreshAfterCreationAsync;
 
         // Without these, any exception escaping an async void handler takes the process down with
         // no dialog, no log and nothing to diagnose from. On a desktop that manages someone's disk,
@@ -177,6 +194,7 @@ public partial class App : Application
             SpaceVolumes = new Services.SpaceUiFixtureVolumes();
             SharedSpace = new(new MockStorageSnapshotSource(
                 MockStorageScenarioCatalog.CreateDefault(), TimeSpan.FromMilliseconds(1250)));
+            Scans.Attach(SharedSpace);
         }
 #endif
         Window = new MainWindow();

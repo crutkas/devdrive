@@ -210,7 +210,8 @@ public sealed partial class DevDriveDiskBar : UserControl
     /// <remarks>
     /// Amber is the app's "worth your attention" colour, and the size bar is the one place where
     /// crossing the low-free line is still undoable. Saying it here, live as the slider moves,
-    /// beats saying it once the drive exists.
+    /// beats saying it once the drive exists. The amber is paired with a sentence, so the state is
+    /// never carried by colour alone.
     /// <para>
     /// This bar has no reclaimable band, so amber is unambiguous on it. The shared
     /// <c>CapacityBar</c> deliberately does <i>not</i> do this: there amber already means
@@ -233,6 +234,9 @@ public sealed partial class DevDriveDiskBar : UserControl
         Apply(FreeSegment, low ? "DiskBarFreeSegmentLowStyle" : "DiskBarFreeSegmentStyle");
         Apply(FreeSwatch, low ? "DiskBarFreeSwatchLowStyle" : "DiskBarFreeSwatchStyle");
 
+        LowSpaceWarning.Text = LowSpaceWarningText(LowFreeFraction);
+        LowSpaceWarning.Visibility = low ? Visibility.Visible : Visibility.Collapsed;
+
         void Apply(Border target, object key)
         {
             if (Resources.TryGetValue(key, out object? value) && value is Style style)
@@ -241,6 +245,11 @@ public sealed partial class DevDriveDiskBar : UserControl
             }
         }
     }
+
+    /// <summary>The sentence shown with the amber state, so the warning is not carried by colour alone.</summary>
+    internal static string LowSpaceWarningText(double lowFreeFraction) =>
+        $"This leaves the volume with less than {Math.Round(lowFreeFraction * 100):0}% free. " +
+        "Choose a smaller size to keep room for Windows and apps.";
 
     private static ulong ToBytes(double value) => value <= 0d ? 0UL : (ulong)Math.Round(value);
 }

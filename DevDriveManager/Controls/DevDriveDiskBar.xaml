@@ -205,5 +205,19 @@
                 <TextBlock x:Name="DevValue" Style="{StaticResource DiskBarLegendValueStyle}" />
             </StackPanel>
         </Grid>
+
+        <!--
+            The words behind the amber. Colour alone fails a colour-blind reader, a greyscale
+            screenshot and a screen reader, and it never says what the problem is. Shown only while
+            the free segment is in its low state; the text is set in ApplyFreeStyle.
+        -->
+        <TextBlock
+            x:Name="LowSpaceWarning"
+            AutomationProperties.AutomationId="DiskBarLowSpaceWarning"
+            AutomationProperties.LiveSetting="Polite"
+            Foreground="{ThemeResource SmWarnBrush}"
+            Style="{StaticResource CaptionTextBlockStyle}"
+            TextWrapping="Wrap"
+            Visibility="Collapsed" />
     </StackPanel>
 </UserControl>

@@ -37,6 +37,7 @@ public partial class CreateDevDriveViewModel : ObservableObject
     private DevDriveCreationPlan? _pendingPlan;
     private bool _isSyncing;
     private bool _initialized;
+    private bool _sizeChosenByUser;
 
     public CreateDevDriveViewModel(
         IDevDriveService volumeService,
@@ -159,9 +160,6 @@ public partial class CreateDevDriveViewModel : ObservableObject
     // ---- Live readouts --------------------------------------------------------------------------
 
     [ObservableProperty]
-    public partial string SpaceAvailableLabel { get; set; } = "Space available";
-
-    [ObservableProperty]
     public partial string SpaceAvailableText { get; set; } = string.Empty;
 
     [ObservableProperty]
@@ -183,6 +181,22 @@ public partial class CreateDevDriveViewModel : ObservableObject
 
     [ObservableProperty]
     public partial string SummaryDetail { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The one line that says what pressing Create will do to the machine, e.g. "Shrink C: to 838 GB
+    /// and create D: at 50 GB." Shown under the size, outside More options, so the consequence is
+    /// never something the user has to expand a panel to learn.
+    /// </summary>
+    [ObservableProperty]
+    public partial string ConsequenceText { get; set; } = string.Empty;
+
+    /// <summary>
+    /// What the slider's ceiling is, and — for a shrink — that it is not the real limit. The ceiling
+    /// is free space; how far a volume can actually shrink is measured while elevated, just before
+    /// anything changes.
+    /// </summary>
+    [ObservableProperty]
+    public partial string SizeCeilingText { get; set; } = string.Empty;
 
     [ObservableProperty]
     public partial string PrimaryActionText { get; set; } = "Create";
@@ -240,11 +254,24 @@ public partial class CreateDevDriveViewModel : ObservableObject
             ? AvailableSourceVolumes[SelectedSourceVolumeIndex]
             : null;
 
-    /// <summary>Reads the host volumes (read-only/safe) and seeds the form. Call from the page's Loaded.</summary>
+    /// <summary>
+    /// Reads the host volumes (read-only/safe) and seeds the form. Call from the page's Loaded.
+    /// </summary>
+    /// <remarks>
+    /// The first call seeds everything. Later calls — every revisit — re-read the volumes so a trip to
+    /// Reclaim shows up here as a higher ceiling, while keeping what the user chose: method, letter,
+    /// label, VHDX path and type, and the size (re-clamped if the ceiling moved below it). Nothing is
+    /// re-read while an operation is running or after it finished; the form is not on screen then.
+    /// </remarks>
     public async Task LoadAsync()
     {
         if (_initialized)
         {
+            if (!IsBusy && !IsComplete && !IsLoading)
+            {
+                await RefreshVolumesAsync();
+            }
+
             return;
         }
 
@@ -272,6 +299,78 @@ public partial class CreateDevDriveViewModel : ObservableObject
         Reconfigure();
     }
 
+    /// <summary>Re-reads the volumes and re-seeds the bar and ceiling without discarding the user's choices.</summary>
+    private async Task RefreshVolumesAsync()
+    {
+        string letter = SelectedDriveLetter;
+        char? source = SelectedSourceVolume?.Letter;
+        double size = SelectedBytes;
+        bool keepSize = _sizeChosenByUser;
+
+        IReadOnlyList<VolumeInfo> volumes;
+        IsLoading = true;
+        try
+        {
+            volumes = await Task.Run(() => _volumeService.GetVolumes());
+        }
+        catch (Exception)
+        {
+            // The form already holds a reading. A failed refresh keeps it rather than replacing a
+            // usable screen with an error over a read that only exists to be fresher.
+            return;
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+
+        // A creation started while the read was in flight owns the form now.
+        if (IsBusy || IsComplete)
+        {
+            return;
+        }
+
+        _volumes = volumes;
+
+        // Suspended so the intermediate states (lists cleared, then refilled) don't each reconfigure.
+        _initialized = false;
+        try
+        {
+            BuildDriveLetters();
+            if (AvailableDriveLetters.Contains(letter))
+            {
+                SelectedDriveLetter = letter;
+            }
+
+            BuildSourceVolumes();
+            if (source is char previous)
+            {
+                int index = AvailableSourceVolumes.ToList().FindIndex(v => v.Letter == previous);
+                if (index >= 0)
+                {
+                    SelectedSourceVolumeIndex = index;
+                }
+            }
+
+            ResolveHostVolume();
+        }
+        finally
+        {
+            _initialized = true;
+        }
+
+        OnPropertyChanged(nameof(SelectedDriveLetter));
+        Reconfigure();
+
+        if (keepSize)
+        {
+            // Clamped first: ApplySize words its error from the raw request, and a size that was
+            // valid a minute ago should be pulled in quietly, not reported as "Not enough space".
+            ApplySize(DevDriveSizeMath.ClampSizeBytes(size, MaximumSelectableBytes));
+            _sizeChosenByUser = true;
+        }
+    }
+
     // ---- Commands -------------------------------------------------------------------------------
 
     [RelayCommand]
@@ -283,8 +382,21 @@ public partial class CreateDevDriveViewModel : ObservableObject
     [RelayCommand]
     private void BrowseVhdPath() => BrowseVhdPathRequested?.Invoke();
 
-    [RelayCommand]
-    private void Cancel() => NavigateBackRequested?.Invoke();
+    /// <summary>
+    /// False while a creation or resize is running. Leaving then would detach the screen from an
+    /// elevated disk operation that cannot be stopped, so every way out — this room's Cancel, the
+    /// rail, and programmatic navigation in the shell — checks it.
+    /// </summary>
+    public bool CanLeave => !IsBusy;
+
+    [RelayCommand(CanExecute = nameof(CanLeave))]
+    private void Cancel()
+    {
+        if (CanLeave)
+        {
+            NavigateBackRequested?.Invoke();
+        }
+    }
 
     /// <summary>Used by the onboarding card's suggestions and its "Done" button to return to management.</summary>
     [RelayCommand]
@@ -505,11 +617,36 @@ public partial class CreateDevDriveViewModel : ObservableObject
         }
     }
 
-    partial void OnSelectedBytesChanged(double value) => ApplySize(value);
+    partial void OnSelectedBytesChanged(double value)
+    {
+        MarkSizeChosen();
+        ApplySize(value);
+    }
 
-    partial void OnSliderValueGbChanged(double value) => ApplySize(DevDriveSizeMath.GigabytesToBytes(value));
+    partial void OnSliderValueGbChanged(double value)
+    {
+        MarkSizeChosen();
+        ApplySize(DevDriveSizeMath.GigabytesToBytes(value));
+    }
 
-    partial void OnSizeNumberValueChanged(double value) => ApplySize(DevDriveSizeMath.UnitToBytes(value, CurrentUnit));
+    partial void OnSizeNumberValueChanged(double value)
+    {
+        MarkSizeChosen();
+        ApplySize(DevDriveSizeMath.UnitToBytes(value, CurrentUnit));
+    }
+
+    /// <summary>
+    /// Records that the size came from the user rather than from <see cref="Reconfigure"/>'s default,
+    /// so a refresh keeps it. Writes made by <see cref="ApplySize"/> itself arrive while
+    /// <see cref="_isSyncing"/> is set and are not the user's.
+    /// </summary>
+    private void MarkSizeChosen()
+    {
+        if (_initialized && !_isSyncing)
+        {
+            _sizeChosenByUser = true;
+        }
+    }
 
     partial void OnSizeUnitIndexChanged(int value)
     {
@@ -517,7 +654,12 @@ public partial class CreateDevDriveViewModel : ObservableObject
         ApplySize(SelectedBytes); // re-express the same size in the new unit
     }
 
-    partial void OnIsBusyChanged(bool value) => RefreshCanCreate();
+    partial void OnIsBusyChanged(bool value)
+    {
+        RefreshCanCreate();
+        OnPropertyChanged(nameof(CanLeave));
+        CancelCommand.NotifyCanExecuteChanged();
+    }
 
     partial void OnIsCompleteChanged(bool value) => RefreshCanCreate();
 
@@ -614,26 +756,15 @@ public partial class CreateDevDriveViewModel : ObservableObject
         }
 
         string usedSize = ByteSizeFormatter.Format(ToUlong(UsedBytes));
-        if (IsResize)
-        {
-            UsedBarLabel = $"Used \u00B7 {usedSize}";
+        UsedBarLabel = $"Used \u00B7 {usedSize}";
+        PrimaryActionText = "Create";
 
-            // This number is free space, and free space is not shrinkable space. A shrink is bounded
-            // by Get-PartitionSupportedSize, which unmovable page file, hibernation, snapshots and
-            // metadata scattered up the volume can hold far below the free figure — 240 GB free and
-            // 60 GB shrinkable is an ordinary system disk. Calling it "shrinkable" stated a number
-            // we had not measured as if we had. ResizeGuard measures the real limit while elevated
-            // and refuses anything larger, so the plan is safe; the label just has to stop claiming
-            // the check has already happened.
-            SpaceAvailableLabel = "Free space \u00B7 shrink limit checked before any change";
-            PrimaryActionText = "Create";
-        }
-        else
-        {
-            UsedBarLabel = $"Used \u00B7 {usedSize}";
-            SpaceAvailableLabel = "Host volume free space";
-            PrimaryActionText = "Create";
-        }
+        // For a shrink the ceiling is free space, and free space is not shrinkable space. A shrink
+        // is bounded by Get-PartitionSupportedSize, which unmovable page file, hibernation,
+        // snapshots and metadata scattered up the volume can hold far below the free figure — 240 GB
+        // free and 60 GB shrinkable is an ordinary system disk. ResizeGuard measures the real limit
+        // while elevated and refuses anything larger, so the plan is safe; SizeCeilingText (set in
+        // UpdateSummary) says so on screen rather than implying the check has already happened.
 
         SliderMaximumGb = Math.Max(
             DevDriveSizeMath.BytesToGigabytes(DevDriveSizeMath.MinimumSizeBytes),
@@ -654,15 +785,28 @@ public partial class CreateDevDriveViewModel : ObservableObject
 
         if (IsResize)
         {
-            char src = SelectedSourceVolume?.Letter ?? _systemLetter;
+            SourceVolumeOption? source = SelectedSourceVolume;
+            char src = source?.Letter ?? _systemLetter;
+            string sourceAfter = source is null
+                ? string.Empty
+                : ByteSizeFormatter.Format(source.SizeBytes > SelectedBytes ? ToUlong(source.SizeBytes - SelectedBytes) : 0UL);
+
             SummaryTitle = $"{letter}: \u2014 {size} ReFS Dev Drive";
-            SummaryDetail = $"Shrinks {src}:, keeps {remaining} free. Verified before changes.";
+            SummaryDetail = $"{src}: keeps {remaining} free.";
+            ConsequenceText = source is null
+                ? string.Empty
+                : $"Shrink {src}: to {sourceAfter} and create {letter}: at {size}.";
+            SizeCeilingText =
+                $"The maximum is {src}:'s free space. How far it can really shrink is checked before anything changes.";
         }
         else
         {
+            char host = _hostVolume?.Letter ?? _systemLetter;
             string kind = VhdTypeIndex == 0 ? "dynamically expanding" : "fixed-size";
             SummaryTitle = $"{letter}: \u2014 {size} ReFS Dev Drive";
-            SummaryDetail = $"{kind} VHDX. Creates and formats with admin approval. Host keeps {remaining} free.";
+            SummaryDetail = $"A {kind} virtual disk file. {host}: keeps {remaining} free.";
+            ConsequenceText = $"Create {letter}: as a {size} virtual disk file on {host}:, leaving {remaining} free.";
+            SizeCeilingText = $"The maximum is {host}:'s free space, less room for the virtual disk's metadata.";
         }
 
     }
