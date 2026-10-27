@@ -82,7 +82,8 @@ public static class MutationComposition
         if (IsSafeMutationMode)
         {
             // Simulated shrink/repartition/format — nothing is queried, shrunk, partitioned, or formatted.
-            return new SafeFakeVolumeResizer();
+            // Two seconds of simulated work keep the busy state visible to the UI suite.
+            return new SafeFakeVolumeResizer(TimeSpan.FromSeconds(2));
         }
 
         return VolumeResizer.CreateDefault();

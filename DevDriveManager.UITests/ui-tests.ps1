@@ -681,6 +681,14 @@ winapp ui screenshot -a $AppPid -o "screenshots\07-create-confirm.png" 2>$null |
 
 Test-UI "Create: resize completes without another confirmation" {
     winapp ui invoke "PrimaryButton" -a $AppPid 2>$null | Out-Null
+
+    # The safe fake takes ~2 s, so the busy state is observable: nothing may lead out of the room
+    # while an elevated disk operation it started is still running.
+    if (winapp ui wait-for "CreationProgress" -a $AppPid -t 1500 2>$null) {
+        if ((Get-UiaProperty "CancelButton" "IsEnabled") -eq "True") { throw "Cancel is live during the operation" }
+        if ((Get-UiaProperty "NavReclaim" "IsEnabled") -eq "True")   { throw "the rail is live during the operation" }
+    }
+
     winapp ui wait-for "GoToManagementButton" -a $AppPid -t 5000 2>$null | Out-Null
     winapp ui wait-for "PrimaryButton" -a $AppPid --gone -t 3000
 }
