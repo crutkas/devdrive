@@ -87,6 +87,16 @@ public sealed class RecycleBinPromiseTests
     }
 
     [TestMethod]
+    public void ANetworkShareHasNoBin()
+    {
+        RecycleBinVolumeSettings? settings = RecycleBinPreflight.ReadSettings(@"\\build-server\share\");
+
+        Assert.IsNotNull(settings);
+        Assert.IsFalse(settings.HasRecycleBin);
+        Assert.IsTrue(RecycleBinPreflight.Evaluate(1, settings).WillDeletePermanently);
+    }
+
+    [TestMethod]
     public void ThePlanMovesARefusedItemIntoThePermanentGroupWithItsReason()
     {
         ReclaimCandidate fits = Candidate(@"C:\src\a\obj", 10);

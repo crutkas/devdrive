@@ -135,6 +135,13 @@ public static class RecycleBinPreflight
         {
             string root = volumeRoot.EndsWith('\\') ? volumeRoot : volumeRoot + '\\';
 
+            // A network share has no Recycle Bin; the shell deletes from it outright. Decided from the
+            // path alone, so this never touches the network.
+            if (root.StartsWith(@"\\", StringComparison.Ordinal) && !root.StartsWith(@"\\?\", StringComparison.Ordinal))
+            {
+                return new RecycleBinVolumeSettings(root, HasRecycleBin: false, RecyclingDisabled: false, null);
+            }
+
             DriveType type = new DriveInfo(root).DriveType;
             if (type is DriveType.Unknown or DriveType.NoRootDirectory)
             {
