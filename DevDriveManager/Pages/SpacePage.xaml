@@ -98,6 +98,8 @@
                         Height="48" MinWidth="112"
                         AutomationProperties.AutomationId="SpaceCancelScan"
                         AutomationProperties.Name="Cancel"
+                        AutomationProperties.HelpText="Stops this map and the Reclaim scan started with it"
+                        ToolTipService.ToolTip="Stops this map and the Reclaim scan started with it"
                         Click="CancelScanButton_Click"
                         Visibility="{x:Bind local:SpacePage.BoolToVisibility(IsScanning), Mode=OneWay}">
                     <StackPanel Orientation="Horizontal" Spacing="8">

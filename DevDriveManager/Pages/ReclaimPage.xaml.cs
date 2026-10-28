@@ -23,6 +23,9 @@ public sealed partial class ReclaimPage : Page, INotifyPropertyChanged
 
     public ReclaimViewModel ViewModel { get; } = App.SharedReclaim;
 
+    /// <summary>The shared scan, so the bar reports and cancels both halves of "Scan this PC".</summary>
+    public ScanCoordinator Scans => App.Scans;
+
     public string PageTitle => RoomRegistry.Find("reclaim")!.Title;
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -201,11 +204,21 @@ public sealed partial class ReclaimPage : Page, INotifyPropertyChanged
         AutomationProperties.SetAutomationId(recovery, "ReclaimConfirmRecovery");
         body.Children.Add(recovery);
 
+        // When the space comes back is its own line, because "removed" and "freed" are not the same
+        // thing: anything going to the Recycle Bin still occupies the volume until the bin is emptied.
+        var space = new TextBlock
+        {
+            Text = request.SpaceText,
+            TextWrapping = TextWrapping.Wrap,
+        };
+        AutomationProperties.SetAutomationId(space, "ReclaimConfirmSpace");
+        body.Children.Add(space);
+
         if (request.VolumeSplitText.Length > 0)
         {
             body.Children.Add(new TextBlock
             {
-                Text = "Space comes back: " + request.VolumeSplitText,
+                Text = "Selected: " + request.VolumeSplitText,
                 TextWrapping = TextWrapping.Wrap,
                 Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
             });
@@ -313,13 +326,8 @@ public sealed partial class ReclaimPage : Page, INotifyPropertyChanged
 
     private void ScanBar_ScanRequested(object? sender, EventArgs e) => App.ScanEverything();
 
-    private void ScanBar_CancelRequested(object? sender, EventArgs e)
-    {
-        if (ViewModel.CancelScanCommand.CanExecute(null))
-        {
-            ViewModel.CancelScanCommand.Execute(null);
-        }
-    }
+    // The bar's Scan started both the Reclaim scan and the Space walk, so its Cancel stops both.
+    private void ScanBar_CancelRequested(object? sender, EventArgs e) => App.Scans.Cancel();
 
     private void UpdateStatusBar()
     {

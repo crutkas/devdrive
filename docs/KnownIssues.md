@@ -26,8 +26,9 @@ Drive, multiple Dev Drives, and capability-aware real-machine smoke tests.
 `ViewModels/PackageCachesViewModel.cs`, `ViewModels/PerformanceSuiteViewModel.cs`
 
 Refresh can rebuild rows while a cache move or benchmark is still running, removing progress,
-cancellation, and result state from the visible ViewModels. The creation page now blocks navigation while
-its disk operation is active, but the main-page operation lifetime is still unresolved.
+cancellation, and result state from the visible ViewModels. The Create room now blocks every way out
+while its disk operation is active (its Cancel, the rail, and programmatic navigation in the shell), and
+its post-creation refresh is wired at app level; the main-page operation lifetime is still unresolved.
 
 **Next:** own operations above reloadable row collections and gate refresh/navigation on one shared busy
 state.
@@ -59,12 +60,16 @@ writers.
 ### SH-006: Multiple Dev Drives use an arbitrary first result
 
 **Severity:** Warning  
-**Evidence:** `DevDriveManager/ViewModels/MainPageViewModel.cs`
+**Evidence:** `DevDriveManager/ViewModels/MainPageViewModel.cs` (`LoadAsync`, `FirstOrDefault`)
 
 Cache targets, benchmarks, health, and trust use the first detected Dev Drive. A user with multiple Dev
 Drives cannot select or verify the mutation target.
 
 **Next:** add an explicit selected Dev Drive and include its identity in every preview and confirmation.
+The detected letter flows from `MainPageViewModel.LoadAsync` into `InitializeSections`, the cache
+ecosystems, the performance suite, and the trust card, so the selector has to be one shared value those
+four read — and re-target them when it changes — rather than a per-room picker. Deliberately deferred
+from the trust-and-workflow pass instead of shipping a selector that only some rooms honour.
 
 ### SH-007: Drive health is always labelled Healthy
 
@@ -190,7 +195,12 @@ GCs during scans (fewer allocations per node).
 | UI safety assertion recorded a failure and continued into real Move | The script now exits with code `2` before all tests when safe mode is absent. |
 | VHD Browse returned an already-created file rejected by provisioning | Browse now selects a folder and composes a non-existing `.vhdx` path. |
 | Failed/read-only creation outcomes exposed post-create actions | Preview, failure, partial execution, and usable-Dev-Drive states now have separate actions. |
-| Users could leave the creation page during disk mutation | Back and form interaction are blocked while creation/resize is busy. |
+| Users could leave the creation page during disk mutation | Create's Cancel, every other rail item, and shell navigation are blocked while creation/resize is busy; the post-creation refresh no longer depends on the page being loaded. |
+| Reclaim reported recycled items as freed space | Outcomes, progress, the run summary, and the per-volume after-picture separate bytes freed from bytes moved to the Recycle Bin, which free nothing until the bin is emptied. |
+| Reclaim could silently delete items it promised were restorable | Items the bin would refuse (size limit, bin off, policy, no bin) are listed as permanent with a reason before confirmation; at run time a promised-recyclable item the bin refuses is kept, and the shell is asked to warn before any unpredicted permanent delete. |
+| Create showed stale capacity after Reclaim freed space | Revisiting Create re-reads volumes and keeps the user's choices, re-clamping the size. |
+| Space's and Reclaim's Cancel each stopped only half of the shared scan; Overview's Cancel did nothing | One `ScanCoordinator` reports and cancels both halves from every room. |
+| Create and Reclaim needed ~1,000 DIPs of width and did not scroll | Both reflow below a breakpoint (After you create and the Reclaim inspector stack below) and scroll vertically. |
 | Release trimming broke reflection-based JSON paths | Trimming is disabled until source-generated contracts are added. |
 | Elevated helper could prompt for a separately installed .NET runtime | The app now publishes with the .NET and Windows App SDK runtimes bundled; the helper resolves the bundled runtime from the package directory. |
 | Lost or malformed execute output could report that nothing changed | Nonzero helper exits, missing output, and malformed execute results now report state unknown and require disk inspection before retry. |

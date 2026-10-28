@@ -44,8 +44,45 @@ public sealed partial class ShellPage : Page
         ViewModel.LaunchUriRequested += OnLaunchUriRequested;
         ViewModel.PerformanceModeEnableRequested += OnPerformanceModeEnableRequested;
 
+        // The shell lives as long as the window, so this subscription does not need releasing.
+        App.SharedCreate.PropertyChanged += OnCreatePropertyChanged;
+
         Loaded += OnLoaded;
         ActualThemeChanged += OnActualThemeChanged;
+    }
+
+    private const string CreateTag = "create";
+
+    /// <summary>
+    /// True while Create is running a disk operation. Every way out of the room checks it: the rail
+    /// items are disabled, and <see cref="SelectNavItem"/> and <see cref="Navigate"/> refuse anything
+    /// but Create. Leaving would detach the screen from an elevated operation that cannot be stopped,
+    /// and the room's progress and outcome are the only account the user gets of it.
+    /// </summary>
+    private static bool IsNavigationLocked => App.SharedCreate.IsBusy;
+
+    private void OnCreatePropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(CreateDevDriveViewModel.IsBusy))
+        {
+            DispatcherQueue.TryEnqueue(UpdateNavigationLock);
+        }
+    }
+
+    private IEnumerable<NavigationViewItem> AllNavItems() =>
+        ShellNavView.MenuItems.Concat(ShellNavView.FooterMenuItems).OfType<NavigationViewItem>();
+
+    private void UpdateNavigationLock()
+    {
+        bool locked = IsNavigationLocked;
+        foreach (NavigationViewItem item in AllNavItems())
+        {
+            bool isCreate = item.Tag as string == CreateTag;
+            item.IsEnabled = !locked || isCreate;
+            ToolTipService.SetToolTip(item, locked && !isCreate
+                ? "Unavailable while the Dev Drive is being created"
+                : AutomationProperties.GetName(item));
+        }
     }
 
     /// <summary>
@@ -93,10 +130,12 @@ public sealed partial class ShellPage : Page
     /// <summary>Select a top-level nav item by its tag (e.g. "caches"), updating the rail and the content frame.</summary>
     public void SelectNavItem(string tag)
     {
-        NavigationViewItem? item = ShellNavView.MenuItems
-            .Concat(ShellNavView.FooterMenuItems)
-            .OfType<NavigationViewItem>()
-            .FirstOrDefault(item => item.Tag as string == tag);
+        if (IsNavigationLocked && tag != CreateTag)
+        {
+            return;
+        }
+
+        NavigationViewItem? item = AllNavItems().FirstOrDefault(item => item.Tag as string == tag);
         if (item is null) return;
 
         // All callers (including attention signals and the shared Create request) use the same
@@ -147,6 +186,19 @@ public sealed partial class ShellPage : Page
 
     private void Navigate(string tag)
     {
+        if (IsNavigationLocked && tag != CreateTag)
+        {
+            // Put the rail back on Create. Disabled items cannot be clicked, so this is the
+            // programmatic path — keyboard selection, or a caller that skipped SelectNavItem.
+            if (AllNavItems().FirstOrDefault(i => i.Tag as string == CreateTag) is { } create &&
+                !ReferenceEquals(ShellNavView.SelectedItem, create))
+            {
+                ShellNavView.SelectedItem = create;
+            }
+
+            return;
+        }
+
         Type? target = tag == "settings" ? typeof(SettingsPage) : RoomRegistry.Find(tag)?.PageType;
 
         if (target is not null && ContentFrame.CurrentSourcePageType != target)

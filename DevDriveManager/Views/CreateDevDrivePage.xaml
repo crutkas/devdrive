@@ -102,173 +102,60 @@
             The room. The form on the left, the disk you end up with on the right. The default view is
             just the volume, the size and Create; the method and the name sit behind More options
             because the defaults are right for almost everyone.
+
+            Scrolls vertically, because More options and the VHDX fields can outgrow a laptop-height
+            window. Below the Wide breakpoint "After you create" stacks under the form instead of
+            squeezing it: the two cards need about 863 DIPs side by side, plus the 72px rail.
         -->
-        <Grid
+        <ScrollViewer
             Grid.Row="2"
-            Padding="18,11"
-            ColumnSpacing="11">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" MinWidth="480" />
-                <ColumnDefinition Width="336" />
-            </Grid.ColumnDefinitions>
+            AutomationProperties.AutomationId="CreateRoomScroller"
+            HorizontalScrollBarVisibility="Disabled"
+            VerticalScrollBarVisibility="Auto">
+            <Grid
+                x:Name="RoomGrid"
+                Padding="18,11"
+                ColumnSpacing="11">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition x:Name="FormColumn" Width="*" MinWidth="480" />
+                    <ColumnDefinition x:Name="AsideColumn" Width="336" />
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
 
-            <!--  ================= The form =================  -->
-            <Border
-                Grid.Column="0"
-                VerticalAlignment="Top"
-                Style="{StaticResource SmCardStyle}"
-                Visibility="{x:Bind local:CreateDevDrivePage.InvertBoolToVisibility(ViewModel.IsComplete), Mode=OneWay}">
-                <Grid>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                    </Grid.RowDefinitions>
+                <!--  ================= The form =================  -->
+                <Border
+                    Grid.Column="0"
+                    VerticalAlignment="Top"
+                    Style="{StaticResource SmCardStyle}"
+                    Visibility="{x:Bind local:CreateDevDrivePage.InvertBoolToVisibility(ViewModel.IsComplete), Mode=OneWay}">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
 
-                    <Border Grid.Row="0" Style="{StaticResource SmCardHeadStyle}">
-                        <TextBlock
-                            VerticalAlignment="Center"
-                            AutomationProperties.AutomationId="CreateFormHead"
-                            Style="{StaticResource SmCardTitleTextStyle}"
-                            Text="Create a Dev Drive" />
-                    </Border>
-
-                    <ProgressBar
-                        Grid.Row="1"
-                        AutomationProperties.AutomationId="CreationProgress"
-                        IsIndeterminate="True"
-                        Visibility="{x:Bind local:CreateDevDrivePage.BoolToVisibility(ViewModel.IsBusy), Mode=OneWay}" />
-
-                    <StackPanel Grid.Row="2" IsHitTestVisible="{x:Bind local:CreateDevDrivePage.Not(ViewModel.IsBusy), Mode=OneWay}">
-
-                        <!--  ===== Source volume (resize) ===== -->
-                        <Border Style="{StaticResource SmSetRowStyle}" Visibility="{x:Bind local:CreateDevDrivePage.BoolToVisibility(ViewModel.IsResize), Mode=OneWay}">
-                            <Grid ColumnSpacing="14">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-                                <TextBlock
-                                    Grid.Column="0"
-                                    VerticalAlignment="Center"
-                                    Style="{StaticResource SmSetLabelTextStyle}"
-                                    Text="Shrink from" />
-                                <ComboBox
-                                    Grid.Column="1"
-                                    MinWidth="230"
-                                    VerticalAlignment="Center"
-                                    AutomationProperties.AutomationId="ResizeSourceComboBox"
-                                    AutomationProperties.Name="Volume to shrink"
-                                    ItemsSource="{x:Bind ViewModel.AvailableSourceVolumes, Mode=OneWay}"
-                                    SelectedIndex="{x:Bind ViewModel.SelectedSourceVolumeIndex, Mode=TwoWay}"
-                                    Style="{StaticResource SmSetComboStyle}" />
-                            </Grid>
+                        <Border Grid.Row="0" Style="{StaticResource SmCardHeadStyle}">
+                            <TextBlock
+                                VerticalAlignment="Center"
+                                AutomationProperties.AutomationId="CreateFormHead"
+                                Style="{StaticResource SmCardTitleTextStyle}"
+                                Text="Create a Dev Drive" />
                         </Border>
 
-                        <!--  ===== Size ===== -->
-                        <Border Style="{StaticResource SmSetRowStyle}">
-                            <StackPanel Spacing="7">
-                                <Grid ColumnSpacing="10">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock
-                                        Grid.Column="0"
-                                        VerticalAlignment="Center"
-                                        Style="{StaticResource SmSetLabelTextStyle}"
-                                        Text="Size" />
-                                    <StackPanel
-                                        Grid.Column="1"
-                                        Orientation="Horizontal"
-                                        Spacing="7">
-                                        <NumberBox
-                                            Width="128"
-                                            VerticalAlignment="Center"
-                                            AutomationProperties.AutomationId="SizeNumberBox"
-                                            AutomationProperties.Name="Dev Drive size"
-                                            LargeChange="10"
-                                            SmallChange="1"
-                                            SpinButtonPlacementMode="Compact"
-                                            Value="{x:Bind ViewModel.SizeNumberValue, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-                                        <ComboBox
-                                            Width="78"
-                                            VerticalAlignment="Center"
-                                            AutomationProperties.AutomationId="SizeUnitComboBox"
-                                            AutomationProperties.Name="Size unit"
-                                            SelectedIndex="{x:Bind ViewModel.SizeUnitIndex, Mode=TwoWay}"
-                                            Style="{StaticResource SmSetComboStyle}">
-                                            <ComboBoxItem AutomationProperties.AutomationId="SizeUnitGb" Content="GB" />
-                                            <ComboBoxItem AutomationProperties.AutomationId="SizeUnitMb" Content="MB" />
-                                        </ComboBox>
-                                    </StackPanel>
-                                </Grid>
+                        <ProgressBar
+                            Grid.Row="1"
+                            AutomationProperties.AutomationId="CreationProgress"
+                            IsIndeterminate="True"
+                            Visibility="{x:Bind local:CreateDevDrivePage.BoolToVisibility(ViewModel.IsBusy), Mode=OneWay}" />
 
-                                <!--  The slider's two ends sit beside it: the minimum on the left, the ceiling on the right.  -->
-                                <Grid ColumnSpacing="10">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock
-                                        Grid.Column="0"
-                                        VerticalAlignment="Center"
-                                        Style="{StaticResource SmSetSubTextStyle}"
-                                        Text="50 GB" />
-                                    <Slider
-                                        Grid.Column="1"
-                                        VerticalAlignment="Center"
-                                        AutomationProperties.AutomationId="SizeSlider"
-                                        AutomationProperties.Name="Dev Drive size in gigabytes"
-                                        Maximum="{x:Bind ViewModel.SliderMaximumGb, Mode=OneWay}"
-                                        Minimum="50"
-                                        StepFrequency="1"
-                                        Value="{x:Bind ViewModel.SliderValueGb, Mode=TwoWay}" />
-                                    <TextBlock
-                                        Grid.Column="2"
-                                        VerticalAlignment="Center"
-                                        AutomationProperties.AutomationId="SizeMaximumTick"
-                                        Style="{StaticResource SmSetSubTextStyle}"
-                                        Text="{x:Bind MaximumTickText, Mode=OneWay}" />
-                                </Grid>
+                        <StackPanel Grid.Row="2" IsHitTestVisible="{x:Bind local:CreateDevDrivePage.Not(ViewModel.IsBusy), Mode=OneWay}">
 
-                                <TextBlock
-                                    AutomationProperties.AutomationId="SizeErrorText"
-                                    Foreground="{ThemeResource SmBadBrush}"
-                                    Style="{StaticResource SmSetSubTextStyle}"
-                                    Text="{x:Bind ViewModel.SizeErrorText, Mode=OneWay}"
-                                    TextWrapping="Wrap"
-                                    Visibility="{x:Bind local:CreateDevDrivePage.BoolToVisibility(ViewModel.HasSizeError), Mode=OneWay}" />
-                            </StackPanel>
-                        </Border>
-
-                        <!--  ===== More options: method, letter, label ===== -->
-                        <Expander
-                            Margin="14,12,14,0"
-                            HorizontalAlignment="Stretch"
-                            HorizontalContentAlignment="Stretch"
-                            AutomationProperties.AutomationId="MoreOptionsExpander"
-                            AutomationProperties.Name="More options"
-                            Header="More options">
-                            <StackPanel Spacing="12">
-                                <!--  RadioButtons in one parent auto-group, so arrow keys move between them.  -->
-                                <StackPanel Spacing="2">
-                                    <TextBlock Style="{StaticResource SmSetLabelTextStyle}" Text="Method" />
-                                    <RadioButton
-                                        AutomationProperties.AutomationId="MethodResizeOption"
-                                        AutomationProperties.Name="Shrink a volume. Recommended."
-                                        Checked="MethodResize_Checked"
-                                        Content="Shrink a volume (recommended)"
-                                        IsChecked="{x:Bind ViewModel.IsResize, Mode=OneWay}" />
-                                    <RadioButton
-                                        AutomationProperties.AutomationId="MethodVhdxOption"
-                                        AutomationProperties.Name="Virtual disk, VHDX"
-                                        Checked="MethodVhdx_Checked"
-                                        Content="Virtual disk (VHDX)"
-                                        IsChecked="{x:Bind ViewModel.IsVhdx, Mode=OneWay}" />
-                                </StackPanel>
-
+                            <!--  ===== Source volume (resize) ===== -->
+                            <Border Style="{StaticResource SmSetRowStyle}" Visibility="{x:Bind local:CreateDevDrivePage.BoolToVisibility(ViewModel.IsResize), Mode=OneWay}">
                                 <Grid ColumnSpacing="14">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
@@ -278,257 +165,434 @@
                                         Grid.Column="0"
                                         VerticalAlignment="Center"
                                         Style="{StaticResource SmSetLabelTextStyle}"
-                                        Text="Letter and label" />
-                                    <StackPanel
+                                        Text="Shrink from" />
+                                    <ComboBox
                                         Grid.Column="1"
-                                        Orientation="Horizontal"
-                                        Spacing="7">
-                                        <ComboBox
-                                            Width="82"
-                                            VerticalAlignment="Center"
-                                            AutomationProperties.AutomationId="DriveLetterComboBox"
-                                            AutomationProperties.Name="Drive letter"
-                                            ItemsSource="{x:Bind ViewModel.AvailableDriveLetters, Mode=OneWay}"
-                                            SelectedItem="{x:Bind ViewModel.SelectedDriveLetter, Mode=TwoWay}"
-                                            Style="{StaticResource SmSetComboStyle}" />
-                                        <TextBox
-                                            Width="184"
-                                            VerticalAlignment="Center"
-                                            AutomationProperties.AutomationId="LabelTextBox"
-                                            AutomationProperties.Name="Drive label"
-                                            PlaceholderText="DevDrive"
-                                            Text="{x:Bind ViewModel.Label, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-                                    </StackPanel>
+                                        MinWidth="230"
+                                        VerticalAlignment="Center"
+                                        AutomationProperties.AutomationId="ResizeSourceComboBox"
+                                        AutomationProperties.Name="Volume to shrink"
+                                        ItemsSource="{x:Bind ViewModel.AvailableSourceVolumes, Mode=OneWay}"
+                                        SelectedIndex="{x:Bind ViewModel.SelectedSourceVolumeIndex, Mode=TwoWay}"
+                                        Style="{StaticResource SmSetComboStyle}" />
                                 </Grid>
+                            </Border>
 
-                                <!--  ===== Virtual disk file (VHDX) ===== -->
-                                <Border Visibility="{x:Bind local:CreateDevDrivePage.BoolToVisibility(ViewModel.IsVhdx), Mode=OneWay}">
-                                    <StackPanel Spacing="7">
-                                        <TextBlock Style="{StaticResource SmSetLabelTextStyle}" Text="Virtual disk file" />
-                                        <Grid ColumnSpacing="9">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <TextBox
-                                                Grid.Column="0"
-                                                AutomationProperties.AutomationId="VhdPathTextBox"
-                                                AutomationProperties.Name="Virtual disk file path"
-                                                PlaceholderText="C:\DevDrives\DevDrive.vhdx"
-                                                Text="{x:Bind ViewModel.VhdFilePath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-                                            <Button
-                                                Grid.Column="1"
-                                                AutomationProperties.AutomationId="BrowseVhdButton"
-                                                Command="{x:Bind ViewModel.BrowseVhdPathCommand}"
-                                                Content="Browse&#8230;" />
-                                        </Grid>
-                                        <ComboBox
-                                            HorizontalAlignment="Stretch"
-                                            AutomationProperties.AutomationId="VhdTypeComboBox"
-                                            AutomationProperties.Name="Virtual disk type"
-                                            SelectedIndex="{x:Bind ViewModel.VhdTypeIndex, Mode=TwoWay}"
-                                            Style="{StaticResource SmSetComboStyle}">
-                                            <ComboBoxItem AutomationProperties.AutomationId="VhdTypeDynamic" Content="Dynamically expanding" />
-                                            <ComboBoxItem AutomationProperties.AutomationId="VhdTypeFixed" Content="Fixed size" />
-                                        </ComboBox>
+                            <!--  ===== Size ===== -->
+                            <Border Style="{StaticResource SmSetRowStyle}">
+                                <StackPanel Spacing="7">
+                                    <Grid ColumnSpacing="10">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock
+                                            Grid.Column="0"
+                                            VerticalAlignment="Center"
+                                            Style="{StaticResource SmSetLabelTextStyle}"
+                                            Text="Size" />
+                                        <StackPanel
+                                            Grid.Column="1"
+                                            Orientation="Horizontal"
+                                            Spacing="7">
+                                            <NumberBox
+                                                Width="128"
+                                                VerticalAlignment="Center"
+                                                AutomationProperties.AutomationId="SizeNumberBox"
+                                                AutomationProperties.Name="Dev Drive size"
+                                                LargeChange="10"
+                                                SmallChange="1"
+                                                SpinButtonPlacementMode="Compact"
+                                                Value="{x:Bind ViewModel.SizeNumberValue, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                            <ComboBox
+                                                Width="78"
+                                                VerticalAlignment="Center"
+                                                AutomationProperties.AutomationId="SizeUnitComboBox"
+                                                AutomationProperties.Name="Size unit"
+                                                SelectedIndex="{x:Bind ViewModel.SizeUnitIndex, Mode=TwoWay}"
+                                                Style="{StaticResource SmSetComboStyle}">
+                                                <ComboBoxItem AutomationProperties.AutomationId="SizeUnitGb" Content="GB" />
+                                                <ComboBoxItem AutomationProperties.AutomationId="SizeUnitMb" Content="MB" />
+                                            </ComboBox>
+                                        </StackPanel>
+                                    </Grid>
+
+                                    <!--  The slider's two ends sit beside it: the minimum on the left, the ceiling on the right.  -->
+                                    <Grid ColumnSpacing="10">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock
+                                            Grid.Column="0"
+                                            VerticalAlignment="Center"
+                                            Style="{StaticResource SmSetSubTextStyle}"
+                                            Text="50 GB" />
+                                        <Slider
+                                            Grid.Column="1"
+                                            VerticalAlignment="Center"
+                                            AutomationProperties.AutomationId="SizeSlider"
+                                            AutomationProperties.Name="Dev Drive size in gigabytes"
+                                            Maximum="{x:Bind ViewModel.SliderMaximumGb, Mode=OneWay}"
+                                            Minimum="50"
+                                            StepFrequency="1"
+                                            Value="{x:Bind ViewModel.SliderValueGb, Mode=TwoWay}" />
+                                        <TextBlock
+                                            Grid.Column="2"
+                                            VerticalAlignment="Center"
+                                            AutomationProperties.AutomationId="SizeMaximumTick"
+                                            Style="{StaticResource SmSetSubTextStyle}"
+                                            Text="{x:Bind MaximumTickText, Mode=OneWay}" />
+                                    </Grid>
+
+                                    <TextBlock
+                                        AutomationProperties.AutomationId="SizeErrorText"
+                                        Foreground="{ThemeResource SmBadBrush}"
+                                        Style="{StaticResource SmSetSubTextStyle}"
+                                        Text="{x:Bind ViewModel.SizeErrorText, Mode=OneWay}"
+                                        TextWrapping="Wrap"
+                                        Visibility="{x:Bind local:CreateDevDrivePage.BoolToVisibility(ViewModel.HasSizeError), Mode=OneWay}" />
+
+                                    <!--  What the right-hand end of the slider is, and for a shrink, what it is not.  -->
+                                    <TextBlock
+                                        AutomationProperties.AutomationId="SizeCeilingText"
+                                        Style="{StaticResource SmSetSubTextStyle}"
+                                        Text="{x:Bind ViewModel.SizeCeilingText, Mode=OneWay}"
+                                        TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Border>
+
+                            <!--
+                                The consequence, in one line, outside More options. The defaults are right
+                                for almost everyone, so the options stay folded — but what Create is about
+                                to do to the machine is never something to expand a panel to learn.
+                            -->
+                            <TextBlock
+                                Padding="14,12,14,0"
+                                AutomationProperties.AutomationId="CreateConsequence"
+                                Style="{StaticResource SmSetLabelTextStyle}"
+                                Text="{x:Bind ViewModel.ConsequenceText, Mode=OneWay}"
+                                TextWrapping="Wrap" />
+
+                            <!--  ===== More options: method, letter, label ===== -->
+                            <Expander
+                                Margin="14,12,14,0"
+                                HorizontalAlignment="Stretch"
+                                HorizontalContentAlignment="Stretch"
+                                AutomationProperties.AutomationId="MoreOptionsExpander"
+                                AutomationProperties.Name="More options"
+                                Header="More options">
+                                <StackPanel Spacing="12">
+                                    <!--  RadioButtons in one parent auto-group, so arrow keys move between them.  -->
+                                    <StackPanel Spacing="2">
+                                        <TextBlock Style="{StaticResource SmSetLabelTextStyle}" Text="Method" />
+                                        <RadioButton
+                                            AutomationProperties.AutomationId="MethodResizeOption"
+                                            AutomationProperties.Name="Shrink a volume. Recommended."
+                                            Checked="MethodResize_Checked"
+                                            Content="Shrink a volume (recommended)"
+                                            IsChecked="{x:Bind ViewModel.IsResize, Mode=OneWay}" />
+                                        <RadioButton
+                                            AutomationProperties.AutomationId="MethodVhdxOption"
+                                            AutomationProperties.Name="Virtual disk, VHDX"
+                                            Checked="MethodVhdx_Checked"
+                                            Content="Virtual disk (VHDX)"
+                                            IsChecked="{x:Bind ViewModel.IsVhdx, Mode=OneWay}" />
                                     </StackPanel>
-                                </Border>
-                            </StackPanel>
-                        </Expander>
 
-                        <!--  One line pointing at Reclaim, only when it has found something safe to free.  -->
-                        <Grid
-                            Padding="14,12,14,0"
-                            ColumnSpacing="12"
-                            Visibility="{x:Bind local:CreateDevDrivePage.BoolToVisibility(HasReclaimTieIn), Mode=OneWay}">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <TextBlock
-                                Grid.Column="0"
-                                VerticalAlignment="Center"
-                                AutomationProperties.AutomationId="ReclaimTieIn"
-                                Style="{StaticResource SmSetSubTextStyle}"
-                                Text="{x:Bind ReclaimTieInText, Mode=OneWay}"
-                                TextWrapping="Wrap" />
-                            <Button
-                                Grid.Column="1"
-                                Padding="11,4"
-                                VerticalAlignment="Center"
-                                AutomationProperties.AutomationId="FindSpaceFirstButton"
-                                Click="FindSpaceFirst_Click"
-                                Content="{x:Bind ReclaimTieInAction, Mode=OneWay}"
-                                Style="{StaticResource SmChipButtonStyle}" />
-                        </Grid>
+                                    <Grid ColumnSpacing="14">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock
+                                            Grid.Column="0"
+                                            VerticalAlignment="Center"
+                                            Style="{StaticResource SmSetLabelTextStyle}"
+                                            Text="Letter and label" />
+                                        <StackPanel
+                                            Grid.Column="1"
+                                            Orientation="Horizontal"
+                                            Spacing="7">
+                                            <ComboBox
+                                                Width="82"
+                                                VerticalAlignment="Center"
+                                                AutomationProperties.AutomationId="DriveLetterComboBox"
+                                                AutomationProperties.Name="Drive letter"
+                                                ItemsSource="{x:Bind ViewModel.AvailableDriveLetters, Mode=OneWay}"
+                                                SelectedItem="{x:Bind ViewModel.SelectedDriveLetter, Mode=TwoWay}"
+                                                Style="{StaticResource SmSetComboStyle}" />
+                                            <TextBox
+                                                Width="184"
+                                                VerticalAlignment="Center"
+                                                AutomationProperties.AutomationId="LabelTextBox"
+                                                AutomationProperties.Name="Drive label"
+                                                PlaceholderText="DevDrive"
+                                                Text="{x:Bind ViewModel.Label, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                        </StackPanel>
+                                    </Grid>
 
-                        <Border
-                            Padding="14,12,14,0"
-                            Visibility="{x:Bind local:CreateDevDrivePage.InvertBoolToVisibility(ViewModel.HasEligibleSource), Mode=OneWay}">
-                            <TextBlock
-                                AutomationProperties.AutomationId="NoSourceInfoBar"
-                                Foreground="{ThemeResource SmWarnBrush}"
-                                Style="{StaticResource SmKeyValueTextStyle}"
-                                Text="{x:Bind ViewModel.NoSourceMessage, Mode=OneWay}"
-                                TextWrapping="Wrap" />
-                        </Border>
+                                    <!--  ===== Virtual disk file (VHDX) ===== -->
+                                    <Border Visibility="{x:Bind local:CreateDevDrivePage.BoolToVisibility(ViewModel.IsVhdx), Mode=OneWay}">
+                                        <StackPanel Spacing="7">
+                                            <TextBlock Style="{StaticResource SmSetLabelTextStyle}" Text="Virtual disk file" />
+                                            <Grid ColumnSpacing="9">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBox
+                                                    Grid.Column="0"
+                                                    AutomationProperties.AutomationId="VhdPathTextBox"
+                                                    AutomationProperties.Name="Virtual disk file path"
+                                                    PlaceholderText="C:\DevDrives\DevDrive.vhdx"
+                                                    Text="{x:Bind ViewModel.VhdFilePath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                                <Button
+                                                    Grid.Column="1"
+                                                    AutomationProperties.AutomationId="BrowseVhdButton"
+                                                    Command="{x:Bind ViewModel.BrowseVhdPathCommand}"
+                                                    Content="Browse&#8230;" />
+                                            </Grid>
+                                            <ComboBox
+                                                HorizontalAlignment="Stretch"
+                                                AutomationProperties.AutomationId="VhdTypeComboBox"
+                                                AutomationProperties.Name="Virtual disk type"
+                                                SelectedIndex="{x:Bind ViewModel.VhdTypeIndex, Mode=TwoWay}"
+                                                Style="{StaticResource SmSetComboStyle}">
+                                                <ComboBoxItem AutomationProperties.AutomationId="VhdTypeDynamic" Content="Dynamically expanding" />
+                                                <ComboBoxItem AutomationProperties.AutomationId="VhdTypeFixed" Content="Fixed size" />
+                                            </ComboBox>
+                                        </StackPanel>
+                                    </Border>
+                                </StackPanel>
+                            </Expander>
 
-                        <Border
-                            Padding="14,12,14,0"
-                            Visibility="{x:Bind local:CreateDevDrivePage.BoolToVisibility(ViewModel.HasError), Mode=OneWay}">
-                            <TextBlock
-                                AutomationProperties.AutomationId="ErrorInfoBar"
-                                Foreground="{ThemeResource SmBadBrush}"
-                                Style="{StaticResource SmKeyValueTextStyle}"
-                                Text="{x:Bind ViewModel.ErrorMessage, Mode=OneWay}"
-                                TextWrapping="Wrap" />
-                        </Border>
-
-                        <Border Height="14" />
-                    </StackPanel>
-                </Grid>
-            </Border>
-
-            <!--  ================= After you create =================  -->
-            <Border
-                Grid.Column="1"
-                VerticalAlignment="Top"
-                Style="{StaticResource SmCardStyle}"
-                Visibility="{x:Bind local:CreateDevDrivePage.InvertBoolToVisibility(ViewModel.IsComplete), Mode=OneWay}">
-                <Grid>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                    </Grid.RowDefinitions>
-
-                    <Border Grid.Row="0" Style="{StaticResource SmCardHeadStyle}">
-                        <TextBlock
-                            VerticalAlignment="Center"
-                            AutomationProperties.AutomationId="AfterCreateHead"
-                            Style="{StaticResource SmCardTitleTextStyle}"
-                            Text="After you create" />
-                    </Border>
-
-                    <StackPanel
-                        Grid.Row="1"
-                        Padding="14,12"
-                        Spacing="10">
-                        <controls:DevDriveDiskBar
-                            AutomationProperties.AutomationId="DevDriveDiskBar"
-                            DevDriveLabel="{x:Bind ViewModel.DevBarLabel, Mode=OneWay}"
-                            LowFreeFraction="{x:Bind ViewModel.LowFreeFraction}"
-                            MaximumSelectableBytes="{x:Bind ViewModel.MaximumSelectableBytes, Mode=OneWay}"
-                            RemainingLabel="{x:Bind ViewModel.RemainingBarLabel, Mode=OneWay}"
-                            SelectedBytes="{x:Bind ViewModel.SelectedBytes, Mode=TwoWay}"
-                            TotalBytes="{x:Bind ViewModel.TotalBytes, Mode=OneWay}"
-                            UsedBytes="{x:Bind ViewModel.UsedBytes, Mode=OneWay}"
-                            UsedLabel="{x:Bind ViewModel.UsedBarLabel, Mode=OneWay}" />
-
-                        <TextBlock
-                            AutomationProperties.AutomationId="AfterCreateTitle"
-                            Style="{StaticResource SmSetLabelTextStyle}"
-                            Text="{x:Bind ViewModel.SummaryTitle, Mode=OneWay}"
-                            TextWrapping="Wrap" />
-
-                        <TextBlock
-                            AutomationProperties.AutomationId="GuardrailsInfoBar"
-                            Style="{StaticResource SmSetSubTextStyle}"
-                            Text="Checked before anything changes. Windows asks for approval once."
-                            TextWrapping="Wrap" />
-                    </StackPanel>
-                </Grid>
-            </Border>
-
-            <!--  ================= Done =================  -->
-            <!--
-                Top-aligned rather than stretched. The work is finished, so the room has nothing more
-                to say; a card stretched down the page to hold two buttons reads as content that failed
-                to load. What the machine now looks like is already answered by the strip above.
-            -->
-            <Border
-                Grid.Column="0"
-                Grid.ColumnSpan="2"
-                MaxWidth="920"
-                HorizontalAlignment="Left"
-                VerticalAlignment="Top"
-                Style="{StaticResource SmCardStyle}"
-                Visibility="{x:Bind local:CreateDevDrivePage.BoolToVisibility(ViewModel.IsComplete), Mode=OneWay}">
-                <Grid>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                    </Grid.RowDefinitions>
-
-                    <Border Grid.Row="0" Style="{StaticResource SmCardHeadStyle}">
-                        <TextBlock
-                            VerticalAlignment="Center"
-                            AutomationProperties.AutomationId="CompletionTitle"
-                            Style="{StaticResource SmCardTitleTextStyle}"
-                            Text="{x:Bind ViewModel.CompletionTitle, Mode=OneWay}" />
-                    </Border>
-
-                    <StackPanel
-                        Grid.Row="1"
-                        Padding="14,12"
-                        Spacing="14">
-                        <TextBlock
-                            AutomationProperties.AutomationId="CompletionMessage"
-                            Style="{StaticResource SmKeyValueTextStyle}"
-                            Text="{x:Bind ViewModel.CompletionMessage, Mode=OneWay}"
-                            TextWrapping="Wrap" />
-
-                        <StackPanel Spacing="7" Visibility="{x:Bind local:CreateDevDrivePage.BoolToVisibility(ViewModel.HasUsableDevDrive), Mode=OneWay}">
-                            <TextBlock Style="{StaticResource SmSectionLabelTextStyle}" Text="NEXT" />
-
-                            <!--  Two doors, side by side: neither is the recommended one.  -->
-                            <Grid ColumnSpacing="11">
+                            <!--  One line pointing at Reclaim, only when it has found something safe to free.  -->
+                            <Grid
+                                Padding="14,12,14,0"
+                                ColumnSpacing="12"
+                                Visibility="{x:Bind local:CreateDevDrivePage.BoolToVisibility(HasReclaimTieIn), Mode=OneWay}">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
-                                <Button
+                                <TextBlock
                                     Grid.Column="0"
-                                    Padding="13,10"
-                                    HorizontalAlignment="Stretch"
-                                    VerticalAlignment="Stretch"
-                                    HorizontalContentAlignment="Left"
-                                    AutomationProperties.AutomationId="MovePackageCachesButton"
-                                    Click="GoToCaches_Click">
-                                    <StackPanel Spacing="2">
-                                        <TextBlock Style="{StaticResource SmSetLabelTextStyle}" Text="Move package caches here" />
-                                        <TextBlock
-                                            Style="{StaticResource SmSetSubTextStyle}"
-                                            Text="Point npm, NuGet, pip and friends at the new drive. Reversible."
-                                            TextWrapping="Wrap" />
-                                    </StackPanel>
-                                </Button>
+                                    VerticalAlignment="Center"
+                                    AutomationProperties.AutomationId="ReclaimTieIn"
+                                    Style="{StaticResource SmSetSubTextStyle}"
+                                    Text="{x:Bind ReclaimTieInText, Mode=OneWay}"
+                                    TextWrapping="Wrap" />
                                 <Button
                                     Grid.Column="1"
-                                    Padding="13,10"
-                                    HorizontalAlignment="Stretch"
-                                    VerticalAlignment="Stretch"
-                                    HorizontalContentAlignment="Left"
-                                    AutomationProperties.AutomationId="RunSpeedTestButton"
-                                    Click="GoToBenchmarks_Click">
-                                    <StackPanel Spacing="2">
-                                        <TextBlock Style="{StaticResource SmSetLabelTextStyle}" Text="Measure it" />
-                                        <TextBlock
-                                            Style="{StaticResource SmSetSubTextStyle}"
-                                            Text="Run the build workloads on the new drive and compare."
-                                            TextWrapping="Wrap" />
-                                    </StackPanel>
-                                </Button>
+                                    Padding="11,4"
+                                    VerticalAlignment="Center"
+                                    AutomationProperties.AutomationId="FindSpaceFirstButton"
+                                    Click="FindSpaceFirst_Click"
+                                    Content="{x:Bind ReclaimTieInAction, Mode=OneWay}"
+                                    Style="{StaticResource SmChipButtonStyle}" />
                             </Grid>
+
+                            <Border
+                                Padding="14,12,14,0"
+                                Visibility="{x:Bind local:CreateDevDrivePage.InvertBoolToVisibility(ViewModel.HasEligibleSource), Mode=OneWay}">
+                                <TextBlock
+                                    AutomationProperties.AutomationId="NoSourceInfoBar"
+                                    Foreground="{ThemeResource SmWarnBrush}"
+                                    Style="{StaticResource SmKeyValueTextStyle}"
+                                    Text="{x:Bind ViewModel.NoSourceMessage, Mode=OneWay}"
+                                    TextWrapping="Wrap" />
+                            </Border>
+
+                            <Border
+                                Padding="14,12,14,0"
+                                Visibility="{x:Bind local:CreateDevDrivePage.BoolToVisibility(ViewModel.HasError), Mode=OneWay}">
+                                <TextBlock
+                                    AutomationProperties.AutomationId="ErrorInfoBar"
+                                    Foreground="{ThemeResource SmBadBrush}"
+                                    Style="{StaticResource SmKeyValueTextStyle}"
+                                    Text="{x:Bind ViewModel.ErrorMessage, Mode=OneWay}"
+                                    TextWrapping="Wrap" />
+                            </Border>
+
+                            <Border Height="14" />
                         </StackPanel>
-                    </StackPanel>
-                </Grid>
-            </Border>
-        </Grid>
+                    </Grid>
+                </Border>
+
+                <!--  ================= After you create =================  -->
+                <Border
+                    x:Name="AfterCreateCard"
+                    Grid.Column="1"
+                    VerticalAlignment="Top"
+                    Style="{StaticResource SmCardStyle}"
+                    Visibility="{x:Bind local:CreateDevDrivePage.InvertBoolToVisibility(ViewModel.IsComplete), Mode=OneWay}">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <Border Grid.Row="0" Style="{StaticResource SmCardHeadStyle}">
+                            <TextBlock
+                                VerticalAlignment="Center"
+                                AutomationProperties.AutomationId="AfterCreateHead"
+                                Style="{StaticResource SmCardTitleTextStyle}"
+                                Text="After you create" />
+                        </Border>
+
+                        <StackPanel
+                            Grid.Row="1"
+                            Padding="14,12"
+                            Spacing="10">
+                            <controls:DevDriveDiskBar
+                                AutomationProperties.AutomationId="DevDriveDiskBar"
+                                DevDriveLabel="{x:Bind ViewModel.DevBarLabel, Mode=OneWay}"
+                                LowFreeFraction="{x:Bind ViewModel.LowFreeFraction}"
+                                MaximumSelectableBytes="{x:Bind ViewModel.MaximumSelectableBytes, Mode=OneWay}"
+                                RemainingLabel="{x:Bind ViewModel.RemainingBarLabel, Mode=OneWay}"
+                                SelectedBytes="{x:Bind ViewModel.SelectedBytes, Mode=TwoWay}"
+                                TotalBytes="{x:Bind ViewModel.TotalBytes, Mode=OneWay}"
+                                UsedBytes="{x:Bind ViewModel.UsedBytes, Mode=OneWay}"
+                                UsedLabel="{x:Bind ViewModel.UsedBarLabel, Mode=OneWay}" />
+
+                            <TextBlock
+                                AutomationProperties.AutomationId="AfterCreateTitle"
+                                Style="{StaticResource SmSetLabelTextStyle}"
+                                Text="{x:Bind ViewModel.SummaryTitle, Mode=OneWay}"
+                                TextWrapping="Wrap" />
+
+                            <TextBlock
+                                AutomationProperties.AutomationId="AfterCreateDetail"
+                                Style="{StaticResource SmSetSubTextStyle}"
+                                Text="{x:Bind ViewModel.SummaryDetail, Mode=OneWay}"
+                                TextWrapping="Wrap" />
+
+                            <TextBlock
+                                AutomationProperties.AutomationId="GuardrailsInfoBar"
+                                Style="{StaticResource SmSetSubTextStyle}"
+                                Text="Checked before anything changes. Windows asks for approval once."
+                                TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Grid>
+                </Border>
+
+                <!--  ================= Done =================  -->
+                <!--
+                    Top-aligned rather than stretched. The work is finished, so the room has nothing more
+                    to say; a card stretched down the page to hold two buttons reads as content that failed
+                    to load. What the machine now looks like is already answered by the strip above.
+                -->
+                <Border
+                    Grid.Column="0"
+                    Grid.ColumnSpan="2"
+                    MaxWidth="920"
+                    HorizontalAlignment="Left"
+                    VerticalAlignment="Top"
+                    Style="{StaticResource SmCardStyle}"
+                    Visibility="{x:Bind local:CreateDevDrivePage.BoolToVisibility(ViewModel.IsComplete), Mode=OneWay}">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <Border Grid.Row="0" Style="{StaticResource SmCardHeadStyle}">
+                            <TextBlock
+                                VerticalAlignment="Center"
+                                AutomationProperties.AutomationId="CompletionTitle"
+                                Style="{StaticResource SmCardTitleTextStyle}"
+                                Text="{x:Bind ViewModel.CompletionTitle, Mode=OneWay}" />
+                        </Border>
+
+                        <StackPanel
+                            Grid.Row="1"
+                            Padding="14,12"
+                            Spacing="14">
+                            <TextBlock
+                                AutomationProperties.AutomationId="CompletionMessage"
+                                Style="{StaticResource SmKeyValueTextStyle}"
+                                Text="{x:Bind ViewModel.CompletionMessage, Mode=OneWay}"
+                                TextWrapping="Wrap" />
+
+                            <StackPanel Spacing="7" Visibility="{x:Bind local:CreateDevDrivePage.BoolToVisibility(ViewModel.HasUsableDevDrive), Mode=OneWay}">
+                                <TextBlock Style="{StaticResource SmSectionLabelTextStyle}" Text="NEXT" />
+
+                                <!--  Two doors, side by side: neither is the recommended one.  -->
+                                <Grid ColumnSpacing="11">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Button
+                                        Grid.Column="0"
+                                        Padding="13,10"
+                                        HorizontalAlignment="Stretch"
+                                        VerticalAlignment="Stretch"
+                                        HorizontalContentAlignment="Left"
+                                        AutomationProperties.AutomationId="MovePackageCachesButton"
+                                        Click="GoToCaches_Click">
+                                        <StackPanel Spacing="2">
+                                            <TextBlock Style="{StaticResource SmSetLabelTextStyle}" Text="Move package caches here" />
+                                            <TextBlock
+                                                Style="{StaticResource SmSetSubTextStyle}"
+                                                Text="Point npm, NuGet, pip and friends at the new drive. Reversible."
+                                                TextWrapping="Wrap" />
+                                        </StackPanel>
+                                    </Button>
+                                    <Button
+                                        Grid.Column="1"
+                                        Padding="13,10"
+                                        HorizontalAlignment="Stretch"
+                                        VerticalAlignment="Stretch"
+                                        HorizontalContentAlignment="Left"
+                                        AutomationProperties.AutomationId="RunSpeedTestButton"
+                                        Click="GoToBenchmarks_Click">
+                                        <StackPanel Spacing="2">
+                                            <TextBlock Style="{StaticResource SmSetLabelTextStyle}" Text="Measure it" />
+                                            <TextBlock
+                                                Style="{StaticResource SmSetSubTextStyle}"
+                                                Text="Run the build workloads on the new drive and compare."
+                                                TextWrapping="Wrap" />
+                                        </StackPanel>
+                                    </Button>
+                                </Grid>
+                            </StackPanel>
+                        </StackPanel>
+                    </Grid>
+                </Border>
+            </Grid>
+        </ScrollViewer>
 
         <controls:RoomStatusBar
             x:Name="StatusBar"
             Grid.Row="3"
             AutomationProperties.AutomationId="CreateStatusBar"
             AutomationProperties.Name="Create status" />
+
+        <VisualStateManager.VisualStateGroups>
+            <VisualStateGroup x:Name="WidthStates">
+                <!--  863 DIPs of cards + 72 of rail + slack. Below it, stack rather than squeeze.  -->
+                <VisualState x:Name="Wide">
+                    <VisualState.StateTriggers>
+                        <AdaptiveTrigger MinWindowWidth="960" />
+                    </VisualState.StateTriggers>
+                </VisualState>
+                <VisualState x:Name="Narrow">
+                    <VisualState.StateTriggers>
+                        <AdaptiveTrigger MinWindowWidth="0" />
+                    </VisualState.StateTriggers>
+                    <VisualState.Setters>
+                        <Setter Target="FormColumn.MinWidth" Value="0" />
+                        <Setter Target="AsideColumn.Width" Value="0" />
+                        <Setter Target="RoomGrid.ColumnSpacing" Value="0" />
+                        <Setter Target="AfterCreateCard.(Grid.Column)" Value="0" />
+                        <Setter Target="AfterCreateCard.(Grid.Row)" Value="1" />
+                        <Setter Target="AfterCreateCard.Margin" Value="0,11,0,0" />
+                    </VisualState.Setters>
+                </VisualState>
+            </VisualStateGroup>
+        </VisualStateManager.VisualStateGroups>
     </Grid>
 </Page>

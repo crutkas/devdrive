@@ -638,8 +638,8 @@
                     </Border>
 
                     <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
-                        <StackPanel Padding="13,12,13,14">
-                            <Grid Margin="0,0,0,12" ColumnSpacing="9">
+                        <StackPanel Padding="13,12,13,14" Spacing="2">
+                            <Grid Margin="0,0,0,16" ColumnSpacing="9">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="*" />
@@ -670,36 +670,33 @@
                                 </Border>
                             </Grid>
 
-                            <TextBlock Style="{StaticResource SmSectionLabelTextStyle}" Text="WHAT THIS MEASURES" />
+                            <TextBlock Style="{StaticResource SmInspectorHeadingTextStyle}" Text="What" />
                             <TextBlock
-                                Margin="0,0,0,10"
+                                Margin="0,0,0,16"
                                 AutomationProperties.AutomationId="BenchInspectorWhat"
-                                Style="{StaticResource SmKeyValueTextStyle}"
-                                Text="{x:Bind InspectorWhat, Mode=OneWay}"
-                                TextWrapping="Wrap" />
+                                Style="{StaticResource SmInspectorBodyTextStyle}"
+                                Text="{x:Bind InspectorWhat, Mode=OneWay}" />
 
-                            <TextBlock Style="{StaticResource SmSectionLabelTextStyle}" Text="THE COMMAND IT RUNS" />
+                            <TextBlock Style="{StaticResource SmInspectorHeadingTextStyle}" Text="Command" />
                             <TextBlock
-                                Margin="0,0,0,10"
+                                Margin="0,2,0,16"
                                 AutomationProperties.AutomationId="BenchInspectorCommand"
                                 Style="{StaticResource SmMonoCellTextStyle}"
                                 Text="{x:Bind InspectorCommand, Mode=OneWay}"
                                 TextWrapping="Wrap" />
 
-                            <TextBlock Style="{StaticResource SmSectionLabelTextStyle}" Text="HOW IT IS TIMED" />
+                            <TextBlock Style="{StaticResource SmInspectorHeadingTextStyle}" Text="How it's timed" />
                             <TextBlock
-                                Margin="0,0,0,10"
+                                Margin="0,0,0,16"
                                 AutomationProperties.AutomationId="BenchInspectorMethod"
-                                Style="{StaticResource SmKeyValueTextStyle}"
-                                Text="{x:Bind InspectorMethod, Mode=OneWay}"
-                                TextWrapping="Wrap" />
+                                Style="{StaticResource SmInspectorBodyTextStyle}"
+                                Text="{x:Bind InspectorMethod, Mode=OneWay}" />
 
-                            <TextBlock Style="{StaticResource SmSectionLabelTextStyle}" Text="THE RUNS BEHIND THE NUMBER" />
+                            <TextBlock Style="{StaticResource SmInspectorHeadingTextStyle}" Text="Runs" />
                             <TextBlock
                                 AutomationProperties.AutomationId="BenchInspectorRuns"
-                                Style="{StaticResource SmKeyValueTextStyle}"
-                                Text="{x:Bind InspectorRuns, Mode=OneWay}"
-                                TextWrapping="Wrap" />
+                                Style="{StaticResource SmInspectorBodyTextStyle}"
+                                Text="{x:Bind InspectorRuns, Mode=OneWay}" />
                         </StackPanel>
                     </ScrollViewer>
 

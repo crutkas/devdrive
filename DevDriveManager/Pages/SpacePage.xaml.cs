@@ -329,7 +329,8 @@ public sealed partial class SpacePage : Page, INotifyPropertyChanged
 
     private void StorageTreemap_NavigateUpRequested(object? sender, EventArgs args) => ViewModel.NavigateUp();
 
-    private void CancelScanButton_Click(object sender, RoutedEventArgs args) => ViewModel.CancelScan();
+    // Scan here starts the Reclaim scan too (App.ScanEverything), so Cancel stops both.
+    private void CancelScanButton_Click(object sender, RoutedEventArgs args) => App.Scans.Cancel();
     private void RetryScanButton_Click(object sender, RoutedEventArgs args) => _ = ViewModel.RetryAsync();
     private void VolumePicker_SelectionChanged(object sender, SelectionChangedEventArgs args)
     {

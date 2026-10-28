@@ -681,6 +681,14 @@ winapp ui screenshot -a $AppPid -o "screenshots\07-create-confirm.png" 2>$null |
 
 Test-UI "Create: resize completes without another confirmation" {
     winapp ui invoke "PrimaryButton" -a $AppPid 2>$null | Out-Null
+
+    # The safe fake takes ~2 s, so the busy state is observable: nothing may lead out of the room
+    # while an elevated disk operation it started is still running.
+    if (winapp ui wait-for "CreationProgress" -a $AppPid -t 1500 2>$null) {
+        if ((Get-UiaProperty "CancelButton" "IsEnabled") -eq "True") { throw "Cancel is live during the operation" }
+        if ((Get-UiaProperty "NavReclaim" "IsEnabled") -eq "True")   { throw "the rail is live during the operation" }
+    }
+
     winapp ui wait-for "GoToManagementButton" -a $AppPid -t 5000 2>$null | Out-Null
     winapp ui wait-for "PrimaryButton" -a $AppPid --gone -t 3000
 }
@@ -822,7 +830,8 @@ if ($IncludeSlowScans) {
 
     Test-UI "Reclaim: the scan finishes" {
         # Worktrees gate the run at ~70 s on a developer machine; allow generous headroom for a cold
-        # cache without waiting forever on a genuinely wedged scan.
+        # cache without waiting forever on a genuinely wedged scan. The bar now reports the whole
+        # shared scan (Reclaim + the Space walk it starts), so Cancel stays until both halves end.
         $deadline = (Get-Date).AddMinutes(8)
         while ((Test-Present "ScanBarCancelButton" 1000) -and (Get-Date) -lt $deadline) {
             Start-Sleep -Seconds 5

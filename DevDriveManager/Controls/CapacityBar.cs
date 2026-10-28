@@ -180,12 +180,10 @@ public sealed partial class CapacityBar : Control
         CapacitySegmentKind.Safe => Resolve("SmGoodBrush"),
         CapacitySegmentKind.Check => Resolve("SmWarnBrush"),
         CapacitySegmentKind.Careful => Resolve("SmBadBrush"),
-        _ => Resolve(AccentRole switch
-        {
-            VolumeAccentRole.DevDrive => "SmCategory2Brush",
-            VolumeAccentRole.System => "SmCategory0Brush",
-            _ => "SmCategory5Brush",
-        }),
+        // Same palette as the Create room's disk bar: used space is blue, a Dev Drive is teal. Other
+        // volumes used to be slate (SmCategory5), which is nearly the free track's own colour, so
+        // used and free could not be told apart.
+        _ => Resolve(AccentRole == VolumeAccentRole.DevDrive ? "SmCategory2Brush" : "SmCategory0Brush"),
     };
 
     /// <summary>

@@ -57,7 +57,7 @@ public sealed class ReclaimOrderingTests
         string volumeRoot = Path.GetPathRoot(folder)!;
         try
         {
-            SafeFakeReclaimExecutor executor = new();
+            SafeFakeReclaimExecutor executor = new(TestBins.Recycles);
 
             await executor.ExecuteAsync([Folder(folder), Bin(volumeRoot)], null, default);
 
@@ -88,7 +88,7 @@ public sealed class ReclaimOrderingTests
         Directory.CreateDirectory(deep);
         try
         {
-            SafeFakeReclaimExecutor executor = new();
+            SafeFakeReclaimExecutor executor = new(TestBins.Recycles);
 
             await executor.ExecuteAsync([Folder(shallow), Folder(deep)], null, default);
 
@@ -112,7 +112,7 @@ public sealed class ReclaimOrderingTests
         string windows = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
         string child = Path.Combine(windows, "Temp");
 
-        SafeFakeReclaimExecutor executor = new();
+        SafeFakeReclaimExecutor executor = new(TestBins.Recycles);
 
         ReclaimOutcome outcome = await executor.ExecuteAsync(
             [Folder(windows), Folder(child)], null, default);
@@ -136,7 +136,7 @@ public sealed class ReclaimOrderingTests
         Directory.CreateDirectory(inner);
         try
         {
-            SafeFakeReclaimExecutor executor = new();
+            SafeFakeReclaimExecutor executor = new(TestBins.Recycles);
 
             ReclaimOutcome outcome = await executor.ExecuteAsync(
                 [Folder(outer), Folder(inner)], null, default);
@@ -145,7 +145,8 @@ public sealed class ReclaimOrderingTests
             Assert.AreEqual(
                 ReclaimItemStatus.Absorbed,
                 outcome.Items.Single(i => i.Candidate.Path == inner).Status);
-            Assert.AreEqual(1_000_000, outcome.BytesFreed, "The container's bytes count once.");
+            Assert.AreEqual(1_000_000, outcome.BytesRecycled, "The container's bytes count once.");
+            Assert.AreEqual(0, outcome.BytesFreed, "Recycling frees nothing until the bin is emptied.");
         }
         finally
         {

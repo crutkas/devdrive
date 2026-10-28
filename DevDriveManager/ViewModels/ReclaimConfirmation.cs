@@ -78,13 +78,20 @@ internal static class ReclaimNarration
     }
 
     /// <summary>One line for how a reclaim run went.</summary>
+    /// <remarks>
+    /// Freed and recycled are reported apart. Recycling moves an item into the same volume's
+    /// Recycle Bin, so it frees nothing until the bin is emptied, and a receipt that called it
+    /// "freed" promised space the drive never got back.
+    /// </remarks>
     public static string SummarizeRun(ReclaimOutcome outcome)
     {
         ArgumentNullException.ThrowIfNull(outcome);
 
-        string freed = ReclaimFormat.Bytes(outcome.BytesFreed);
+        long freed = outcome.BytesFreed;
+        long recycled = outcome.BytesRecycled;
         string items = outcome.RemovedCount == 1 ? "1 item" : $"{outcome.RemovedCount:N0} items";
         string failed = outcome.FailedCount == 1 ? "1 item" : $"{outcome.FailedCount:N0} items";
+        string binNote = recycled > 0 ? " " + RecycledSpaceNote : string.Empty;
 
         if (outcome.Cancelled)
         {
@@ -93,20 +100,62 @@ internal static class ReclaimNarration
             // that aborted partway — so saying it unconditionally is the exact over-promise this
             // room's copy is written to avoid, and it contradicts the failure banner shown beside it.
             return outcome.FailedCount == 0
-                ? $"Stopped after freeing {freed} across {items}. Nothing else was touched."
-                : $"Stopped after freeing {freed} across {items}. {failed} could not be removed " +
-                  "and is still listed. Nothing after that was touched.";
+                ? $"Stopped after {Gerund(freed, recycled)} across {items}. Nothing else was touched.{binNote}"
+                : $"Stopped after {Gerund(freed, recycled)} across {items}. {failed} could not be removed " +
+                  $"and is still listed. Nothing after that was touched.{binNote}";
         }
 
         if (outcome.FailedCount == 0)
         {
             return outcome.RemovedCount == 0
                 ? "Nothing was removed."
-                : $"Freed {freed} across {items}.";
+                : $"{Past(freed, recycled)} across {items}.{binNote}";
         }
 
-        return $"Freed {freed} across {items}. {failed} could not be removed and is still listed.";
+        return $"{Past(freed, recycled)} across {items}. {failed} could not be removed and is still listed.{binNote}";
     }
+
+    /// <summary>The progress line while a run is removing things.</summary>
+    public static string DescribeProgress(ReclaimExecutionProgress progress)
+    {
+        ArgumentNullException.ThrowIfNull(progress);
+
+        if (progress.Total <= 1)
+        {
+            return $"Removing {progress.CurrentItem}…";
+        }
+
+        List<string> parts = [];
+        if (progress.BytesFreedSoFar > 0)
+        {
+            parts.Add($"{ReclaimFormat.Bytes(progress.BytesFreedSoFar)} freed");
+        }
+
+        if (progress.BytesRecycledSoFar > 0)
+        {
+            parts.Add($"{ReclaimFormat.Bytes(progress.BytesRecycledSoFar)} to the Recycle Bin");
+        }
+
+        string counted = $"{progress.Completed:N0} of {progress.Total:N0}";
+        return parts.Count == 0 ? counted : $"{counted} — {string.Join(" · ", parts)}";
+    }
+
+    /// <summary>Why recycled bytes are not in the freed total.</summary>
+    public const string RecycledSpaceNote = "Recycled items still use space until the Recycle Bin is emptied.";
+
+    private static string Past(long freed, long recycled) => (freed > 0, recycled > 0) switch
+    {
+        (true, true) => $"Freed {ReclaimFormat.Bytes(freed)} and moved {ReclaimFormat.Bytes(recycled)} to the Recycle Bin",
+        (false, true) => $"Moved {ReclaimFormat.Bytes(recycled)} to the Recycle Bin",
+        _ => $"Freed {ReclaimFormat.Bytes(freed)}",
+    };
+
+    private static string Gerund(long freed, long recycled) => (freed > 0, recycled > 0) switch
+    {
+        (true, true) => $"freeing {ReclaimFormat.Bytes(freed)} and moving {ReclaimFormat.Bytes(recycled)} to the Recycle Bin",
+        (false, true) => $"moving {ReclaimFormat.Bytes(recycled)} to the Recycle Bin",
+        _ => $"freeing {ReclaimFormat.Bytes(freed)}",
+    };
 }
 
 /// <summary>
@@ -134,9 +183,40 @@ public sealed record ReclaimConfirmationRequest(
     IReadOnlyList<string> PermanentNames,
     string VolumeSplitText)
 {
+    /// <summary>
+    /// The request for a plan. The plan has already moved anything the Recycle Bin would refuse into
+    /// the permanent group, so the names listed here are everything that will not come back.
+    /// </summary>
+    public static ReclaimConfirmationRequest FromPlan(ReclaimPlan plan, string volumeSplitText)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+
+        List<PlannedRemoval> permanent = [.. plan.Permanent];
+
+        return new ReclaimConfirmationRequest(
+            ItemCount: plan.Items.Count,
+            Bytes: plan.TotalBytes,
+            HighestRisk: plan.Items.Count == 0 ? ReclaimRisk.Safe : plan.Items.Max(i => i.Candidate.Risk),
+            CarefulCount: plan.Items.Count(i => i.Candidate.Risk == ReclaimRisk.Careful),
+            PermanentCount: permanent.Count,
+            PermanentBytes: permanent.Sum(i => i.Candidate.SizeBytes),
+            PermanentNames: [.. permanent
+                .OrderByDescending(i => i.Candidate.SizeBytes)
+                .Take(MaxPermanentNames)
+                .Select(i => i.PermanentLabel)],
+            VolumeSplitText: volumeSplitText);
+    }
+
+    private const int MaxPermanentNames = 4;
+
     public string BytesText => ReclaimFormat.Bytes(Bytes);
 
     public string PermanentBytesText => ReclaimFormat.Bytes(PermanentBytes);
+
+    /// <summary>Bytes going to the Recycle Bin — removed from view, not from the volume.</summary>
+    public long RecycledBytes => Math.Max(0, Bytes - PermanentBytes);
+
+    public string RecycledBytesText => ReclaimFormat.Bytes(RecycledBytes);
 
     public string ItemCountText => ItemCount == 1 ? "1 item" : $"{ItemCount:N0} items";
 
@@ -150,26 +230,50 @@ public sealed record ReclaimConfirmationRequest(
     /// <summary>True when some of this will not be recoverable from the Recycle Bin.</summary>
     public bool HasPermanent => PermanentCount > 0;
 
+    private bool AllPermanent => HasPermanent && PermanentCount >= ItemCount;
+
     /// <summary>
     /// The headline. Leads with the irreversible part when there is one, because that is the fact
     /// that should change someone's mind, and a headline leading with the amount freed is an
-    /// advertisement rather than a confirmation.
+    /// advertisement rather than a confirmation. A batch that only goes to the Recycle Bin does not
+    /// say "free" at all: moving something into the same volume's bin frees nothing yet.
     /// </summary>
-    public string Headline => HasPermanent
-        ? $"Remove {ItemCountText} and free {BytesText} — {PermanentBytesText} of it permanently"
-        : $"Remove {ItemCountText} and free {BytesText}";
+    public string Headline => !HasPermanent
+        ? $"Move {ItemCountText} ({BytesText}) to the Recycle Bin"
+        : AllPermanent
+            ? $"Permanently delete {ItemCountText} and free {BytesText}"
+            : $"Remove {ItemCountText} ({BytesText}) — {PermanentBytesText} of it permanently";
 
     /// <summary>
     /// Whether this can be undone, and for the mixed case, which parts cannot. Names the permanent
     /// items rather than counting them: "3 of these cannot go to the Recycle Bin" tells the reader
     /// there is a decision without telling them enough to make it.
     /// </summary>
+    /// <remarks>
+    /// The all-recyclable promise is only made because it is kept: the plan has already moved
+    /// anything the bin would refuse into the permanent list, and the executor keeps — rather than
+    /// deletes — any item that the bin refuses later anyway.
+    /// </remarks>
     public string RecoveryText => HasPermanent
-        ? PermanentCount == ItemCount
+        ? AllPermanent
             ? "None of this goes to the Recycle Bin. It cannot be undone."
             : $"{PermanentCount:N0} of these cannot go to the Recycle Bin: " +
-              string.Join(", ", PermanentNames) + ". Everything else can be restored from the bin."
-        : "Everything here goes to the Recycle Bin, so it can be restored.";
+              string.Join(", ", PermanentNames) +
+              (PermanentCount > PermanentNames.Count ? $", and {PermanentCount - PermanentNames.Count:N0} more" : string.Empty) +
+              ". Everything else can be restored from the bin."
+        : "Everything here goes to the Recycle Bin, so it can be restored. Nothing is deleted " +
+          "permanently without asking you first.";
+
+    /// <summary>
+    /// When the space actually comes back. Recycling moves bytes into a bin on the same volume, so
+    /// only the permanent part is free the moment the run ends.
+    /// </summary>
+    public string SpaceText => !HasPermanent
+        ? $"This doesn't free space yet — the {BytesText} comes back when the Recycle Bin is emptied."
+        : AllPermanent
+            ? $"{BytesText} is freed as soon as this finishes."
+            : $"{PermanentBytesText} is freed now. The other {RecycledBytesText} comes back when the " +
+              "Recycle Bin is emptied.";
 
     /// <summary>
     /// The worst thing in the pile, stated as a consequence rather than as a tier name. "Careful"

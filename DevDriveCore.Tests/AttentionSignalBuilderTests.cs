@@ -308,12 +308,12 @@ public sealed class AttentionSignalBuilderTests
     }
 
     [TestMethod]
-    public void Build_FallsBackToTheLabelForALetterlessVolume()
+    public void Build_DoesNotFlagALetterlessSystemPartitionAsLowOnSpace()
     {
         IReadOnlyList<AttentionSignal> signals = AttentionSignalBuilder.Build(
-            Healthy(Volume(null, 1000, 10, label: "Recovery"), Volume('G', 1000, 500, devDrive: true)));
+            Healthy(Volume(null, 1000, 10, label: "Windows RE tools"), Volume('G', 1000, 500, devDrive: true)));
 
-        Assert.AreEqual("Recovery is 99% full", signals[0].Title);
+        Assert.IsFalse(signals.Any(s => s.Id.StartsWith("LowSpace_", StringComparison.Ordinal)));
     }
 
     [TestMethod]

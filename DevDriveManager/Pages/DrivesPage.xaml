@@ -584,20 +584,20 @@
                     </Border>
 
                     <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
-                        <StackPanel Padding="14,12" Spacing="4">
+                        <StackPanel Padding="14,12" Spacing="2">
                             <!--
                                 Two numbers first, because the question this room ends on is whether
                                 there is room for what you were about to put somewhere, and a sentence
                                 is a slow way to answer it.
                             -->
-                            <Grid Margin="0,0,0,12" ColumnSpacing="9">
+                            <Grid Margin="0,0,0,16" ColumnSpacing="9">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
                                 <Border Grid.Column="0" Style="{StaticResource SmTierCardStyle}">
                                     <StackPanel Spacing="3">
-                                        <TextBlock Style="{StaticResource SmMetricLabelTextStyle}" Text="FREE ON DEV DRIVE" />
+                                        <TextBlock Style="{StaticResource SmMetricLabelTextStyle}" Text="Free on Dev Drive" />
                                         <TextBlock
                                             AutomationProperties.AutomationId="DrivesFreeOnDevDrive"
                                             Style="{StaticResource SmMetricValueTextStyle}"
@@ -606,7 +606,7 @@
                                 </Border>
                                 <Border Grid.Column="1" Style="{StaticResource SmTierCardStyle}">
                                     <StackPanel Spacing="3">
-                                        <TextBlock Style="{StaticResource SmMetricLabelTextStyle}" Text="FREE ON SYSTEM" />
+                                        <TextBlock Style="{StaticResource SmMetricLabelTextStyle}" Text="Free on system drive" />
                                         <TextBlock
                                             AutomationProperties.AutomationId="DrivesFreeOnSystem"
                                             Style="{StaticResource SmMetricValueTextStyle}"
@@ -615,35 +615,30 @@
                                 </Border>
                             </Grid>
 
-                            <TextBlock Style="{StaticResource SmSectionLabelTextStyle}" Text="WHAT THIS IS" />
+                            <TextBlock Style="{StaticResource SmInspectorHeadingTextStyle}" Text="What" />
                             <TextBlock
-                                Margin="0,0,0,10"
+                                Margin="0,0,0,16"
                                 AutomationProperties.AutomationId="DrivesInspectorWhat"
-                                Style="{StaticResource SmKeyValueTextStyle}"
-                                Text="{x:Bind InspectorWhatThisIs, Mode=OneWay}"
-                                TextWrapping="Wrap" />
+                                Style="{StaticResource SmInspectorBodyTextStyle}"
+                                Text="{x:Bind InspectorWhatThisIs, Mode=OneWay}" />
 
-                            <TextBlock Style="{StaticResource SmSectionLabelTextStyle}" Text="HOW FULL IT IS" />
+                            <TextBlock Style="{StaticResource SmInspectorHeadingTextStyle}" Text="Space" />
                             <TextBlock
-                                Margin="0,0,0,10"
+                                Margin="0,0,0,16"
                                 AutomationProperties.AutomationId="DrivesInspectorCapacity"
-                                Style="{StaticResource SmKeyValueTextStyle}"
-                                Text="{x:Bind InspectorCapacity, Mode=OneWay}"
-                                TextWrapping="Wrap" />
+                                Style="{StaticResource SmInspectorBodyTextStyle}"
+                                Text="{x:Bind InspectorCapacity, Mode=OneWay}" />
 
-                            <TextBlock Style="{StaticResource SmSectionLabelTextStyle}" Text="WHAT THE FORMAT MEANS" />
+                            <TextBlock Style="{StaticResource SmInspectorHeadingTextStyle}" Text="Format" />
                             <TextBlock
-                                Margin="0,0,0,10"
+                                Margin="0,0,0,16"
                                 AutomationProperties.AutomationId="DrivesInspectorFormat"
-                                Style="{StaticResource SmKeyValueTextStyle}"
-                                Text="{x:Bind InspectorFormat, Mode=OneWay}"
-                                TextWrapping="Wrap" />
+                                Style="{StaticResource SmInspectorBodyTextStyle}"
+                                Text="{x:Bind InspectorFormat, Mode=OneWay}" />
 
-                            <TextBlock Style="{StaticResource SmSectionLabelTextStyle}" Text="MAKING ROOM FOR ANOTHER" />
-                            <TextBlock
-                                Style="{StaticResource SmKeyValueTextStyle}"
-                                TextWrapping="Wrap">
-                                Reclaim before you repartition. A shrink can only use free space that is contiguous and at the end of the volume, and deleting first is what makes that space exist.
+                            <TextBlock Style="{StaticResource SmInspectorHeadingTextStyle}" Text="Need more space?" />
+                            <TextBlock Style="{StaticResource SmInspectorBodyTextStyle}">
+                                Free up space in Reclaim first. Shrinking a drive can only use its free space, and some system files can't be moved, so it may shrink by less than what's free.
                             </TextBlock>
                         </StackPanel>
                     </ScrollViewer>
