@@ -128,7 +128,9 @@ public static class AttentionSignalBuilder
 
     private static IEnumerable<AttentionSignal> LowSpaceSignals(AttentionInputs inputs)
     {
-        foreach (VolumeInfo volume in inputs.Volumes.Where(v => v.SizeBytes > 0))
+        // Letterless volumes are Windows' own partitions (Recovery, EFI, System Reserved). They run
+        // nearly full by design and there is nothing in Reclaim that can act on them.
+        foreach (VolumeInfo volume in inputs.Volumes.Where(v => v.SizeBytes > 0 && v.DriveLetter is not null))
         {
             double free = 1d - volume.UsedFraction;
             if (free >= inputs.LowFreeFraction)

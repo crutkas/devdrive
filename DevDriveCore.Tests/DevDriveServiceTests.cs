@@ -102,13 +102,13 @@ public sealed class DevDriveServiceTests
     }
 
     [TestMethod]
-    public void GetVolumes_OrdersLetteredFirstThenLetterless()
+    public void GetVolumes_OrdersByLetterAndLeavesOutLetterlessSystemPartitions()
     {
         (DevDriveService service, IStorageQuery storage, INativeVolumeApi native, _) = Build();
 
         storage.GetVolumes().Returns(new[]
         {
-            TestData.Volume(null, "NTFS", "Recovery", driveType: 3),
+            TestData.Volume(null, "NTFS", "Windows RE tools", driveType: 3),
             TestData.Volume('G', "ReFS", "DevDrive", driveType: 3),
             TestData.Volume('C', "NTFS", "Windows", driveType: 3),
         });
@@ -117,20 +117,19 @@ public sealed class DevDriveServiceTests
         IReadOnlyList<VolumeInfo> volumes = service.GetVolumes();
 
         CollectionAssert.AreEqual(
-            new char?[] { 'C', 'G', null },
+            new char?[] { 'C', 'G' },
             volumes.Select(v => v.DriveLetter).ToArray());
     }
 
     [TestMethod]
-    public void GetVolumes_DoesNotQueryNativeForLetterlessVolume()
+    public void GetVolumes_SkipsLetterlessVolumeWithoutQueryingNative()
     {
         (DevDriveService service, IStorageQuery storage, INativeVolumeApi native, _) = Build();
         storage.GetVolumes().Returns(new[] { TestData.Volume(null, "NTFS", "Recovery", driveType: 3) });
 
         IReadOnlyList<VolumeInfo> volumes = service.GetVolumes();
 
-        Assert.HasCount(1, volumes);
-        Assert.IsFalse(volumes[0].IsDevDrive);
+        Assert.IsEmpty(volumes);
         native.DidNotReceive().QueryPersistentVolumeState(Arg.Any<string>());
     }
 
