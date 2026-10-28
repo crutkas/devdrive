@@ -215,26 +215,25 @@ public sealed partial class DashboardPage : Page, INotifyPropertyChanged
 
     public string InspectorTitle => _selectedSignal is null ? "This machine" : "About this signal";
 
-    public string MetricOneLabel => _selectedSignal is null ? "VOLUMES" : "IMPACT";
+    public string MetricOneLabel => _selectedSignal is null ? "Drives" : "Impact";
 
     public string MetricOneValue => _selectedSignal is null
         ? ViewModel.Volumes.Count.ToString("N0")
         : _selectedSignal.Impact;
 
-    public string MetricTwoLabel => _selectedSignal is null ? "RECLAIMABLE" : "GOES TO";
+    public string MetricTwoLabel => _selectedSignal is null ? "Reclaimable" : "Go to";
 
     public string MetricTwoValue => _selectedSignal is null
         ? Reclaim.HasScanned ? ReclaimFormat.Bytes(Reclaim.FoundBytes) : "—"
         : _selectedSignal.RoomLabel;
 
-    public string SelectionLabel => _selectedSignal is null ? "WHAT THIS ROOM IS" : "WHY IT IS LISTED";
+    public string SelectionLabel => _selectedSignal is null ? "About" : "Why";
 
     public string SelectionDetail => _selectedSignal is null
-        ? "Everything below is measured, not estimated. Select a row to see what it means and which "
-            + "room acts on it."
+        ? "Select an item to see why it's listed and where to fix it."
         : $"{_selectedSignal.Detail}. Found on {_selectedSignal.Where}.";
 
-    public string BiggestLabel => _biggest.Count > 0 ? "BIGGEST FOLDERS SCANNED" : "BIGGEST FOLDERS";
+    public string BiggestLabel => "Biggest folders";
 
     /// <summary>
     /// Whether the biggest-folders block has anything to show. A section heading over an empty list
@@ -562,7 +561,7 @@ public sealed partial class DashboardPage : Page, INotifyPropertyChanged
             }
 
             _coverage.Add(new InspectorFactViewModel(
-                "Nodes walked", snapshot.Nodes.Length.ToString("N0"), AutomationId: "CoverageNodes"));
+                "Items scanned", snapshot.Nodes.Length.ToString("N0"), AutomationId: "CoverageNodes"));
 
             _coverage.Add(new InspectorFactViewModel(
                 "Coverage",
@@ -571,7 +570,7 @@ public sealed partial class DashboardPage : Page, INotifyPropertyChanged
                 "CoverageRatio"));
 
             _coverage.Add(new InspectorFactViewModel(
-                "Paths denied",
+                "Couldn't read",
                 snapshot.Coverage.DeniedPaths.Length.ToString("N0"),
                 AutomationId: "CoverageDenied"));
 
@@ -580,7 +579,7 @@ public sealed partial class DashboardPage : Page, INotifyPropertyChanged
             if (snapshot.Coverage.AllocatedMinusApparentBytes is long slack && slack > 0)
             {
                 _coverage.Add(new InspectorFactViewModel(
-                    "Cluster slack",
+                    "Cluster overhead",
                     StorageBytes.Format(slack),
                     AutomationId: "CoverageSlack"));
             }
@@ -588,15 +587,15 @@ public sealed partial class DashboardPage : Page, INotifyPropertyChanged
         else
         {
             _coverage.Add(new InspectorFactViewModel(
-                "Nodes walked", "—", "no scan yet", "CoverageNodes"));
+                "Items scanned", "—", "no scan yet", "CoverageNodes"));
         }
 
         if (Reclaim.HasScanned)
         {
             _coverage.Add(new InspectorFactViewModel(
-                "Reclaim categories",
+                "Cleanup categories",
                 $"{Reclaim.Categories.Count(c => c.TotalBytes > 0)} of {Reclaim.Categories.Count}",
-                "found something",
+                "with results",
                 "CoverageCategories"));
         }
 

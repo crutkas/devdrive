@@ -426,8 +426,8 @@
                     </Border>
 
                     <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
-                        <StackPanel Padding="14,12" Spacing="4">
-                            <Grid Margin="0,0,0,12" ColumnSpacing="9">
+                        <StackPanel Padding="14,12" Spacing="2">
+                            <Grid Margin="0,0,0,16" ColumnSpacing="9">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="*" />
@@ -452,22 +452,21 @@
                                 </Border>
                             </Grid>
 
-                            <TextBlock Style="{StaticResource SmSectionLabelTextStyle}" Text="{x:Bind SelectionLabel, Mode=OneWay}" />
+                            <TextBlock Style="{StaticResource SmInspectorHeadingTextStyle}" Text="{x:Bind SelectionLabel, Mode=OneWay}" />
                             <TextBlock
-                                Margin="0,0,0,12"
+                                Margin="0,0,0,16"
                                 AutomationProperties.AutomationId="OverviewSelectionDetail"
-                                Style="{StaticResource SmKeyValueTextStyle}"
-                                Text="{x:Bind SelectionDetail, Mode=OneWay}"
-                                TextWrapping="Wrap" />
+                                Style="{StaticResource SmInspectorBodyTextStyle}"
+                                Text="{x:Bind SelectionDetail, Mode=OneWay}" />
 
                             <StackPanel Visibility="{x:Bind local:UiHelpers.BoolToVisibility(HasBiggestFolders), Mode=OneWay}">
-                                <TextBlock Style="{StaticResource SmSectionLabelTextStyle}" Text="{x:Bind BiggestLabel, Mode=OneWay}" />
+                                <TextBlock Style="{StaticResource SmInspectorHeadingTextStyle}" Text="{x:Bind BiggestLabel, Mode=OneWay}" />
                                 <!--
                                     No AutomationId on the ItemsControl: a bare ItemsControl
                                     surfaces no UIA peer, so an id there resolves to nothing. Each
                                     row carries the Name a screen reader actually reads.
                                 -->
-                                <ItemsControl Margin="0,0,0,12" ItemsSource="{x:Bind BiggestFolders}">
+                                <ItemsControl Margin="0,2,0,16" ItemsSource="{x:Bind BiggestFolders}">
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate x:DataType="vm:InspectorFactViewModel">
                                             <Grid
@@ -495,8 +494,8 @@
                                 </ItemsControl>
                             </StackPanel>
 
-                            <TextBlock Style="{StaticResource SmSectionLabelTextStyle}" Text="WHAT THE SCAN ACTUALLY SAW" />
-                            <ItemsControl ItemsSource="{x:Bind CoverageFacts}">
+                            <TextBlock Style="{StaticResource SmInspectorHeadingTextStyle}" Text="Scan results" />
+                            <ItemsControl Margin="0,2,0,0" ItemsSource="{x:Bind CoverageFacts}">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate x:DataType="vm:InspectorFactViewModel">
                                         <Grid
@@ -512,7 +511,7 @@
                                             <TextBlock
                                                 Grid.Column="0"
                                                 VerticalAlignment="Center"
-                                                Style="{StaticResource SmKeyValueTextStyle}"
+                                                Style="{StaticResource SmInspectorBodyTextStyle}"
                                                 Text="{x:Bind Label}" />
                                             <StackPanel
                                                 Grid.Column="1"
@@ -550,7 +549,7 @@
                             AutomationProperties.AutomationId="OverviewFootNote"
                             Style="{StaticResource SmCardSubTextStyle}"
                             TextWrapping="Wrap">
-                            Every row above lands in a different room. Selecting one explains it here; opening it takes you there.
+                            Select an item to see details here, or open it to fix it.
                         </TextBlock>
                     </Border>
                 </Grid>

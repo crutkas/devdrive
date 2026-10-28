@@ -180,10 +180,10 @@ public sealed partial class DrivesPage : Page, INotifyPropertyChanged
     public string InspectorTitle => SelectedVolume?.Header ?? "Nothing selected";
 
     public string InspectorWhatThisIs => SelectedVolume is null
-        ? "Select a volume."
+        ? "Select a drive."
         : SelectedVolume.NotesText.Length > 0
             ? SelectedVolume.NotesText
-            : $"A {SelectedVolume.FileSystemType} volume with no special role on this PC.";
+            : $"A regular {SelectedVolume.FileSystemType} drive.";
 
     public string InspectorCapacity => SelectedVolume is null
         ? string.Empty
@@ -205,15 +205,14 @@ public sealed partial class DrivesPage : Page, INotifyPropertyChanged
             if (SelectedVolume.IsDevDrive)
             {
                 return SelectedVolume.IsTrusted
-                    ? $"{SelectedVolume.FileSystemType} on a trusted Dev Drive. Defender scans asynchronously here, "
-                        + "which is where the build speed comes from \u2014 and the reason to keep only source and "
-                        + "caches on it."
-                    : $"{SelectedVolume.FileSystemType}, formatted as a Dev Drive but not currently trusted. "
-                        + "Without trust it is scanned like any other volume.";
+                    ? $"{SelectedVolume.FileSystemType} Dev Drive, trusted. Defender scans files in the background "
+                        + "here, which is what makes builds faster. Keep source code and package caches on it."
+                    : $"{SelectedVolume.FileSystemType} Dev Drive, not trusted. Defender scans it like any other "
+                        + "drive, so builds don't get faster.";
             }
 
-            return $"{SelectedVolume.FileSystemType}. Every write is scanned synchronously, the same as any "
-                + "ordinary volume.";
+            return $"{SelectedVolume.FileSystemType}. Defender scans every file as it's written, like any "
+                + "regular drive.";
         }
     }
 

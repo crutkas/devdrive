@@ -180,7 +180,7 @@ public sealed partial class BenchmarksPage : Page, INotifyPropertyChanged
 
     public string InspectorWhat => SelectedWorkload?.Row.DetailsWhat is { Length: > 0 } what
         ? what
-        : "Pick a row above and this explains what it builds, the command it runs, and how the timing is taken.";
+        : "Select a workload to see what it builds, the command it runs, and how it's timed.";
 
     public string InspectorCommand => SelectedWorkload?.Row.DetailsCommand is { Length: > 0 } command
         ? command
