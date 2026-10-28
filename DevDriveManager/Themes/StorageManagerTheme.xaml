@@ -982,6 +982,33 @@
         <Setter Property="Foreground" Value="{ThemeResource SmBadBrush}" />
     </Style>
 
+    <!--
+        Inspector sections (Reclaim). The heading and its answer used to share one dim ink, with the
+        heading set as tiny tracked capitals, so the eye could not find where one section ended and
+        the next began. Headings now carry the weight and full ink; answers sit at body size in the
+        muted ink, which is still well above the dim one.
+    -->
+    <Style x:Key="SmInspectorHeadingTextStyle" TargetType="TextBlock">
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Foreground" Value="{ThemeResource SmTextBrush}" />
+        <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+
+    <Style x:Key="SmInspectorBodyTextStyle" TargetType="TextBlock">
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="LineHeight" Value="19" />
+        <Setter Property="Foreground" Value="{ThemeResource SmMutedBrush}" />
+        <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+
+    <Style
+        x:Key="SmInspectorBodyBadTextStyle"
+        BasedOn="{StaticResource SmInspectorBodyTextStyle}"
+        TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{ThemeResource SmBadBrush}" />
+    </Style>
+
     <!-- Compact form rows remain shared by the Create Dev Drive form, in every theme. -->
     <Style x:Key="SmSetRowStyle" TargetType="Border">
         <Setter Property="Padding" Value="14,8" />

@@ -804,9 +804,9 @@
                                 Text="{x:Bind ViewModel.SelectedRow.DisplayName, Mode=OneWay, FallbackValue='Nothing selected'}" />
                         </Border>
 
-                        <!--  The same four questions in the same order, ending in cost to get it back.  -->
+                        <!--  The same four questions in the same order, ending in how to get it back.  -->
                         <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
-                            <StackPanel Padding="14,12" Spacing="4">
+                            <StackPanel Padding="14,12" Spacing="2">
                                 <!--
                                     Ahead of the four standing questions, and only when it applies.
                                     If the last run left this row behind, that is the most important
@@ -815,46 +815,41 @@
                                     sentence fits.
                                 -->
                                 <TextBlock
-                                    Style="{StaticResource SmSectionLabelTextStyle}"
-                                    Text="WHY IT IS STILL HERE"
+                                    Style="{StaticResource SmInspectorHeadingTextStyle}"
+                                    Text="Why it's still here"
                                     Visibility="{x:Bind ViewModel.SelectedRow.HasFailure, Mode=OneWay, FallbackValue=Collapsed}" />
                                 <TextBlock
-                                    Margin="0,0,0,10"
+                                    Margin="0,0,0,16"
                                     AutomationProperties.AutomationId="ReclaimInspectorFailure"
-                                    Style="{StaticResource SmKeyValueBadTextStyle}"
+                                    Style="{StaticResource SmInspectorBodyBadTextStyle}"
                                     Text="{x:Bind ViewModel.SelectedRow.FailureText, Mode=OneWay, FallbackValue=''}"
-                                    TextWrapping="Wrap"
                                     Visibility="{x:Bind ViewModel.SelectedRow.HasFailure, Mode=OneWay, FallbackValue=Collapsed}" />
 
-                                <TextBlock Style="{StaticResource SmSectionLabelTextStyle}" Text="WHAT THIS IS" />
+                                <TextBlock Style="{StaticResource SmInspectorHeadingTextStyle}" Text="What" />
                                 <TextBlock
-                                    Margin="0,0,0,10"
-                                    Style="{StaticResource SmKeyValueTextStyle}"
-                                    Text="{x:Bind ViewModel.SelectedRow.DisplayName, Mode=OneWay, FallbackValue='Select a row.'}"
-                                    TextWrapping="Wrap" />
+                                    Margin="0,0,0,16"
+                                    Style="{StaticResource SmInspectorBodyTextStyle}"
+                                    Text="{x:Bind ViewModel.SelectedRow.DisplayName, Mode=OneWay, FallbackValue='Select a row.'}" />
 
-                                <TextBlock Style="{StaticResource SmSectionLabelTextStyle}" Text="WHERE IT IS" />
+                                <TextBlock Style="{StaticResource SmInspectorHeadingTextStyle}" Text="Location" />
                                 <TextBlock
-                                    Margin="0,0,0,10"
+                                    Margin="0,0,0,16"
                                     IsTextSelectionEnabled="True"
-                                    Style="{StaticResource SmKeyValueTextStyle}"
-                                    Text="{x:Bind ViewModel.SelectedRow.Path, Mode=OneWay, FallbackValue=''}"
-                                    TextWrapping="Wrap" />
+                                    Style="{StaticResource SmInspectorBodyTextStyle}"
+                                    Text="{x:Bind ViewModel.SelectedRow.Path, Mode=OneWay, FallbackValue=''}" />
 
-                                <TextBlock Style="{StaticResource SmSectionLabelTextStyle}" Text="WHY IT IS SAFE OR NOT" />
+                                <TextBlock Style="{StaticResource SmInspectorHeadingTextStyle}" Text="Why" />
                                 <TextBlock
-                                    Margin="0,0,0,10"
+                                    Margin="0,0,0,16"
                                     AutomationProperties.AutomationId="ReclaimInspectorReason"
-                                    Style="{StaticResource SmKeyValueTextStyle}"
-                                    Text="{x:Bind ViewModel.SelectedRow.ReasonText, Mode=OneWay, FallbackValue=''}"
-                                    TextWrapping="Wrap" />
+                                    Style="{StaticResource SmInspectorBodyTextStyle}"
+                                    Text="{x:Bind ViewModel.SelectedRow.ReasonText, Mode=OneWay, FallbackValue=''}" />
 
-                                <TextBlock Style="{StaticResource SmSectionLabelTextStyle}" Text="COST TO GET IT BACK" />
+                                <TextBlock Style="{StaticResource SmInspectorHeadingTextStyle}" Text="How to recover" />
                                 <TextBlock
                                     AutomationProperties.AutomationId="ReclaimInspectorRecovery"
-                                    Style="{StaticResource SmKeyValueTextStyle}"
-                                    Text="{x:Bind ViewModel.SelectedRow.RecoveryText, Mode=OneWay, FallbackValue=''}"
-                                    TextWrapping="Wrap" />
+                                    Style="{StaticResource SmInspectorBodyTextStyle}"
+                                    Text="{x:Bind ViewModel.SelectedRow.RecoveryText, Mode=OneWay, FallbackValue=''}" />
                             </StackPanel>
                         </ScrollViewer>
                     </Grid>
