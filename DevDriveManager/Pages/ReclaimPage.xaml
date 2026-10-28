@@ -660,7 +660,10 @@
                                                             was already free — so the delta is read in
                                                             place rather than by diffing two pictures.
                                                         -->
-                                                        <controls:CapacityBar Height="9" Capacity="{x:Bind Bar}" />
+                                                        <controls:CapacityBar
+                                                            Height="9"
+                                                            AccentRole="{x:Bind AccentRole}"
+                                                            Capacity="{x:Bind Bar}" />
 
                                                         <Grid>
                                                             <Grid.ColumnDefinitions>

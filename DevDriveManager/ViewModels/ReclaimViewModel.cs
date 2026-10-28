@@ -859,6 +859,7 @@ public sealed partial class ReclaimViewModel : ObservableObject
 
         IReadOnlyDictionary<string, long>? freedByVolume = plan?.FreedBytesByVolume;
         IReadOnlyDictionary<string, long>? recycledByVolume = plan?.RecycledBytesByVolume;
+        string? systemRoot = Path.GetPathRoot(Environment.SystemDirectory);
 
         // Driven by the volumes, not by the selection. A volume that would free nothing still belongs
         // in the after-picture: "C: is unchanged by this" is a fact the user needs when deciding
@@ -892,6 +893,9 @@ public sealed partial class ReclaimViewModel : ObservableObject
                 $"{ReclaimFormat.Bytes(stillUsed)} still in use of {ReclaimFormat.Bytes(volume.CapacityBytes)}")
             {
                 RecycledBytes = Math.Max(0, recycledBytes),
+                AccentRole = volume.IsDevDrive ? VolumeAccentRole.DevDrive
+                    : string.Equals(volume.RootPath, systemRoot, StringComparison.OrdinalIgnoreCase) ? VolumeAccentRole.System
+                    : VolumeAccentRole.Other,
             });
         }
     }
@@ -929,6 +933,9 @@ public sealed record ReclaimVolumeImpact(
     /// in the bar: the bin is on the same volume, so they free nothing until it is emptied.
     /// </summary>
     public long RecycledBytes { get; init; }
+
+    /// <summary>Colours the in-use band the way the Create room and the drive strip colour this volume.</summary>
+    public VolumeAccentRole AccentRole { get; init; } = VolumeAccentRole.Other;
 
     public string BytesText => ReclaimFormat.Bytes(Bytes);
 
