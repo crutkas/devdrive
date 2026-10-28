@@ -2,6 +2,7 @@ using DevDriveCore;
 using DevDriveCore.Services;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
+using Microsoft.UI.Xaml.Automation.Peers;
 using Microsoft.UI.Xaml.Controls;
 
 namespace DevDriveManager.Controls;
@@ -237,6 +238,16 @@ public sealed partial class DevDriveDiskBar : UserControl
         LowSpaceWarning.Text = LowSpaceWarningText(LowFreeFraction);
         LowSpaceWarning.Visibility = low ? Visibility.Visible : Visibility.Collapsed;
 
+        if (low && _wasKnownNotLow)
+        {
+            AnnounceLowSpace();
+        }
+
+        // Only a state the user could see and then leave counts as "before". Arriving on the room
+        // with a size that is already low, or volume data landing after the room opened, is not a
+        // crossing the user made, and announcing it would talk over the page being read out.
+        _wasKnownNotLow = !low && TotalBytes > 0d && IsLoaded;
+
         void Apply(Border target, object key)
         {
             if (Resources.TryGetValue(key, out object? value) && value is Style style)
@@ -244,6 +255,34 @@ public sealed partial class DevDriveDiskBar : UserControl
                 target.Style = style;
             }
         }
+    }
+
+    private bool _wasKnownNotLow;
+
+    /// <summary>
+    /// Tells a screen reader the moment the size crosses into low-space territory.
+    /// </summary>
+    /// <remarks>
+    /// <c>LiveSetting="Polite"</c> alone never spoke: a <see cref="TextBlock"/> does not raise
+    /// <c>LiveRegionChanged</c> by itself, and the only thing that changes here is
+    /// <see cref="UIElement.Visibility"/>, which is not a text change either. So the event is raised
+    /// explicitly, once per crossing — the caller only gets here on not-low to low, never on each
+    /// slider tick that stays low, which would talk over the slider's own value announcements.
+    /// <para>
+    /// A notification rather than <c>LiveRegionChanged</c>, because it carries its own text instead
+    /// of asking the reader to go and fetch it.
+    /// </para>
+    /// </remarks>
+    private void AnnounceLowSpace()
+    {
+        AutomationPeer? peer = FrameworkElementAutomationPeer.FromElement(LowSpaceWarning)
+            ?? FrameworkElementAutomationPeer.CreatePeerForElement(LowSpaceWarning);
+
+        peer?.RaiseNotificationEvent(
+            AutomationNotificationKind.Other,
+            AutomationNotificationProcessing.ImportantMostRecent,
+            LowSpaceWarning.Text,
+            "DevDriveDiskBarLowSpace");
     }
 
     /// <summary>The sentence shown with the amber state, so the warning is not carried by colour alone.</summary>

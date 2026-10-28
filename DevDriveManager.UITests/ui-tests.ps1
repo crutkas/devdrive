@@ -687,6 +687,12 @@ Test-UI "Create: resize completes without another confirmation" {
     if (winapp ui wait-for "CreationProgress" -a $AppPid -t 1500 2>$null) {
         if ((Get-UiaProperty "CancelButton" "IsEnabled") -eq "True") { throw "Cancel is live during the operation" }
         if ((Get-UiaProperty "NavReclaim" "IsEnabled") -eq "True")   { throw "the rail is live during the operation" }
+        # IsEnabled, not IsHitTestVisible: a hit-test lock left every field reachable by keyboard.
+        if ((Get-UiaProperty "SizeNumberBox" "IsEnabled") -eq "True") { throw "the form is live during the operation" }
+        # A disabled rail item never opens its tooltip, so the room's status bar has to say why.
+        $why = winapp ui search "Other rooms are unavailable" -a $AppPid --json 2>$null | Out-String | ConvertFrom-Json
+        $global:LASTEXITCODE = 0
+        if (-not $why.matches) { throw "nothing on screen says why the rail is locked" }
     }
 
     winapp ui wait-for "GoToManagementButton" -a $AppPid -t 5000 2>$null | Out-Null

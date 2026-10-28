@@ -28,19 +28,35 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="controls:CapacityBar">
-                    <!--  The track is the free space, so an empty volume reads as empty rather than
-                          as a bar full of a "free" colour.
-
-                          Painted with SmFreeTrackBrush rather than SmDividerBrush. A divider is
-                          meant to be barely there; free space is not. As a divider this measured
-                          1.12:1 against the card header, so the one quantity the app exists to
-                          increase was the one thing on the bar nobody could see.
+                    <!--  The track no longer paints the free space itself: free is a band, so the bar
+                          can leave a gap between it and the last used band (see SmCapacityBandStyle).
+                          The free band is painted with SmFreeTrackBrush rather than SmDividerBrush. A
+                          divider is meant to be barely there; free space is not. As a divider this
+                          measured 1.12:1 against the card header, so the one quantity the app exists
+                          to increase was the one thing on the bar nobody could see.
 
                           CornerRadius is applied from code rather than template-bound, because it has
                           to be clamped against the measured height before it can be honoured.  -->
-                    <Border x:Name="PART_Track" Background="{ThemeResource SmFreeTrackBrush}">
-                        <Grid x:Name="PART_Root" />
-                    </Border>
+                    <Grid>
+                        <Border x:Name="PART_Track">
+                            <Grid x:Name="PART_Root" />
+                        </Border>
+
+                        <!--  Colour probe for the hatched freed band, which has to be built in code.
+                              ThemeResource resolves against this element's own theme, which is the one
+                              the bar must match; Application.Current.Resources would follow the app's
+                              theme instead. The same trap, and the same answer, as TreemapPane.  -->
+                        <Border
+                            x:Name="PART_GoodProbe"
+                            Width="0"
+                            Height="0"
+                            HorizontalAlignment="Left"
+                            VerticalAlignment="Top"
+                            AutomationProperties.AccessibilityView="Raw"
+                            Background="{ThemeResource SmGoodBrush}"
+                            IsHitTestVisible="False"
+                            Opacity="0" />
+                    </Grid>
                 </ControlTemplate>
             </Setter.Value>
         </Setter>

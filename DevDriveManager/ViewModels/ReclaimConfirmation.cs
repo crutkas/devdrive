@@ -245,6 +245,19 @@ public sealed record ReclaimConfirmationRequest(
             : $"Remove {ItemCountText} ({BytesText}) — {PermanentBytesText} of it permanently";
 
     /// <summary>
+    /// The confirming button's verb. It repeats the headline's verb rather than a generic one: a
+    /// headline that says "Move to the Recycle Bin" over a button that says "Remove" makes the reader
+    /// wonder which of the two will happen, and a button that says "Remove" over "Permanently
+    /// delete" softens the one word that should not be softened. Only the mixed batch, which really
+    /// does both, keeps the umbrella verb.
+    /// </summary>
+    public string PrimaryActionText => !HasPermanent
+        ? "Move to Recycle Bin"
+        : AllPermanent
+            ? "Delete permanently"
+            : "Remove";
+
+    /// <summary>
     /// Whether this can be undone, and for the mixed case, which parts cannot. Names the permanent
     /// items rather than counting them: "3 of these cannot go to the Recycle Bin" tells the reader
     /// there is a decision without telling them enough to make it.

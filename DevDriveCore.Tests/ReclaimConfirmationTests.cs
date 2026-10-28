@@ -81,6 +81,30 @@ public sealed class ReclaimConfirmationTests
     }
 
     /// <summary>
+    /// The button repeats the headline's verb. "Remove" under "Move 3 items to the Recycle Bin" left
+    /// the reader to guess which would happen, and under "Permanently delete" it softened the one
+    /// word that must not be softened.
+    /// </summary>
+    [TestMethod]
+    public void ThePrimaryButtonUsesTheHeadlinesVerb()
+    {
+        ReclaimConfirmationRequest recycle = Request();
+        ReclaimConfirmationRequest permanent = Request(
+            itemCount: 2, bytes: 1_000, permanentCount: 2, permanentBytes: 1_000, permanentNames: ["a", "b"]);
+        ReclaimConfirmationRequest mixed = Request(
+            itemCount: 3, bytes: 5_000, permanentCount: 1, permanentBytes: 1_000, permanentNames: ["a"]);
+
+        Assert.AreEqual("Move to Recycle Bin", recycle.PrimaryActionText);
+        StringAssert.StartsWith(recycle.Headline, "Move");
+
+        Assert.AreEqual("Delete permanently", permanent.PrimaryActionText);
+        StringAssert.StartsWith(permanent.Headline, "Permanently delete");
+
+        Assert.AreEqual("Remove", mixed.PrimaryActionText);
+        StringAssert.StartsWith(mixed.Headline, "Remove");
+    }
+
+    /// <summary>
     /// The trust fix: an item the bin would refuse is named as permanent — with the reason — before
     /// the user agrees, rather than being silently nuked by the shell after a promise of the bin.
     /// </summary>

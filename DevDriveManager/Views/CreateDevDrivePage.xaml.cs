@@ -89,6 +89,9 @@ public sealed partial class CreateDevDrivePage : Page, INotifyPropertyChanged
     /// <summary>The hint's verb, naming the prize.</summary>
     public string ReclaimTieInAction => $"Reclaim {App.SharedReclaim.FoundRiskMix.SafeText}";
 
+    /// <summary>Why the rest of the app is out of reach while Create is working.</summary>
+    internal const string NavigationLockedText = "Other rooms are unavailable until this finishes";
+
     /// <summary>Shows <see cref="Visibility.Visible"/> when <paramref name="value"/> is true.</summary>
     public static Visibility BoolToVisibility(bool value) => value ? Visibility.Visible : Visibility.Collapsed;
 
@@ -253,6 +256,10 @@ public sealed partial class CreateDevDrivePage : Page, INotifyPropertyChanged
         {
             StatusBar.Facts.Add(new StatusFact("Working", StatusEmphasis.Warn));
             StatusBar.Facts.Add(new StatusFact("Do not power off the machine"));
+
+            // The rail is locked for the duration, and a disabled NavigationViewItem never opens its
+            // tooltip, so this line is the only place a sighted user is told why.
+            StatusBar.Facts.Add(new StatusFact(NavigationLockedText));
             return;
         }
 

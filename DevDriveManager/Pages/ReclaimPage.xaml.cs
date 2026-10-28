@@ -243,7 +243,7 @@ public sealed partial class ReclaimPage : Page, INotifyPropertyChanged
         {
             Title = request.Headline,
             Content = body,
-            PrimaryButtonText = "Remove",
+            PrimaryButtonText = request.PrimaryActionText,
             CloseButtonText = "Cancel",
 
             // Cancel is the default so that Enter, and a dialog that appears under a moving cursor,
@@ -312,6 +312,37 @@ public sealed partial class ReclaimPage : Page, INotifyPropertyChanged
 
         _nameColumnWidth = available;
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(NameColumnWidth)));
+    }
+
+    /// <summary>The risk bar's floor when it shares the footer's line, matching the XAML column.</summary>
+    private const double FooterRiskMinWidth = 90;
+
+    private bool _footerStacked;
+
+    /// <summary>
+    /// Drops the selection footer's risk bar to its own row when the totals, the bar's floor and
+    /// the buttons no longer fit on one line.
+    /// </summary>
+    /// <remarks>
+    /// Raised by the footer and by both of its Auto-sized ends, because the answer changes with the
+    /// text as well as with the column: "131.6 GB selected of 412.9 GB found" after a scan is twice
+    /// the width of the "0 B selected of 0 B found" it replaces. Inline needs every piece at its
+    /// natural width, and the ends report exactly that in either state — Auto columns are never
+    /// squeezed — so the test cannot oscillate.
+    /// </remarks>
+    private void SelectionFooter_SizeChanged(object sender, SizeChangedEventArgs args)
+    {
+        Thickness padding = SelectionFooter.Padding;
+        double available = SelectionFooter.ActualWidth - padding.Left - padding.Right;
+        double inline = FooterTotals.ActualWidth + FooterRiskMinWidth + FooterActions.ActualWidth +
+            (2 * SelectionFooterGrid.ColumnSpacing);
+
+        bool stacked = available > 0 && available < inline;
+        if (stacked != _footerStacked)
+        {
+            _footerStacked = stacked;
+            VisualStateManager.GoToState(this, stacked ? "FooterStacked" : "FooterInline", useTransitions: false);
+        }
     }
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)

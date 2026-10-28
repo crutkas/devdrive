@@ -252,6 +252,7 @@
                                 <TextBlock
                                     HorizontalAlignment="Center"
                                     AutomationProperties.AutomationId="SignalsEmptyTitle"
+                                    AutomationProperties.HeadingLevel="None"
                                     Style="{StaticResource SmCardTitleTextStyle}"
                                     Text="{x:Bind EmptyTitle, Mode=OneWay}" />
                                 <TextBlock
@@ -392,6 +393,7 @@
                                 <TextBlock
                                     HorizontalAlignment="Center"
                                     AutomationProperties.AutomationId="TrendEmptyTitle"
+                                    AutomationProperties.HeadingLevel="None"
                                     Style="{StaticResource SmCardTitleTextStyle}"
                                     Text="Not enough history yet" />
                                 <TextBlock

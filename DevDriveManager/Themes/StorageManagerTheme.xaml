@@ -84,7 +84,11 @@
 
             <SolidColorBrush x:Key="SmTextBrush" Color="#141821" />
             <SolidColorBrush x:Key="SmMutedBrush" Color="#CC141821" />
-            <SolidColorBrush x:Key="SmDimBrush" Color="#94141821" />
+            <!--  #9A, not the spec's .58 (#94). Dim ink carries 11.5px captions and card subtitles,
+                  and #94 measured 4.36:1 on the card, 4.31:1 on the card header and 4.22:1 on the
+                  canvas, all under the 4.5:1 AA asks for text that size. #9A measures 4.74, 4.63
+                  and 4.53 on the same three surfaces.  -->
+            <SolidColorBrush x:Key="SmDimBrush" Color="#9A141821" />
             <SolidColorBrush x:Key="SmFaintBrush" Color="#66141821" />
 
             <SolidColorBrush x:Key="SmAccentBrush" Color="#0F6CBD" />
@@ -132,8 +136,12 @@
 
             <SolidColorBrush x:Key="SmTextBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
             <SolidColorBrush x:Key="SmMutedBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
-            <SolidColorBrush x:Key="SmDimBrush" Color="{ThemeResource SystemColorGrayTextColor}" />
-            <SolidColorBrush x:Key="SmFaintBrush" Color="{ThemeResource SystemColorGrayTextColor}" />
+            <!--  WindowText, not GrayText. GrayText is the system's colour for *disabled* text, so
+                  using it for live captions told a high-contrast reader that every subtitle, column
+                  header and inspector value was switched off. The free track above is the one place
+                  GrayText stays, because it is a channel, not text.  -->
+            <SolidColorBrush x:Key="SmDimBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
+            <SolidColorBrush x:Key="SmFaintBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
 
             <SolidColorBrush x:Key="SmAccentBrush" Color="{ThemeResource SystemColorHighlightColor}" />
             <SolidColorBrush x:Key="SmSelectionBrush" Color="{ThemeResource SystemColorHighlightColor}" />
@@ -620,11 +628,15 @@
         <Setter Property="Fill" Value="{ThemeResource SmStrokeBrush}" />
     </Style>
 
+    <!--  A card head's title is the card's heading: level 2 under the page's level-1 title, so a
+          screen-reader user can jump card to card with the heading key the way a sighted reader
+          scans the heads. An empty-state title that borrows this style opts out locally.  -->
     <Style x:Key="SmCardTitleTextStyle" TargetType="TextBlock">
         <Setter Property="FontSize" Value="13" />
         <Setter Property="FontWeight" Value="SemiBold" />
         <Setter Property="Foreground" Value="{ThemeResource SmTextBrush}" />
         <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+        <Setter Property="AutomationProperties.HeadingLevel" Value="Level2" />
     </Style>
 
     <Style x:Key="SmCardSubTextStyle" TargetType="TextBlock">
@@ -990,11 +1002,14 @@
         one section ended and the next began. Headings now carry the weight and full ink; answers sit
         at body size in the muted ink, which is still well above the dim one.
     -->
+    <!--  Level 3: these sit under the inspector card's own level-2 title. Bold type alone is not
+          structure a screen reader can navigate by.  -->
     <Style x:Key="SmInspectorHeadingTextStyle" TargetType="TextBlock">
         <Setter Property="FontSize" Value="13" />
         <Setter Property="FontWeight" Value="SemiBold" />
         <Setter Property="Foreground" Value="{ThemeResource SmTextBrush}" />
         <Setter Property="TextWrapping" Value="Wrap" />
+        <Setter Property="AutomationProperties.HeadingLevel" Value="Level3" />
     </Style>
 
     <Style x:Key="SmInspectorBodyTextStyle" TargetType="TextBlock">
@@ -1037,6 +1052,81 @@
         <Setter Property="FontSize" Value="12.5" />
         <Setter Property="CornerRadius" Value="5" />
         <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <!--
+        CapacityBar bands, one style per band kind.
+
+        The bar builds its bands in code, and it used to hand each one a Brush read from
+        Application.Current.Resources. That lookup follows the app-wide theme rather than the bar's
+        own ActualTheme, so with the in-app theme set against the Windows one (Dark on a Light OS,
+        say) every bar repainted itself in the other theme's colours on each theme change. A Style
+        is theme-independent and its ThemeResource setters resolve against the element they land on,
+        which is the same answer DevDriveDiskBar and the pills already use.
+
+        The free track is a band too, rather than the track's background, so the bar can leave a gap
+        between the last band and the free channel. Used against free measures as little as 1.35:1
+        in Light; the gap puts the card behind each edge instead, which is the contrast the bands
+        were designed against.
+    -->
+    <Style x:Key="SmCapacityBandStyle" TargetType="Rectangle" />
+
+    <Style
+        x:Key="SmCapacityUsedBandStyle"
+        BasedOn="{StaticResource SmCapacityBandStyle}"
+        TargetType="Rectangle">
+        <Setter Property="Fill" Value="{ThemeResource SmCategory0Brush}" />
+    </Style>
+
+    <Style
+        x:Key="SmCapacityDevDriveBandStyle"
+        BasedOn="{StaticResource SmCapacityBandStyle}"
+        TargetType="Rectangle">
+        <Setter Property="Fill" Value="{ThemeResource SmCategory2Brush}" />
+    </Style>
+
+    <Style
+        x:Key="SmCapacityReclaimableBandStyle"
+        BasedOn="{StaticResource SmCapacityBandStyle}"
+        TargetType="Rectangle">
+        <Setter Property="Fill" Value="{ThemeResource SmCategory3Brush}" />
+    </Style>
+
+    <Style
+        x:Key="SmCapacitySafeBandStyle"
+        BasedOn="{StaticResource SmCapacityBandStyle}"
+        TargetType="Rectangle">
+        <Setter Property="Fill" Value="{ThemeResource SmGoodBrush}" />
+    </Style>
+
+    <Style
+        x:Key="SmCapacityCheckBandStyle"
+        BasedOn="{StaticResource SmCapacityBandStyle}"
+        TargetType="Rectangle">
+        <Setter Property="Fill" Value="{ThemeResource SmWarnBrush}" />
+    </Style>
+
+    <Style
+        x:Key="SmCapacityCarefulBandStyle"
+        BasedOn="{StaticResource SmCapacityBandStyle}"
+        TargetType="Rectangle">
+        <Setter Property="Fill" Value="{ThemeResource SmBadBrush}" />
+    </Style>
+
+    <Style
+        x:Key="SmCapacityFreeBandStyle"
+        BasedOn="{StaticResource SmCapacityBandStyle}"
+        TargetType="Rectangle">
+        <Setter Property="Fill" Value="{ThemeResource SmFreeTrackBrush}" />
+    </Style>
+
+    <!--  The freed band under high contrast: solid Highlight rather than a 55% hatch, because a
+          translucent stripe is exactly what the mode exists to remove.  -->
+    <Style
+        x:Key="SmCapacityFreedSolidBandStyle"
+        BasedOn="{StaticResource SmCapacityBandStyle}"
+        TargetType="Rectangle">
+        <Setter Property="Fill" Value="{ThemeResource SystemColorHighlightColorBrush}" />
     </Style>
 
 </ResourceDictionary>
