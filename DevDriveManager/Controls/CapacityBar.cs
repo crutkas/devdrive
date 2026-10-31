@@ -5,6 +5,7 @@ using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Shapes;
 using Windows.Foundation;
 using Windows.UI;
+using Windows.UI.ViewManagement;
 
 namespace DevDriveManager.Controls;
 
@@ -17,25 +18,32 @@ namespace DevDriveManager.Controls;
 /// <see cref="VolumeCapacity"/> in the storage library, which is where it is unit tested; this class
 /// only paints what it is handed.
 /// <para>
-/// Free space is drawn as the track, not as a segment. Painting "free" as a band would make an empty
-/// volume look as busy as a full one.
+/// Free space is painted in the track colour, not as another hue. Painting "free" as a coloured band
+/// would make an empty volume look as busy as a full one. It is its own rectangle, rather than the
+/// track's background, only so a gap can separate it from the bands.
 /// </para>
 /// </remarks>
 public sealed partial class CapacityBar : Control
 {
+    private static readonly AccessibilitySettings Accessibility = new();
+
+    /// <summary>
+    /// The gap between the last band and the free track, in DIPs. Used against free can be as low
+    /// as 1.35:1, so the edge is drawn by the card showing through rather than by those two colours
+    /// meeting. Same idea as <c>DevDriveDiskBar</c>'s segment gap, kept narrower because these bars
+    /// are as thin as 5px.
+    /// </summary>
+    private const double FreeTrackGap = 2d;
+
     private Grid? _root;
     private Border? _track;
+    private Border? _goodProbe;
+    private long _goodProbeToken;
 
     public CapacityBar()
     {
         DefaultStyleKey = typeof(CapacityBar);
         IsTabStop = false;
-
-        // Every band is an imperatively created Rectangle with a resolved Fill, so nothing on this
-        // bar re-resolves on its own. Without this the bar keeps its old-theme colours through a
-        // light/dark or high-contrast switch -- and high contrast is precisely the case where a
-        // stale palette stops being cosmetic.
-        ActualThemeChanged += (_, _) => Rebuild();
 
         // The radius can only be resolved once the bar has been measured, and it has to be redone
         // whenever either the request or the size changes.
@@ -64,8 +72,8 @@ public sealed partial class CapacityBar : Control
     /// This is deliberately the <i>role</i>, not a <see cref="Brush"/>. A brush handed in from
     /// outside is resolved once against whichever theme was live at the time and can never
     /// re-resolve, so the bar kept its old-theme colours across a light/dark or high-contrast
-    /// switch. The role is theme-independent; this control turns it into a colour, and re-runs that
-    /// translation on <see cref="FrameworkElement.ActualThemeChanged"/>.
+    /// switch. The role is theme-independent; this control turns it into a band style whose
+    /// <c>ThemeResource</c> setter follows the bar's own theme.
     /// </remarks>
     public VolumeAccentRole AccentRole
     {
@@ -82,8 +90,22 @@ public sealed partial class CapacityBar : Control
     protected override void OnApplyTemplate()
     {
         base.OnApplyTemplate();
+
+        _goodProbe?.UnregisterPropertyChangedCallback(Border.BackgroundProperty, _goodProbeToken);
+
         _root = GetTemplateChild("PART_Root") as Grid;
         _track = GetTemplateChild("PART_Track") as Border;
+        _goodProbe = GetTemplateChild("PART_GoodProbe") as Border;
+
+        // The probe's ThemeResource re-resolves on a light/dark or high-contrast switch of THIS
+        // element's theme, which is the only signal the hatched band needs to be rebuilt. Every
+        // other band is styled and re-inks itself.
+        if (_goodProbe is not null)
+        {
+            _goodProbeToken = _goodProbe.RegisterPropertyChangedCallback(
+                Border.BackgroundProperty, (_, _) => Rebuild());
+        }
+
         ApplyCornerRadius();
         Rebuild();
     }
@@ -134,56 +156,97 @@ public sealed partial class CapacityBar : Control
 
     private void Rebuild()
     {
-        if (_root is null)
+        if (_root is not { } root)
         {
             return;
         }
 
-        _root.ColumnDefinitions.Clear();
-        _root.Children.Clear();
+        root.ColumnDefinitions.Clear();
+        root.Children.Clear();
 
         VolumeCapacityResult capacity = Capacity;
-        if (capacity.Segments.IsDefaultOrEmpty)
-        {
-            return;
-        }
+        bool highContrast = Accessibility.HighContrast;
 
         int column = 0;
-        foreach (CapacitySegment segment in capacity.Segments)
+        if (!capacity.Segments.IsDefaultOrEmpty)
         {
-            if (segment.Fraction <= 0)
+            foreach (CapacitySegment segment in capacity.Segments)
             {
-                continue;
+                if (segment.Fraction <= 0)
+                {
+                    continue;
+                }
+
+                AddColumn(segment.Fraction);
+
+                if (segment.Kind == CapacitySegmentKind.Freed && !highContrast && FreedHatch() is { } hatch)
+                {
+                    // The hatch's faded stripes sit over the free channel, exactly as they did when
+                    // the track behind every band was the free colour.
+                    AddBand(column, "SmCapacityFreeBandStyle");
+                    AddBand(column, "SmCapacityBandStyle").Fill = hatch;
+                }
+                else
+                {
+                    AddBand(column, StyleKeyFor(segment.Kind));
+                }
+
+                column++;
             }
-
-            _root.ColumnDefinitions.Add(
-                new ColumnDefinition { Width = new GridLength(segment.Fraction, GridUnitType.Star) });
-
-            Rectangle band = new() { Fill = BrushFor(segment.Kind) };
-            Grid.SetColumn(band, column++);
-            _root.Children.Add(band);
         }
 
-        // The remainder is the untouched track, so it gets a column but no rectangle.
-        if (capacity.FreeFraction > 0)
+        // An unloaded or unmeasured volume is all track, so an empty bar reads as empty rather than
+        // as missing.
+        double free = column == 0 ? 1 : capacity.FreeFraction;
+        if (free > 0)
         {
-            _root.ColumnDefinitions.Add(
-                new ColumnDefinition { Width = new GridLength(capacity.FreeFraction, GridUnitType.Star) });
+            AddColumn(free);
+            Rectangle track = AddBand(column, "SmCapacityFreeBandStyle");
+            if (column > 0)
+            {
+                track.Margin = new Thickness(FreeTrackGap, 0, 0, 0);
+            }
+        }
+
+        void AddColumn(double fraction) =>
+            root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(fraction, GridUnitType.Star) });
+
+        Rectangle AddBand(int at, string styleKey)
+        {
+            Rectangle band = new();
+            if (Application.Current.Resources.TryGetValue(styleKey, out object? value) && value is Style style)
+            {
+                band.Style = style;
+            }
+
+            Grid.SetColumn(band, at);
+            root.Children.Add(band);
+            return band;
         }
     }
 
-    private Brush? BrushFor(CapacitySegmentKind kind) => kind switch
+    /// <summary>
+    /// Which band style paints a segment.
+    /// </summary>
+    /// <remarks>
+    /// A <see cref="Style"/> key rather than a <see cref="Brush"/>. The brushes used to be read from
+    /// <c>Application.Current.Resources</c>, which answers for the app-wide theme rather than this
+    /// element's <see cref="FrameworkElement.ActualTheme"/>, so with the in-app theme set against the
+    /// Windows one every rebuild painted the other theme's colours. A style is theme-independent
+    /// and its <c>ThemeResource</c> setter resolves against the band it is applied to.
+    /// </remarks>
+    private string StyleKeyFor(CapacitySegmentKind kind) => kind switch
     {
         // Amber reads as "actionable" rather than "consumed", which is what reclaimable space is.
-        CapacitySegmentKind.Reclaimable => Resolve("SmCategory3Brush"),
-        CapacitySegmentKind.Freed => FreedBrush(),
-        CapacitySegmentKind.Safe => Resolve("SmGoodBrush"),
-        CapacitySegmentKind.Check => Resolve("SmWarnBrush"),
-        CapacitySegmentKind.Careful => Resolve("SmBadBrush"),
+        CapacitySegmentKind.Reclaimable => "SmCapacityReclaimableBandStyle",
+        CapacitySegmentKind.Freed => "SmCapacityFreedSolidBandStyle",
+        CapacitySegmentKind.Safe => "SmCapacitySafeBandStyle",
+        CapacitySegmentKind.Check => "SmCapacityCheckBandStyle",
+        CapacitySegmentKind.Careful => "SmCapacityCarefulBandStyle",
         // Same palette as the Create room's disk bar: used space is blue, a Dev Drive is teal. Other
         // volumes used to be slate (SmCategory5), which is nearly the free track's own colour, so
         // used and free could not be told apart.
-        _ => Resolve(AccentRole == VolumeAccentRole.DevDrive ? "SmCategory2Brush" : "SmCategory0Brush"),
+        _ => AccentRole == VolumeAccentRole.DevDrive ? "SmCapacityDevDriveBandStyle" : "SmCapacityUsedBandStyle",
     };
 
     /// <summary>
@@ -200,10 +263,15 @@ public sealed partial class CapacityBar : Control
     /// <c>repeating-linear-gradient(135deg, good 0 4px, good/55% 4px 8px)</c>. Duplicated stops at
     /// 0.5 give the hard edge; a smooth ramp would read as a gradient fill, not a hatch.
     /// </para>
+    /// <para>
+    /// A gradient cannot be expressed as a <c>ThemeResource</c>, so its colour is read back from the
+    /// template's probe, whose own <c>ThemeResource</c> resolves against this bar's theme. Under high
+    /// contrast the caller skips this entirely and paints solid Highlight.
+    /// </para>
     /// </remarks>
-    private Brush? FreedBrush()
+    private LinearGradientBrush? FreedHatch()
     {
-        if (Resolve("SmGoodBrush") is not SolidColorBrush good)
+        if (_goodProbe?.Background is not SolidColorBrush good)
         {
             return null;
         }
@@ -226,7 +294,4 @@ public sealed partial class CapacityBar : Control
             },
         };
     }
-
-    private static Brush? Resolve(string key) =>
-        Application.Current.Resources.TryGetValue(key, out object? value) ? value as Brush : null;
 }

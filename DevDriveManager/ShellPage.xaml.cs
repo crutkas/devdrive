@@ -72,6 +72,12 @@ public sealed partial class ShellPage : Page
     private IEnumerable<NavigationViewItem> AllNavItems() =>
         ShellNavView.MenuItems.Concat(ShellNavView.FooterMenuItems).OfType<NavigationViewItem>();
 
+    /// <remarks>
+    /// The explanation is carried by <c>AutomationProperties.HelpText</c> and by the Create room's
+    /// status bar, not by a tooltip. A disabled <see cref="NavigationViewItem"/> never opens its
+    /// tooltip, so the old "Unavailable while…" tooltip was set on exactly the items that could not
+    /// show it. HelpText is still read by a screen reader on a disabled item.
+    /// </remarks>
     private void UpdateNavigationLock()
     {
         bool locked = IsNavigationLocked;
@@ -79,9 +85,9 @@ public sealed partial class ShellPage : Page
         {
             bool isCreate = item.Tag as string == CreateTag;
             item.IsEnabled = !locked || isCreate;
-            ToolTipService.SetToolTip(item, locked && !isCreate
-                ? "Unavailable while the Dev Drive is being created"
-                : AutomationProperties.GetName(item));
+            AutomationProperties.SetHelpText(item, locked && !isCreate
+                ? CreateDevDrivePage.NavigationLockedText
+                : string.Empty);
         }
     }
 

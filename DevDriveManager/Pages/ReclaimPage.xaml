@@ -54,10 +54,17 @@
             The centre is a table over an always-visible visual, exactly like the table over the
             treemap next door.
 
-            Side by side the three need about 986 DIPs plus the 72px rail. Below the Wide breakpoint
-            the inspector drops under the rail and the table instead of squeezing the centre, and the
-            room scrolls vertically; at full width it keeps its fixed-height, internally scrolling
-            cards, so the scroller is switched off there and star rows still get a real height.
+            Three layouts, by window width (see WidthStates at the foot of the page):
+              Wide    1080+  rail 236, centre 380+, inspector 312 — 986 DIPs plus the 72px rail.
+              Medium  980+   rail 212, centre 340+, inspector 280 — still three columns, so a
+                             1024-wide window keeps the inspector beside the table instead of
+                             under 700 DIPs of content.
+              Narrow  below  the inspector drops under the rail and the table, and the room scrolls.
+
+            Whenever the room does not scroll, the scroller is switched off so star rows get a real
+            height. When it does scroll, row 0 is given a fixed height instead (RoomTopRow), because a
+            star row inside a vertical scroller is measured at infinite height — and so is every
+            ListView in it, which then realises every item and loses its own scrolling.
         -->
         <ScrollViewer
             x:Name="RoomScroller"
@@ -72,11 +79,14 @@
                 ColumnSpacing="11">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition x:Name="RailColumn" Width="236" />
-                    <ColumnDefinition Width="*" MinWidth="380" />
+                    <ColumnDefinition
+                        x:Name="CentreColumn"
+                        Width="*"
+                        MinWidth="380" />
                     <ColumnDefinition x:Name="InspectorColumn" Width="312" />
                 </Grid.ColumnDefinitions>
                 <Grid.RowDefinitions>
-                    <RowDefinition Height="*" />
+                    <RowDefinition x:Name="RoomTopRow" Height="*" />
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
@@ -286,7 +296,10 @@
                             rendering bug rather than a design choice.
                         -->
                         <RowDefinition Height="Auto" />
-                        <RowDefinition Height="*" MinHeight="150" />
+                        <RowDefinition
+                            x:Name="AfterPictureRow"
+                            Height="*"
+                            MinHeight="150" />
                     </Grid.RowDefinitions>
 
                     <Border
@@ -458,24 +471,40 @@
                                 same line as the button: how much, out of how much, split by risk, and
                                 on which volume. Found and selected live here rather than beside the
                                 after-picture because this is where the decision is actually made.
+
+                                When the centre column is too narrow for all three side by side (a
+                                1024-wide window, or Wide just above its breakpoint), the risk bar
+                                drops to a second row rather than pushing the button off the card.
+                                The totals and the button stay on one line. See FooterStates.
                             -->
                             <Border
+                                x:Name="SelectionFooter"
                                 Grid.Row="3"
                                 Padding="13,9,13,10"
                                 Background="{ThemeResource SmCardHeaderBrush}"
                                 BorderBrush="{ThemeResource SmDividerBrush}"
-                                BorderThickness="0,1,0,0">
-                                <Grid ColumnSpacing="13">
+                                BorderThickness="0,1,0,0"
+                                SizeChanged="SelectionFooter_SizeChanged">
+                                <Grid x:Name="SelectionFooterGrid" ColumnSpacing="13">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="*" MinWidth="90" />
+                                        <ColumnDefinition
+                                            x:Name="FooterRiskColumn"
+                                            Width="*"
+                                            MinWidth="90" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
 
                                     <StackPanel
+                                        x:Name="FooterTotals"
                                         Grid.Column="0"
                                         VerticalAlignment="Center"
                                         Orientation="Horizontal"
+                                        SizeChanged="SelectionFooter_SizeChanged"
                                         Spacing="6">
                                         <TextBlock
                                             VerticalAlignment="Bottom"
@@ -501,6 +530,7 @@
                                     </StackPanel>
 
                                     <StackPanel
+                                        x:Name="FooterRisk"
                                         Grid.Column="1"
                                         VerticalAlignment="Center"
                                         Spacing="5">
@@ -517,9 +547,11 @@
                                     </StackPanel>
 
                                     <StackPanel
+                                        x:Name="FooterActions"
                                         Grid.Column="2"
                                         VerticalAlignment="Center"
                                         Orientation="Horizontal"
+                                        SizeChanged="SelectionFooter_SizeChanged"
                                         Spacing="8">
                                         <!--
                                             "Stop", not "Cancel". Cancel invites the reading that the run
@@ -715,7 +747,7 @@
                                                     AutomationProperties.AutomationId="ReclaimTierSafe"
                                                     Style="{StaticResource SmTierValueTextStyle}"
                                                     Text="{x:Bind ViewModel.SelectedRiskMix.SafeText, Mode=OneWay}" />
-                                                <TextBlock Style="{StaticResource SmCardSubTextStyle}" Text="{x:Bind ViewModel.SelectedRiskMix.SafeCountText, Mode=OneWay}" />
+                                                <TextBlock Style="{StaticResource SmCardSubTextStyle}" Text="{x:Bind ViewModel.SelectedRiskMix.SafeCountText, Mode=OneWay}" TextWrapping="Wrap" />
                                             </StackPanel>
                                         </Border>
 
@@ -733,7 +765,7 @@
                                                     AutomationProperties.AutomationId="ReclaimTierCheck"
                                                     Style="{StaticResource SmTierValueTextStyle}"
                                                     Text="{x:Bind ViewModel.SelectedRiskMix.CheckText, Mode=OneWay}" />
-                                                <TextBlock Style="{StaticResource SmCardSubTextStyle}" Text="{x:Bind ViewModel.SelectedRiskMix.CheckCountText, Mode=OneWay}" />
+                                                <TextBlock Style="{StaticResource SmCardSubTextStyle}" Text="{x:Bind ViewModel.SelectedRiskMix.CheckCountText, Mode=OneWay}" TextWrapping="Wrap" />
                                             </StackPanel>
                                         </Border>
 
@@ -751,7 +783,7 @@
                                                     AutomationProperties.AutomationId="ReclaimTierCareful"
                                                     Style="{StaticResource SmTierValueTextStyle}"
                                                     Text="{x:Bind ViewModel.SelectedRiskMix.CarefulText, Mode=OneWay}" />
-                                                <TextBlock Style="{StaticResource SmCardSubTextStyle}" Text="{x:Bind ViewModel.SelectedRiskMix.CarefulCountText, Mode=OneWay}" />
+                                                <TextBlock Style="{StaticResource SmCardSubTextStyle}" Text="{x:Bind ViewModel.SelectedRiskMix.CarefulCountText, Mode=OneWay}" TextWrapping="Wrap" />
                                             </StackPanel>
                                         </Border>
 
@@ -769,7 +801,7 @@
                                                     AutomationProperties.AutomationId="ReclaimTierTotal"
                                                     Style="{StaticResource SmTierValueTextStyle}"
                                                     Text="{x:Bind ViewModel.SelectedBytesText, Mode=OneWay}" />
-                                                <TextBlock Style="{StaticResource SmCardSubTextStyle}" Text="{x:Bind ViewModel.SelectedCountText, Mode=OneWay}" />
+                                                <TextBlock Style="{StaticResource SmCardSubTextStyle}" Text="{x:Bind ViewModel.SelectedCountText, Mode=OneWay}" TextWrapping="Wrap" />
                                             </StackPanel>
                                         </Border>
                                     </Grid>
@@ -866,12 +898,31 @@
             Hints="Space select · Enter open" />
 
         <VisualStateManager.VisualStateGroups>
+            <!--
+                Width and height are separate groups that never set the same property, so whichever
+                pair of states is active, neither undoes the other on its way out.
+            -->
             <VisualStateGroup x:Name="WidthStates">
                 <!--  986 DIPs of columns + 72 of rail + slack.  -->
                 <VisualState x:Name="Wide">
                     <VisualState.StateTriggers>
                         <AdaptiveTrigger MinWindowWidth="1080" />
                     </VisualState.StateTriggers>
+                </VisualState>
+                <!--
+                    Still three columns, each a little leaner: 212 + 340 + 280 + gutters is 890 DIPs,
+                    plus the rail. Stacking at this width put the inspector — the "should I" half of
+                    the room — below the fold of a 1024 x 700 window.
+                -->
+                <VisualState x:Name="Medium">
+                    <VisualState.StateTriggers>
+                        <AdaptiveTrigger MinWindowWidth="980" />
+                    </VisualState.StateTriggers>
+                    <VisualState.Setters>
+                        <Setter Target="RailColumn.Width" Value="212" />
+                        <Setter Target="CentreColumn.MinWidth" Value="340" />
+                        <Setter Target="InspectorColumn.Width" Value="280" />
+                    </VisualState.Setters>
                 </VisualState>
                 <VisualState x:Name="Narrow">
                     <VisualState.StateTriggers>
@@ -880,6 +931,13 @@
                     <VisualState.Setters>
                         <Setter Target="RoomScroller.VerticalScrollMode" Value="Enabled" />
                         <Setter Target="RoomScroller.VerticalScrollBarVisibility" Value="Auto" />
+                        <!--
+                            Bounded, because the scroller is now live: a star row would be measured at
+                            infinite height and take the category list's virtualisation and scrolling
+                            with it. 560 holds the table at its full height over the after-picture's
+                            minimum.
+                        -->
+                        <Setter Target="RoomTopRow.Height" Value="560" />
                         <!--
                             Spacing moves onto the rail's margin so the empty inspector column does
                             not leave an 11px gutter after the centre, and the stacked inspector
@@ -893,6 +951,48 @@
                         <Setter Target="InspectorCard.(Grid.ColumnSpan)" Value="3" />
                         <Setter Target="InspectorCard.(Grid.Row)" Value="1" />
                         <Setter Target="InspectorCard.Margin" Value="0,11,0,0" />
+                    </VisualState.Setters>
+                </VisualState>
+            </VisualStateGroup>
+
+            <!--
+                The width states assume a room row of about 560 DIPs: a full candidate table (268)
+                over the after-picture's 150 floor. A 1280 x 690 window leaves about 510, and with the
+                scroller off in Wide and Medium the after-picture was clipped rather than scrolled.
+                Below 760 tall the table and the after-picture both give up height instead; each
+                scrolls internally, so nothing is lost, only shown in a shorter window.
+            -->
+            <VisualStateGroup x:Name="HeightStates">
+                <VisualState x:Name="Tall">
+                    <VisualState.StateTriggers>
+                        <AdaptiveTrigger MinWindowHeight="760" />
+                    </VisualState.StateTriggers>
+                </VisualState>
+                <VisualState x:Name="Short">
+                    <VisualState.StateTriggers>
+                        <AdaptiveTrigger MinWindowHeight="0" />
+                    </VisualState.StateTriggers>
+                    <VisualState.Setters>
+                        <Setter Target="RowList.MaxHeight" Value="148" />
+                        <Setter Target="AfterPictureRow.MinHeight" Value="112" />
+                    </VisualState.Setters>
+                </VisualState>
+            </VisualStateGroup>
+
+            <!--
+                Driven from code (SelectionFooter_SizeChanged), because the question is not how wide
+                the window is but whether the footer's own contents fit, and those change with the
+                numbers in them as well as with the column.
+            -->
+            <VisualStateGroup x:Name="FooterStates">
+                <VisualState x:Name="FooterInline" />
+                <VisualState x:Name="FooterStacked">
+                    <VisualState.Setters>
+                        <Setter Target="SelectionFooterGrid.RowSpacing" Value="8" />
+                        <Setter Target="FooterRiskColumn.MinWidth" Value="0" />
+                        <Setter Target="FooterRisk.(Grid.Row)" Value="1" />
+                        <Setter Target="FooterRisk.(Grid.Column)" Value="0" />
+                        <Setter Target="FooterRisk.(Grid.ColumnSpan)" Value="3" />
                     </VisualState.Setters>
                 </VisualState>
             </VisualStateGroup>
