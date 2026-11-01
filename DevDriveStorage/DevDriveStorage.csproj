@@ -6,6 +6,8 @@
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
     <Platforms>x64;ARM64</Platforms>
+    <!-- Consumers publish with NativeAOT; turns on the trim, AOT and single-file analyzers. -->
+    <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
 
   <ItemGroup>

@@ -4,7 +4,7 @@ using System.Text;
 using System.Text.Json;
 using DevDriveCore.Abstractions;
 using DevDriveCore.Models;
-using DevDriveCore.Services;
+using DevDriveCore.Serialization;
 
 namespace DevDriveCore.Platform;
 
@@ -210,7 +210,7 @@ public sealed class ElevatedResizeBroker : IElevatedResizeBroker
         char target = 'D';
         try
         {
-            ResizePlan? plan = JsonSerializer.Deserialize<ResizePlan>(request.PlanJson, VolumeResizer.JsonOptions);
+            ResizePlan? plan = InitializerPreservingJson.Deserialize(request.PlanJson, HelperJsonContext.Default.ResizePlan);
             if (plan is not null)
             {
                 source = char.ToUpperInvariant(plan.SourceVolumeLetter);
@@ -231,7 +231,7 @@ public sealed class ElevatedResizeBroker : IElevatedResizeBroker
             SourceVolumeLetter = source,
             NewDriveLetter = target,
         };
-        return JsonSerializer.Serialize(outcome, VolumeResizer.JsonOptions);
+        return JsonSerializer.Serialize(outcome, HelperJsonContext.Default.ResizeExecuteOutcome);
     }
 
     /// <summary>Resolves the helper path next to <c>DevDriveManager.exe</c> in the (packaged) install dir.</summary>
