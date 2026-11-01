@@ -2,6 +2,7 @@ using System.Text.Json;
 using DevDriveCore.Abstractions;
 using DevDriveCore.Models;
 using DevDriveCore.Platform;
+using DevDriveCore.Serialization;
 
 namespace DevDriveCore.Services;
 
@@ -51,7 +52,7 @@ public sealed class ElevatedVhdProvisioner : IVhdProvisioner
             Label = string.IsNullOrWhiteSpace(plan.Label) ? "DevDrive" : plan.Label.Trim(),
             ExecuteAuthorized = true,
         };
-        string planJson = JsonSerializer.Serialize(authorizedPlan, JsonOptions);
+        string planJson = JsonSerializer.Serialize(authorizedPlan, HelperJsonContext.Default.VhdProvisionPlan);
         var entry = new ReversibilityEntry
         {
             Id = VhdProvisioner.ReversibilityId(fullPath),
@@ -83,7 +84,7 @@ public sealed class ElevatedVhdProvisioner : IVhdProvisioner
         VhdProvisionResult result;
         try
         {
-            result = JsonSerializer.Deserialize<VhdProvisionResult>(resultJson, JsonOptions)
+            result = InitializerPreservingJson.Deserialize(resultJson, HelperJsonContext.Default.VhdProvisionResult)
                 ?? throw new JsonException("The elevated helper returned an empty result.");
         }
         catch (JsonException ex)
@@ -135,7 +136,7 @@ public sealed class ElevatedVhdProvisioner : IVhdProvisioner
 
         string planJson = JsonSerializer.Serialize(
             new VhdRevertPlan { FilePath = fullPath, ExecuteAuthorized = true },
-            JsonOptions);
+            HelperJsonContext.Default.VhdRevertPlan);
         string? resultJson = await _broker.InvokeAsync(
             new VhdBrokerRequest { Mode = VhdBrokerMode.Revert, PlanJson = planJson },
             cancellationToken).ConfigureAwait(false);
@@ -146,7 +147,7 @@ public sealed class ElevatedVhdProvisioner : IVhdProvisioner
                 "Administrator approval was declined or the bundled elevated helper is unavailable. The VHDX was not reverted.");
         }
 
-        VhdProvisionResult result = JsonSerializer.Deserialize<VhdProvisionResult>(resultJson, JsonOptions)
+        VhdProvisionResult result = InitializerPreservingJson.Deserialize(resultJson, HelperJsonContext.Default.VhdProvisionResult)
             ?? throw new InvalidOperationException("The elevated helper returned an empty VHDX revert result.");
         if (!result.Success)
         {
@@ -225,9 +226,4 @@ public sealed class ElevatedVhdProvisioner : IVhdProvisioner
             DriveLetter = plan.DriveLetter,
             ReversibilityId = reversibilityId,
         };
-
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        PropertyNameCaseInsensitive = true,
-    };
 }

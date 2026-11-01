@@ -27,6 +27,12 @@
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <!-- Some public members are self-documenting; don't fail the build on missing XML docs. -->
     <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <!--
+      Consumers publish this library with NativeAOT (Dev Config treats ILC warnings as errors), so the
+      trim, AOT and single-file analyzers run here. JSON goes through source-generated contexts
+      (Serialization\CoreJsonContexts.cs), never reflection.
+    -->
+    <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
 
   <ItemGroup>

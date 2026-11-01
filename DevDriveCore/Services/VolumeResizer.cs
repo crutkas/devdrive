@@ -1,6 +1,7 @@
 using System.Text.Json;
 using DevDriveCore.Abstractions;
 using DevDriveCore.Models;
+using DevDriveCore.Serialization;
 
 namespace DevDriveCore.Services;
 
@@ -22,10 +23,11 @@ namespace DevDriveCore.Services;
 /// </remarks>
 public sealed class VolumeResizer : IVolumeResizer
 {
-    internal static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        PropertyNameCaseInsensitive = true,
-    };
+    /// <summary>
+    /// The helper wire options (PascalCase out, case-insensitive in). They carry the source-generated
+    /// <see cref="HelperJsonContext"/> as their resolver, so they stay safe under trimming and NativeAOT.
+    /// </summary>
+    internal static readonly JsonSerializerOptions JsonOptions = HelperJsonContext.Default.Options;
 
     private readonly IElevatedResizeBroker _broker;
 
@@ -46,7 +48,7 @@ public sealed class VolumeResizer : IVolumeResizer
     {
         ArgumentNullException.ThrowIfNull(plan);
 
-        string planJson = JsonSerializer.Serialize(plan, JsonOptions);
+        string planJson = JsonSerializer.Serialize(plan, HelperJsonContext.Default.ResizePlan);
         string? resultJson = await _broker
             .InvokeAsync(new ResizeBrokerRequest(ResizeMode.WhatIf, planJson), cancellationToken)
             .ConfigureAwait(false);
@@ -60,7 +62,7 @@ public sealed class VolumeResizer : IVolumeResizer
         try
         {
             ResizeFeasibility? feasibility =
-                JsonSerializer.Deserialize<ResizeFeasibility>(resultJson, JsonOptions);
+                InitializerPreservingJson.Deserialize(resultJson, HelperJsonContext.Default.ResizeFeasibility);
             return feasibility is { CanProceed: true } && !ResizeGuard.HasPreviewIdentity(feasibility)
                 ? feasibility with
                 {
@@ -108,7 +110,7 @@ public sealed class VolumeResizer : IVolumeResizer
         // The helper refuses a `--execute` request whose plan lacks it, so a bare command-line `--execute`
         // can't reach the destructive path. Defence in depth — see ResizePlan.
         ResizePlan authorizedPlan = plan with { ExecuteAuthorized = true };
-        string planJson = JsonSerializer.Serialize(authorizedPlan, JsonOptions);
+        string planJson = JsonSerializer.Serialize(authorizedPlan, HelperJsonContext.Default.ResizePlan);
         string? resultJson = await _broker
             .InvokeAsync(new ResizeBrokerRequest(ResizeMode.Execute, planJson), cancellationToken)
             .ConfigureAwait(false);
@@ -121,7 +123,7 @@ public sealed class VolumeResizer : IVolumeResizer
         try
         {
             ResizeExecuteOutcome? outcome =
-                JsonSerializer.Deserialize<ResizeExecuteOutcome>(resultJson, JsonOptions);
+                InitializerPreservingJson.Deserialize(resultJson, HelperJsonContext.Default.ResizeExecuteOutcome);
             return IsTrustworthy(outcome, plan)
                 ? outcome!
                 : StateUnknown(plan, "The elevated helper returned an incomplete resize result.");

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using DevDriveCore.Models;
+using DevDriveCore.Serialization;
 
 namespace DevDriveCore.Services;
 
@@ -36,8 +37,6 @@ public interface IFreeSpaceHistoryStore
 /// </remarks>
 public sealed class JsonFreeSpaceHistoryStore : IFreeSpaceHistoryStore
 {
-    private static readonly JsonSerializerOptions Options = new() { WriteIndented = false };
-
     private readonly string _path;
     private readonly Lock _gate = new();
 
@@ -119,8 +118,10 @@ public sealed class JsonFreeSpaceHistoryStore : IFreeSpaceHistoryStore
                 return [];
             }
 
-            FreeSpaceSample[]? samples = JsonSerializer.Deserialize<FreeSpaceSample[]>(
-                File.ReadAllText(_path), Options);
+            FreeSpaceSample[]? samples = InitializerPreservingJson.DeserializeArray(
+                File.ReadAllText(_path),
+                FreeSpaceHistoryJsonContext.Default.FreeSpaceSampleArray,
+                FreeSpaceHistoryJsonContext.Default.FreeSpaceSample);
 
             return samples is null
                 ? []
@@ -143,7 +144,9 @@ public sealed class JsonFreeSpaceHistoryStore : IFreeSpaceHistoryStore
             }
 
             string temporary = _path + ".tmp";
-            File.WriteAllText(temporary, JsonSerializer.Serialize(samples, Options));
+            File.WriteAllText(
+                temporary,
+                JsonSerializer.Serialize(samples, FreeSpaceHistoryJsonContext.Default.IReadOnlyListFreeSpaceSample));
             File.Move(temporary, _path, overwrite: true);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)

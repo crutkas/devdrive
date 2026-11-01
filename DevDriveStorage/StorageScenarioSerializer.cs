@@ -4,20 +4,12 @@ using System.Text.Json.Serialization;
 
 namespace DevDriveStorage;
 
-public static class StorageScenarioSerializer
+public static partial class StorageScenarioSerializer
 {
-    private static readonly JsonSerializerOptions Options = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        PropertyNameCaseInsensitive = false,
-        UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
-        Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
-    };
-
     public static StorageSnapshot Deserialize(string json)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(json);
-        SnapshotDocument document = JsonSerializer.Deserialize<SnapshotDocument>(json, Options)
+        SnapshotDocument document = JsonSerializer.Deserialize(json, ScenarioJsonContext.Default.SnapshotDocument)
             ?? throw new JsonException("The scenario document was empty.");
 
         var nodes = document.Nodes.Select(node =>
@@ -88,4 +80,33 @@ public static class StorageScenarioSerializer
         string? Evidence,
         ProviderAvailability Availability,
         DateTimeOffset? ObservedAtUtc);
+
+    // Source-generated, so reading a scenario needs no reflection and stays safe under trimming and
+    // NativeAOT. Reproduces the options this reader has always used: camelCase member names matched
+    // case-sensitively, unknown members rejected, and enums as camelCase strings (integers still
+    // accepted). The enum converters are per type because an attribute cannot hand a naming policy to
+    // JsonStringEnumConverter<TEnum>'s constructor.
+    [JsonSourceGenerationOptions(
+        PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
+        PropertyNameCaseInsensitive = false,
+        UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
+        Converters =
+        [
+            typeof(CamelCaseEnumConverter<SnapshotCompletion>),
+            typeof(CamelCaseEnumConverter<StorageNodeKind>),
+            typeof(CamelCaseEnumConverter<ProviderAvailability>),
+        ])]
+    [JsonSerializable(typeof(SnapshotDocument))]
+    private sealed partial class ScenarioJsonContext : JsonSerializerContext
+    {
+    }
+
+    private sealed class CamelCaseEnumConverter<TEnum> : JsonStringEnumConverter<TEnum>
+        where TEnum : struct, Enum
+    {
+        public CamelCaseEnumConverter()
+            : base(JsonNamingPolicy.CamelCase)
+        {
+        }
+    }
 }

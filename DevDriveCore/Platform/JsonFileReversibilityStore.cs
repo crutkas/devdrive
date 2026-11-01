@@ -1,6 +1,7 @@
 using System.Text.Json;
 using DevDriveCore.Abstractions;
 using DevDriveCore.Models;
+using DevDriveCore.Serialization;
 
 namespace DevDriveCore.Platform;
 
@@ -17,8 +18,6 @@ namespace DevDriveCore.Platform;
 /// </remarks>
 public sealed class JsonFileReversibilityStore : IReversibilityStore
 {
-    private static readonly JsonSerializerOptions SerializerOptions = new() { WriteIndented = true };
-
     private readonly string _filePath;
 
     /// <summary>Creates a store backed by the JSON file at <paramref name="filePath"/>.</summary>
@@ -95,7 +94,10 @@ public sealed class JsonFileReversibilityStore : IReversibilityStore
 
         try
         {
-            ReversibilityEntry[]? entries = JsonSerializer.Deserialize<ReversibilityEntry[]>(json);
+            ReversibilityEntry[]? entries = InitializerPreservingJson.DeserializeArray(
+                json,
+                ReversibilityJsonContext.Default.ReversibilityEntryArray,
+                ReversibilityJsonContext.Default.ReversibilityEntry);
             if (entries is not null)
             {
                 foreach (ReversibilityEntry entry in entries)
@@ -141,7 +143,9 @@ public sealed class JsonFileReversibilityStore : IReversibilityStore
             Directory.CreateDirectory(dir);
         }
 
-        string json = JsonSerializer.Serialize(entries.Values.ToArray(), SerializerOptions);
+        string json = JsonSerializer.Serialize(
+            entries.Values.ToArray(),
+            ReversibilityJsonContext.Default.ReversibilityEntryArray);
 
         // F13 (atomic write): write to a sibling temp file then atomically replace the real file. A crash
         // or a full disk mid-write then leaves the previous good store intact instead of a truncated,

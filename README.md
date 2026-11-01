@@ -40,6 +40,14 @@ In-depth docs live in [`docs/`](docs/README.md):
 the real platform implementations. Pure decision logic is exposed as `public static` methods so it
 can be unit-tested directly.
 
+`DevDriveCore`, `DevDriveStorage`, and `DevDriveReclaim` are also consumed by apps published with
+NativeAOT, so they set `IsAotCompatible` and must build without trim or AOT analyzer warnings. Use the
+source-generated JSON contexts (`DevDriveCore\Serialization\CoreJsonContexts.cs` and the context inside
+`StorageScenarioSerializer`), never the reflection-based `JsonSerializer` overloads, and read
+`DevDriveCore` models through `InitializerPreservingJson` so members missing from a payload keep their
+initializers. `JsonWireFormatTests` and `SourceGeneratedJsonParityTests` pin the on-disk and helper
+formats.
+
 ---
 
 ## Capability state
