@@ -6,11 +6,20 @@ using DevDriveManager.Services;
 namespace DevDriveCore.Tests;
 
 /// <summary>
-/// Tests for the UI-test-only <see cref="SafeFakeVolumeResizer"/> and the
-/// <see cref="MutationComposition.CreateVolumeResizer"/> seam. The fake must produce a realistic
+/// Tests for the UI-test-only <see cref="SafeFakeVolumeResizer"/>. The fake must produce a realistic
 /// feasibility/outcome while NEVER launching the helper, querying Storage, or touching a disk, so the
 /// automated UI suite can drive the resize flow safely.
 /// </summary>
+/// <remarks>
+/// These assert that the fake <em>echoes the plan it was given</em>, which is the only property that
+/// makes it a usable stand-in: a fake returning hardcoded letters and sizes would let the UI suite pass
+/// against plumbing that never reads the form. Asserting its canned constants for their own sake would
+/// be testing the fake rather than anything the product decides.
+/// <para>
+/// <c>MutationComposition.CreateVolumeResizer</c> is covered by <c>CompositionRootTests</c> alongside
+/// the other composition-root factories.
+/// </para>
+/// </remarks>
 [TestClass]
 public sealed class SafeFakeVolumeResizerTests
 {
@@ -20,29 +29,25 @@ public sealed class SafeFakeVolumeResizerTests
         new() { SourceVolumeLetter = 'C', ShrinkBytes = shrink, NewDriveLetter = 'D', Label = "DevDrive" };
 
     [TestMethod]
-    public async Task PreviewAsync_NormalPlan_ReportsCanProceed()
+    public async Task PreviewEchoesThePlanAndReportsAReadOnlyProbe()
     {
         var resizer = new SafeFakeVolumeResizer();
 
-        ResizeFeasibility? f = await resizer.PreviewAsync(Plan());
+        foreach (ulong shrink in (ulong[])[100UL * Gib, ResizeGuard.MinimumDevDriveBytes])
+        {
+            ResizeFeasibility? f = await resizer.PreviewAsync(Plan(shrink));
 
-        Assert.IsNotNull(f);
-        Assert.IsTrue(f!.CanProceed, f.Reason);
-        Assert.AreEqual('C', f.SourceVolumeLetter);
-        Assert.AreEqual('D', f.NewDriveLetter);
-        Assert.AreEqual(100UL * Gib, f.AlignedShrinkBytes);
-        Assert.IsTrue(f.IsReadOnlyProbe);
+            Assert.IsNotNull(f, $"the fake must answer a {shrink}-byte plan");
+            Assert.IsTrue(f!.CanProceed, f.Reason);
+            Assert.AreEqual('C', f.SourceVolumeLetter);
+            Assert.AreEqual('D', f.NewDriveLetter);
+            Assert.AreEqual(shrink, f.AlignedShrinkBytes, "the preview must reflect the plan, not a constant");
+            Assert.IsTrue(f.IsReadOnlyProbe);
+        }
     }
 
     [TestMethod]
-    public async Task PreviewAsync_NeverReturnsNull()
-    {
-        var resizer = new SafeFakeVolumeResizer();
-        Assert.IsNotNull(await resizer.PreviewAsync(Plan(shrink: ResizeGuard.MinimumDevDriveBytes)));
-    }
-
-    [TestMethod]
-    public async Task VerifyAndExecuteAsync_ReportsSimulatedSuccess_WithoutTouchingDisk()
+    public async Task ExecuteReportsSimulatedSuccessAndSaysNoDiskWasTouched()
     {
         var resizer = new SafeFakeVolumeResizer();
 
@@ -52,7 +57,9 @@ public sealed class SafeFakeVolumeResizerTests
         Assert.IsTrue(outcome.Executed);
         Assert.AreEqual('C', outcome.SourceVolumeLetter);
         Assert.AreEqual('D', outcome.NewDriveLetter);
-        Assert.AreEqual(100UL * Gib, outcome.DevDriveBytes);
+        Assert.AreEqual(100UL * Gib, outcome.DevDriveBytes, "the outcome must reflect the plan, not a constant");
+
+        // The safety contract, and the reason this class exists at all.
         StringAssert.Contains(outcome.Message, "No real disk", StringComparison.OrdinalIgnoreCase);
     }
 
@@ -63,15 +70,5 @@ public sealed class SafeFakeVolumeResizerTests
         await Assert.ThrowsExactlyAsync<ArgumentNullException>(async () => await resizer.PreviewAsync(null!));
         await Assert.ThrowsExactlyAsync<ArgumentNullException>(async () => await resizer.VerifyAndExecuteAsync(null!));
         await Assert.ThrowsExactlyAsync<ArgumentNullException>(async () => await resizer.ExecuteAsync(null!));
-    }
-
-    [TestMethod]
-    public void CreateVolumeResizer_ReturnsResizer()
-    {
-        // In the default (non-seam) environment this is the production VolumeResizer; under the UI-test
-        // seam it is a SafeFakeVolumeResizer. Either way it is a non-null IVolumeResizer and constructing
-        // it performs no disk I/O.
-        IVolumeResizer resizer = MutationComposition.CreateVolumeResizer();
-        Assert.IsNotNull(resizer);
     }
 }

@@ -66,7 +66,17 @@ public sealed class DevDriveService : IDevDriveService
                 continue;
             }
 
-            (bool isDevDrive, bool isTrusted) = DetectDevDrive(volume.DriveLetter);
+            // A volume with no letter is a partition Windows keeps for itself — Recovery (WinRE),
+            // EFI System, System Reserved — not a drive anyone stores work on. It cannot be a Dev
+            // Drive target, a cache home or a scan root, and counting it put a 99%-full recovery
+            // partition at the top of Overview. The Space, Reclaim and Create strips already list
+            // lettered volumes only, so this keeps every room's idea of "your drives" the same.
+            if (volume.DriveLetter is null)
+            {
+                continue;
+            }
+
+            (bool isDevDrive, bool isTrusted, bool stateKnown) = DetectDevDrive(volume.DriveLetter);
             (bool isVhd, string? vhdPath) = DetectVhd(volume.DriveLetter, partitionByLetter, diskByNumber);
 
             result.Add(new VolumeInfo
@@ -78,15 +88,16 @@ public sealed class DevDriveService : IDevDriveService
                 FreeBytes = volume.FreeBytes,
                 IsDevDrive = isDevDrive,
                 IsTrusted = isTrusted,
+                IsDevDriveStateKnown = stateKnown,
+                IsSizeKnown = volume.IsSizeKnown,
                 IsVhd = isVhd,
                 VhdFilePath = vhdPath,
             });
         }
 
-        // Lettered volumes first (alphabetical), then letterless (e.g. Recovery) last.
+        // Lettered volumes only, alphabetical.
         return result
-            .OrderBy(v => v.DriveLetter.HasValue ? 0 : 1)
-            .ThenBy(v => v.DriveLetter ?? char.MaxValue)
+            .OrderBy(v => v.DriveLetter)
             .ToList();
     }
 
@@ -138,15 +149,19 @@ public sealed class DevDriveService : IDevDriveService
         return (isDev, isTrusted);
     }
 
-    private (bool IsDevDrive, bool IsTrusted) DetectDevDrive(char? driveLetter)
+    private (bool IsDevDrive, bool IsTrusted, bool IsKnown) DetectDevDrive(char? driveLetter)
     {
         if (driveLetter is not char letter)
         {
-            return (false, false);
+            // A letterless volume cannot be a Dev Drive, and that is a fact rather than a failure
+            // to look — this one really is knowable.
+            return (false, false, true);
         }
 
         uint? flags = _native.QueryPersistentVolumeState($"{letter}:\\");
-        return DecodeFlags(flags);
+        (bool isDevDrive, bool isTrusted) = DecodeFlags(flags);
+
+        return (isDevDrive, isTrusted, flags is not null);
     }
 
     private (bool IsVhd, string? VhdFilePath) DetectVhd(

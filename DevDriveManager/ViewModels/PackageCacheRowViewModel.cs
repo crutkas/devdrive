@@ -9,7 +9,7 @@ using DevDriveCore.Services;
 namespace DevDriveManager.ViewModels;
 
 /// <summary>
-/// Which action the inline confirm will perform when accepted. Defaults to <see cref="Move"/> so the
+/// Which action confirmation will perform when accepted. Defaults to <see cref="Move"/> so the
 /// existing confirm path (and tests that execute <c>ConfirmMoveCommand</c> directly) keep moving.
 /// </summary>
 public enum PendingCacheAction
@@ -27,7 +27,7 @@ public enum PendingCacheAction
 /// <summary>
 /// Row VM for one developer tool's package cache. Detection data is immutable; only the size loads
 /// asynchronously (so the row shows "calculating…" then the real size). The Move command is GATED —
-/// it opens an inline, preview-only confirm (owned by this row) and changes nothing.
+/// it requests confirmation before any mutation (owned by this row).
 /// </summary>
 /// <remarks>
 /// Speed <em>testing</em> ("what does moving this cache get me?") now lives in the unified Performance
@@ -75,12 +75,17 @@ public partial class PackageCacheRowViewModel : ObservableObject
         Description = $"{info.PathTemplate} \u2192 sets {info.EnvironmentVariable}";
         ResolvedPath = info.ResolvedPath;
         MapPath = info.ResolvedPath;
+        LocationText = info.ResolvedPath;
+        SetRedirectedBy(info.EnvironmentVariableSet);
 
         if (!info.Detected)
         {
             StatusKind = "notfound";
             StatusText = "Not found";
-            SizeText = string.Empty;
+
+            // An em dash, not a blank. Under a SIZE column header an empty cell reads as data we
+            // failed to load; the truth is there is no folder to measure.
+            SizeText = "\u2014";
         }
         else if (info.OnDevDrive)
         {
@@ -103,9 +108,7 @@ public partial class PackageCacheRowViewModel : ObservableObject
         string token = FolderToken(info.Name);
         RowAutomationId = $"PackageCacheCard_{token}";
         MoveButtonAutomationId = $"MoveCache_{token}";
-        MoveConfirmPanelAutomationId = $"MoveConfirm_{token}";
-        ConfirmMoveButtonAutomationId = $"ConfirmMove_{token}";
-        CancelMoveButtonAutomationId = $"CancelMove_{token}";
+        MoveConfirmDialogAutomationId = $"MoveConfirm_{token}";
         CancelActiveMoveButtonAutomationId = $"CancelActiveMove_{token}";
         MoveResultAutomationId = $"MoveResult_{token}";
         MoveBackButtonAutomationId = $"MoveBack_{token}";
@@ -120,6 +123,31 @@ public partial class PackageCacheRowViewModel : ObservableObject
 
     /// <summary>The underlying detection snapshot (used to build the safe move plan).</summary>
     public PackageCacheInfo Info { get; }
+
+    /// <summary>
+    /// Which swatch colour this ecosystem gets, assigned in inventory order by the parent so a tool
+    /// keeps one colour everywhere it appears.
+    /// </summary>
+    public int CategoryIndex { get; set; }
+
+    /// <summary>
+    /// Where the cache lives right now.
+    /// <para>
+    /// Separate from <see cref="ResolvedPath"/>, which is the detection-time path and never changes.
+    /// A row is updated in place when a move finishes rather than being rebuilt, so anything the table
+    /// shows as a column has to be observable or it goes stale the moment the user acts.
+    /// </para>
+    /// </summary>
+    [ObservableProperty]
+    public partial string LocationText { get; set; }
+
+    /// <summary>The environment variable pointing the tool at its cache, or a dash when none is set.</summary>
+    [ObservableProperty]
+    public partial string RedirectedByText { get; set; }
+
+    /// <summary>False when nothing redirects this tool, so the cell can render more quietly.</summary>
+    [ObservableProperty]
+    public partial bool IsRedirected { get; set; }
 
     public string Header { get; }
 
@@ -149,26 +177,11 @@ public partial class PackageCacheRowViewModel : ObservableObject
     /// <summary>True when the cache directory does not exist.</summary>
     public bool IsNotFound { get; }
 
-    /// <summary>Dim "Not found" rows so the actionable rows stand out.</summary>
-    public double RowOpacity => IsNotFound ? 0.5 : 1.0;
-
-    /// <summary>
-    /// True for alternate ("banded") rows within a status group so the eye has a stripe to follow. Set by
-    /// the Package caches page each time the rows are (re)grouped — moving a cache changes its group and
-    /// hence the banding, so this is observable.
-    /// </summary>
-    [ObservableProperty]
-    public partial bool BandAlt { get; set; }
-
     public string RowAutomationId { get; }
 
     public string MoveButtonAutomationId { get; }
 
-    public string MoveConfirmPanelAutomationId { get; }
-
-    public string ConfirmMoveButtonAutomationId { get; }
-
-    public string CancelMoveButtonAutomationId { get; }
+    public string MoveConfirmDialogAutomationId { get; }
 
     public string CancelActiveMoveButtonAutomationId { get; }
 
@@ -204,9 +217,9 @@ public partial class PackageCacheRowViewModel : ObservableObject
         SizeText = bytes == 0UL ? "\u2014" : ByteSizeFormatter.Format(bytes);
     }
 
-    // ---- Inline "Move" confirm + REAL reversible move (M4) ---------------------------------------
+    // ---- Move confirmation and reversible move ----------------------------------------------------
 
-    /// <summary>True while this row's inline move-confirm panel is open.</summary>
+    /// <summary>True while this row has a pending confirmation.</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ShowMoveButton))]
     [NotifyPropertyChangedFor(nameof(ShowMoveBackButton))]
@@ -224,7 +237,7 @@ public partial class PackageCacheRowViewModel : ObservableObject
     [ObservableProperty]
     public partial bool ShowMoveResult { get; set; }
 
-    /// <summary>The inline-confirm body copy (built by the parent from the SAFE move plan).</summary>
+    /// <summary>Confirmation copy built by the parent from the move plan.</summary>
     [ObservableProperty]
     public partial string MoveConfirmBodyText { get; set; } = string.Empty;
 
@@ -253,7 +266,7 @@ public partial class PackageCacheRowViewModel : ObservableObject
 
     // ---- "Map path" / "Move & remap" for an UNDETECTED tool --------------------------------------
 
-    /// <summary>Which action the inline confirm will run when accepted. Defaults to <see cref="PendingCacheAction.Move"/>.</summary>
+    /// <summary>Which action confirmation will run when accepted. Defaults to <see cref="PendingCacheAction.Move"/>.</summary>
     public PendingCacheAction PendingAction { get; set; } = PendingCacheAction.Move;
 
     /// <summary>User-editable folder this tool's cache lives at (for Map / Move &amp; remap). Two-way bound.</summary>
@@ -316,7 +329,7 @@ public partial class PackageCacheRowViewModel : ObservableObject
         MoveAndRemapCommand.NotifyCanExecuteChanged();
     }
 
-    /// <summary>Parent call: open the inline confirm with the supplied (real, reversible) body copy.</summary>
+    /// <summary>Parent call: request confirmation with the supplied (real, reversible) body copy.</summary>
     public void BeginMoveConfirm(string body)
     {
         MoveConfirmBodyText = body;
@@ -358,6 +371,14 @@ public partial class PackageCacheRowViewModel : ObservableObject
             IsSet = true;
             CanMoveBack = outcome.CanMoveBack;
             AutomationName = $"{Header}, {StatusText}";
+
+            // A move is a copy plus an environment variable, so both visible columns move with it.
+            if (outcome.TargetPath.Length > 0)
+            {
+                LocationText = outcome.TargetPath;
+            }
+
+            SetRedirectedBy(true);
         }
         // On Failed/Cancelled the engine already rolled back: the row stays "On C:" and can retry.
     }
@@ -377,6 +398,10 @@ public partial class PackageCacheRowViewModel : ObservableObject
             IsSet = false;
             CanMoveBack = false;
             AutomationName = $"{Header}, {StatusText}";
+
+            // Moving back restores the detection-time location and clears the variable again.
+            LocationText = ResolvedPath;
+            SetRedirectedBy(false);
         }
     }
 
@@ -398,7 +423,25 @@ public partial class PackageCacheRowViewModel : ObservableObject
             StatusText = onDev ? $"On {_devLetter}:" : "Mapped";
             CanMoveBack = outcome.CanMoveBack;
             AutomationName = $"{Header}, {StatusText}";
+
+            // Mapping is the variable half of a move without the copy: the folder is the user's choice.
+            if (outcome.TargetPath.Length > 0)
+            {
+                LocationText = outcome.TargetPath;
+            }
+
+            SetRedirectedBy(true);
         }
+    }
+
+    /// <summary>
+    /// Renders the "Redirected by" cell. The variable's name is fixed per tool; what changes is whether
+    /// anything is pointing at it, so the dash and the name share one code path.
+    /// </summary>
+    private void SetRedirectedBy(bool redirected)
+    {
+        IsRedirected = redirected && Info.EnvironmentVariable.Length > 0;
+        RedirectedByText = IsRedirected ? Info.EnvironmentVariable : "\u2014 not set \u2014";
     }
 
     [RelayCommand(CanExecute = nameof(CanMove))]

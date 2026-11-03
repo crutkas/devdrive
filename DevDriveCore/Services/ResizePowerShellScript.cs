@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using DevDriveCore.Models;
+using DevDriveCore.Serialization;
 
 namespace DevDriveCore.Services;
 
@@ -221,9 +222,9 @@ if ($LASTEXITCODE -ne 0) { throw "Windows did not verify the new volume as a Dev
 
         try
         {
-            ResizeFinalState? parsed = JsonSerializer.Deserialize<ResizeFinalState>(
+            ResizeFinalState? parsed = InitializerPreservingJson.Deserialize(
                 json,
-                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                HelperJsonContext.Default.ResizeFinalState);
             if (parsed is null ||
                 char.ToUpperInvariant(parsed.FinalDriveLetter) != char.ToUpperInvariant(plan.NewDriveLetter) ||
                 parsed.FinalDiskNumber != plan.ExpectedDiskNumber ||

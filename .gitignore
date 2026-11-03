@@ -54,6 +54,9 @@ BundleArtifacts/
 *.appxupload
 *.msix
 *.msixbundle
+
+# Staging folder produced when running the packaged app from a build output
+AppX/
 *.cer
 *.pfx
 Package.StoreAssociation.xml
@@ -75,3 +78,6 @@ $RECYCLE.BIN/
 **/screenshot.png
 **/test-screenshot.png
 **/test-results.json
+
+# PID handle dropped by 'winapp run'
+.apppid

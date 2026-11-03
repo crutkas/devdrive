@@ -470,10 +470,4 @@ public sealed class PackageCacheMoverTests
     {
         Assert.AreEqual("package-cache:npm_config_cache", PackageCacheMover.ReversibilityId("npm_config_cache"));
     }
-
-    [TestMethod]
-    public void CreateDefault_ReturnsInstance()
-    {
-        Assert.IsNotNull(PackageCacheMover.CreateDefault());
-    }
 }

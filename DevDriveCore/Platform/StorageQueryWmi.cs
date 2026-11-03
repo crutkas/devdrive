@@ -23,6 +23,7 @@ public sealed class StorageQueryWmi : IStorageQuery
                 FileSystem = mo["FileSystem"] as string ?? string.Empty,
                 SizeBytes = ToUInt64(mo["Size"]),
                 FreeBytes = ToUInt64(mo["SizeRemaining"]),
+                IsSizeKnown = mo["Size"] is not null,
                 DriveType = ToUInt32(mo["DriveType"]),
                 Path = mo["Path"] as string,
             });

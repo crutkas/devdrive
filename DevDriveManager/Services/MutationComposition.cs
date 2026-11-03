@@ -1,6 +1,7 @@
 using DevDriveCore.Abstractions;
 using DevDriveCore.Platform;
 using DevDriveCore.Services;
+using DevDriveReclaim;
 
 namespace DevDriveManager.Services;
 
@@ -81,9 +82,31 @@ public static class MutationComposition
         if (IsSafeMutationMode)
         {
             // Simulated shrink/repartition/format — nothing is queried, shrunk, partitioned, or formatted.
-            return new SafeFakeVolumeResizer();
+            // Two seconds of simulated work keep the busy state visible to the UI suite.
+            return new SafeFakeVolumeResizer(TimeSpan.FromSeconds(2));
         }
 
         return VolumeResizer.CreateDefault();
+    }
+
+    /// <summary>
+    /// The production reclaim executor, or a SAFE-fake one under the UI-test seam.
+    /// </summary>
+    /// <remarks>
+    /// This is the only place a <see cref="DevDriveReclaim.ReclaimExecutor"/> is constructed, and
+    /// deliberately so. Reclaim is the one operation in this app that destroys data a user did not
+    /// hand over first, so "is the safe-mutation seam honoured here" has to be answerable by reading
+    /// a single method rather than by auditing every call site — the moment there are two ways to
+    /// reach a delete, the seam guarantees nothing.
+    /// </remarks>
+    public static IReclaimExecutor CreateReclaimExecutor()
+    {
+        if (IsSafeMutationMode)
+        {
+            // Simulated removal — the guard and the overlap resolution still run, nothing is deleted.
+            return new SafeFakeReclaimExecutor();
+        }
+
+        return new ReclaimExecutor();
     }
 }

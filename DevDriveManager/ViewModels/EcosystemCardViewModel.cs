@@ -19,12 +19,13 @@ namespace DevDriveManager.ViewModels;
 /// </list>
 /// UI-agnostic (CommunityToolkit.Mvvm + DevDriveCore only) so the test project can link and exercise it.
 /// </summary>
-public partial class EcosystemCardViewModel : ObservableObject
+public partial class EcosystemCardViewModel : ObservableObject, IDisposable
 {
     private readonly EcosystemDefinition _definition;
     private readonly char _devLetter;
     private readonly char _systemLetter;
     private readonly bool _hasDevDrive;
+    private bool _disposed;
 
     public EcosystemCardViewModel(
         EcosystemDefinition definition,
@@ -114,14 +115,28 @@ public partial class EcosystemCardViewModel : ObservableObject
     [ObservableProperty]
     public partial int OnDevDriveCount { get; set; }
 
-    /// <summary>
-    /// True for alternate ("banded") rows when this card is rendered in a flat banded list (the Benchmarks
-    /// page). Assigned by the page as it (re)builds its filtered list.
-    /// </summary>
-    [ObservableProperty]
-    public partial bool BandAlt { get; set; }
-
     private void OnRowPropertyChanged(object? sender, PropertyChangedEventArgs e) => Recompute();
+
+    /// <summary>
+    /// Detaches from the member rows. The rows belong to the long-lived shared
+    /// <c>PackageCachesViewModel</c> and outlive every generation of cards, so a card that is
+    /// dropped without unsubscribing is held alive by them forever. <c>BuildCards</c> runs on
+    /// every detection, move, move-back <i>and</i> suite reconfiguration, so the generations add up.
+    /// </summary>
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+
+        foreach (PackageCacheRowViewModel row in Rows)
+        {
+            row.PropertyChanged -= OnRowPropertyChanged;
+        }
+    }
 
     private void Recompute()
     {

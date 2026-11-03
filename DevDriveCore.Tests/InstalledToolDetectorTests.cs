@@ -161,7 +161,9 @@ public sealed class InstalledToolDetectorTests
         IReadOnlyList<InstalledToolInfo> all = detector.DetectAll();
 
         Assert.HasCount(InstalledToolCatalog.Default.Count, all);
-        Assert.HasCount(14, all);
+        // The exact catalogue size is not a behaviour — asserting a literal 14 here only guaranteed a
+        // red test the next time a tool was added. Which tools must be present is pinned by
+        // Catalogue_CoversTheRequestedTools, by name.
         // None configured -> all "not found", but still reported.
         Assert.IsTrue(all.All(t => !t.Found));
     }
@@ -219,12 +221,6 @@ public sealed class InstalledToolDetectorTests
     {
         Assert.ThrowsExactly<ArgumentNullException>(() => new InstalledToolDetector(null!, new FakePathProbe()));
         Assert.ThrowsExactly<ArgumentNullException>(() => new InstalledToolDetector(new FakeProcessRunner(), null!));
-    }
-
-    [TestMethod]
-    public void CreateDefault_ReturnsInstance()
-    {
-        Assert.IsNotNull(InstalledToolDetector.CreateDefault());
     }
 
     [TestMethod]

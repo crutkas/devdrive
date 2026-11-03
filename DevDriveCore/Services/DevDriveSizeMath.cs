@@ -39,6 +39,44 @@ public static class DevDriveSizeMath
 
     public const double VhdContainerHeadroomBytes = VhdContainerHeadroomBytesExact;
 
+    /// <summary>The size we would pre-select if the source had unlimited room: 256 GiB.</summary>
+    public const double PreferredSizeBytes = 256d * BytesPerGigabyte;
+
+    /// <summary>
+    /// The free space a default selection tries to leave behind on the source, in bytes: 45 GiB.
+    /// </summary>
+    /// <remarks>
+    /// A reserve stated in absolute bytes rather than as a percentage of capacity, because the
+    /// question "is there enough room left to work" does not scale with how big the disk is — 5% of
+    /// a 4 TB disk is roomy and 5% of a 256 GB disk is not. 45 GiB is the point below which Windows,
+    /// a page file, an update staging area and a build tree stop fitting comfortably together.
+    /// </remarks>
+    public const double ComfortableReserveBytes = 45d * BytesPerGigabyte;
+
+    /// <summary>
+    /// The size to pre-select for a source that can give at most <paramref name="maximumSelectableBytes"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Never "everything the volume will give". Taking the whole maximum is a valid thing to ask for
+    /// and a terrible thing to arrive at by doing nothing: it leaves the source with zero free space,
+    /// and a create form that opens on that value is proposing it. So the default keeps
+    /// <see cref="ComfortableReserveBytes"/> behind whenever the arithmetic allows.
+    /// </para>
+    /// <para>
+    /// When the source is small enough that the reserve and a viable Dev Drive cannot both fit, the
+    /// 50 GiB minimum wins and the reserve is given up — a Dev Drive below the minimum is not a
+    /// smaller Dev Drive, it is no Dev Drive. The user can still drag the slider anywhere in range;
+    /// this only decides where it starts.
+    /// </para>
+    /// </remarks>
+    public static double DefaultSizeBytes(double maximumSelectableBytes)
+    {
+        double max = Math.Max(0d, maximumSelectableBytes);
+        double afterReserve = max - ComfortableReserveBytes;
+        return ClampSizeBytes(Math.Min(PreferredSizeBytes, afterReserve), max);
+    }
+
     /// <summary>
     /// Clamps <paramref name="requestedBytes"/> into the valid Dev Drive range
     /// <c>[<see cref="MinimumSizeBytes"/>, <paramref name="maximumSelectableBytes"/>]</c>. When the
@@ -94,6 +132,27 @@ public static class DevDriveSizeMath
     /// <summary>Fraction of the bar occupied by the remaining free/shrinkable space after carving.</summary>
     public static double RemainingFraction(double totalBytes, double maximumSelectableBytes, double selectedBytes) =>
         totalBytes <= 0d ? 0d : Clamp01(RemainingBytes(maximumSelectableBytes, selectedBytes) / totalBytes);
+
+    /// <summary>
+    /// Whether carving this Dev Drive would leave the source below the user's low-free threshold.
+    /// </summary>
+    /// <remarks>
+    /// Drives the colour of the free segment on the size bar, so the moment a drag crosses into
+    /// territory the app would otherwise warn about afterwards, the bar says so while the choice is
+    /// still being made rather than once it has been committed.
+    /// <para>
+    /// A bar with nothing loaded reports <c>0</c> remaining, which is not the same as a source that
+    /// is genuinely full — so an unloaded bar is never called low.
+    /// </para>
+    /// </remarks>
+    /// <param name="totalBytes">Capacity of the source volume.</param>
+    /// <param name="maximumSelectableBytes">Largest Dev Drive the source can give up.</param>
+    /// <param name="selectedBytes">The size currently chosen.</param>
+    /// <param name="lowFreeFraction">The share of capacity below which free space counts as low.</param>
+    public static bool LeavesSourceLowOnSpace(
+        double totalBytes, double maximumSelectableBytes, double selectedBytes, double lowFreeFraction) =>
+        totalBytes > 0d
+        && RemainingFraction(totalBytes, maximumSelectableBytes, selectedBytes) < lowFreeFraction;
 
     private static double Clamp01(double value) => Math.Clamp(value, 0d, 1d);
 }

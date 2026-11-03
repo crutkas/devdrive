@@ -16,8 +16,15 @@ namespace DevDriveManager.Services;
 /// healthy, resizable data volume, so the verdict, steps, and numbers read realistically while staying
 /// completely offline. The execute path returns a simulated success and never reports a real mutation.
 /// </remarks>
-public sealed class SafeFakeVolumeResizer : IVolumeResizer
+public sealed class SafeFakeVolumeResizer(TimeSpan simulatedDuration = default) : IVolumeResizer
 {
+    /// <summary>
+    /// How long a simulated create takes. Zero for unit tests; the app's composition uses a couple of
+    /// seconds so the busy state — progress, the disabled Cancel, the locked rail — is something the
+    /// UI suite and a person can actually see, rather than a state that flips back before it renders.
+    /// </summary>
+    public TimeSpan SimulatedDuration { get; } = simulatedDuration;
+
     /// <inheritdoc />
     public Task<ResizeFeasibility?> PreviewAsync(ResizePlan plan, CancellationToken cancellationToken = default)
     {
@@ -30,10 +37,17 @@ public sealed class SafeFakeVolumeResizer : IVolumeResizer
     }
 
     /// <inheritdoc />
-    public Task<ResizeExecuteOutcome> VerifyAndExecuteAsync(
+    public async Task<ResizeExecuteOutcome> VerifyAndExecuteAsync(
         ResizePlan plan,
-        CancellationToken cancellationToken = default) =>
-        ExecuteAsync(plan, cancellationToken);
+        CancellationToken cancellationToken = default)
+    {
+        if (SimulatedDuration > TimeSpan.Zero)
+        {
+            await Task.Delay(SimulatedDuration, cancellationToken);
+        }
+
+        return await ExecuteAsync(plan, cancellationToken);
+    }
 
     /// <inheritdoc />
     public Task<ResizeExecuteOutcome> ExecuteAsync(ResizePlan plan, CancellationToken cancellationToken = default)

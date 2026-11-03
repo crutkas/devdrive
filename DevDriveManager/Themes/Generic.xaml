@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!--
+    Default styles for the Storage Manager custom controls.
+
+    Only implicit (unkeyed) control styles belong here. Generic.xaml is consulted for a custom
+    control's default template; keyed resources put here are not reliably resolvable from pages, so
+    the shared brushes, geometry, and type ramp live in StorageManagerTheme.xaml, which is merged
+    into Application.Resources. Lookups from this file still chain up to that dictionary.
+-->
+<ResourceDictionary
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:DevDriveManager.Controls">
+
+    <Style TargetType="controls:CapacityBar">
+        <Setter Property="Height" Value="{StaticResource SmCapacityBarHeight}" />
+        <Setter Property="HorizontalAlignment" Value="Stretch" />
+        <Setter Property="IsTabStop" Value="False" />
+        <!--
+            Pill by default, but overridable per instance. Most bars in the app are thin strips where
+            a pill is right; the risk-composition bar is 12px tall and a full pill on something that
+            thick reads as a capsule badge rather than a measurement.
+
+            The control clamps whatever it is given to half its own height, so this token means "as
+            round as this bar can be" rather than a literal 10px. See CapacityBar.ApplyCornerRadius.
+        -->
+        <Setter Property="CornerRadius" Value="{StaticResource SmPillCornerRadius}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="controls:CapacityBar">
+                    <!--  The track no longer paints the free space itself: free is a band, so the bar
+                          can leave a gap between it and the last used band (see SmCapacityBandStyle).
+                          The free band is painted with SmFreeTrackBrush rather than SmDividerBrush. A
+                          divider is meant to be barely there; free space is not. As a divider this
+                          measured 1.12:1 against the card header, so the one quantity the app exists
+                          to increase was the one thing on the bar nobody could see.
+
+                          CornerRadius is applied from code rather than template-bound, because it has
+                          to be clamped against the measured height before it can be honoured.  -->
+                    <Grid>
+                        <Border x:Name="PART_Track">
+                            <Grid x:Name="PART_Root" />
+                        </Border>
+
+                        <!--  Colour probe for the hatched freed band, which has to be built in code.
+                              ThemeResource resolves against this element's own theme, which is the one
+                              the bar must match; Application.Current.Resources would follow the app's
+                              theme instead. The same trap, and the same answer, as TreemapPane.  -->
+                        <Border
+                            x:Name="PART_GoodProbe"
+                            Width="0"
+                            Height="0"
+                            HorizontalAlignment="Left"
+                            VerticalAlignment="Top"
+                            AutomationProperties.AccessibilityView="Raw"
+                            Background="{ThemeResource SmGoodBrush}"
+                            IsHitTestVisible="False"
+                            Opacity="0" />
+                    </Grid>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+</ResourceDictionary>

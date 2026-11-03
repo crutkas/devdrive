@@ -23,6 +23,13 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <!--
+      Workstation GC, deliberately. Server GC (one heap per core) cut a C: scan from ~7.3 s to ~5 s
+      on a 20-core machine, but held 2.0 GB after three scans against 1.3 GB and climbed to 2.5-3 GB
+      under repeated scans. Capping GCHeapCount at 4 was worse still (2.2 GB) because it disables
+      DATAS. A GC/XAML deadlock was also seen under server GC; see SH-016 in docs/KnownIssues.md.
+    -->
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <!--
       WUI2010 (nested x:Bind path may crash on a null segment) is suppressed *intentionally*.
       Pages bind to section sub-ViewModels (ViewModel.Suite/PackageCaches/DriveHealth.*). Every
       sub-VM is a get-only property assigned once in the MainPageViewModel constructor and never
@@ -40,7 +47,25 @@
     <NoWarn>$(NoWarn);WUI2010;WUI2011</NoWarn>
   </PropertyGroup>
 
+  <!--
+    AppX\ is a staging folder some packaging tooling drops next to the project, and it contains a
+    verbatim copy of the project's own sources. Left alone, the default globs compile all 165 of
+    them a second time and the build fails with duplicate-member errors that name real files, so
+    the cause looks like the source tree rather than the tool that copied it.
+  -->
   <ItemGroup>
+    <Compile Remove="AppX\**" />
+    <Page Remove="AppX\**" />
+    <ApplicationDefinition Remove="AppX\**" />
+    <Content Remove="AppX\**" />
+    <None Remove="AppX\**" />
+    <PRIResource Remove="AppX\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="ThirdPartyNotices.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
     <Content Include="Assets\SplashScreen.scale-200.png" />
     <Content Include="Assets\LockScreenLogo.scale-200.png" />
     <Content Include="Assets\Square150x150Logo.scale-200.png" />
@@ -81,6 +106,7 @@
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.2.0" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
     <PackageReference Include="CommunityToolkit.WinUI.Controls.SettingsControls" Version="8.2.251219" />
+    <PackageReference Include="CommunityToolkit.WinUI.Animations" Version="8.2.251219" />
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools.WinApp" Version="0.3.2" />
   </ItemGroup>
 
@@ -98,6 +124,9 @@
   <!-- All Dev Drive logic lives in the UI-agnostic core (public APIs only). -->
   <ItemGroup>
     <ProjectReference Include="..\DevDriveCore\DevDriveCore.csproj" />
+    <!-- Space and Reclaim: the storage scanner and the reclaim detection subsystem. -->
+    <ProjectReference Include="..\DevDriveStorage\DevDriveStorage.csproj" />
+    <ProjectReference Include="..\DevDriveReclaim\DevDriveReclaim.csproj" />
     <!--
       The elevated filter-probe helper (the "Iso app"). ReferenceOutputAssembly=false: we ship its EXE
       next to ours but never link its assembly. GlobalPropertiesToRemove strips the main app's RID /

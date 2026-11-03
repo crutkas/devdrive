@@ -2,6 +2,7 @@ using DevDriveCore;
 using DevDriveCore.Services;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
+using Microsoft.UI.Xaml.Automation.Peers;
 using Microsoft.UI.Xaml.Controls;
 
 namespace DevDriveManager.Controls;
@@ -18,8 +19,14 @@ public sealed partial class DevDriveDiskBar : UserControl
     public DevDriveDiskBar()
     {
         InitializeComponent();
-        Loaded += (_, _) => UpdateVisual();
+        Loaded += (_, _) =>
+        {
+            UpdateVisual();
+            UpdateLegend();
+        };
     }
+
+    private const double SegmentGap = 3d;
 
     /// <summary>Total capacity of the source/host volume in bytes (the whole bar).</summary>
     public static readonly DependencyProperty TotalBytesProperty = DependencyProperty.Register(
@@ -63,7 +70,7 @@ public sealed partial class DevDriveDiskBar : UserControl
 
     /// <summary>Legend caption for the used + protected segment.</summary>
     public static readonly DependencyProperty UsedLabelProperty = DependencyProperty.Register(
-        nameof(UsedLabel), typeof(string), typeof(DevDriveDiskBar), new PropertyMetadata("Used + protected"));
+        nameof(UsedLabel), typeof(string), typeof(DevDriveDiskBar), new PropertyMetadata("Used + protected", OnLabelChanged));
 
     public string UsedLabel
     {
@@ -73,7 +80,7 @@ public sealed partial class DevDriveDiskBar : UserControl
 
     /// <summary>Legend caption for the remaining free/shrinkable segment.</summary>
     public static readonly DependencyProperty RemainingLabelProperty = DependencyProperty.Register(
-        nameof(RemainingLabel), typeof(string), typeof(DevDriveDiskBar), new PropertyMetadata("Remaining"));
+        nameof(RemainingLabel), typeof(string), typeof(DevDriveDiskBar), new PropertyMetadata("Remaining", OnLabelChanged));
 
     public string RemainingLabel
     {
@@ -83,7 +90,7 @@ public sealed partial class DevDriveDiskBar : UserControl
 
     /// <summary>Legend caption for the carved Dev Drive segment.</summary>
     public static readonly DependencyProperty DevDriveLabelProperty = DependencyProperty.Register(
-        nameof(DevDriveLabel), typeof(string), typeof(DevDriveDiskBar), new PropertyMetadata("Dev Drive"));
+        nameof(DevDriveLabel), typeof(string), typeof(DevDriveDiskBar), new PropertyMetadata("Dev Drive", OnLabelChanged));
 
     public string DevDriveLabel
     {
@@ -91,8 +98,81 @@ public sealed partial class DevDriveDiskBar : UserControl
         set => SetValue(DevDriveLabelProperty, value);
     }
 
+    /// <summary>
+    /// Share of the source's capacity below which its remaining free space is shown as low.
+    /// </summary>
+    /// <remarks>
+    /// A property rather than a read of the preferences singleton, so the threshold the bar paints
+    /// against is the same one Settings advertises and the control stays testable without a store.
+    /// </remarks>
+    public static readonly DependencyProperty LowFreeFractionProperty = DependencyProperty.Register(
+        nameof(LowFreeFraction),
+        typeof(double),
+        typeof(DevDriveDiskBar),
+        new PropertyMetadata(AttentionSignalBuilder.LowFreeFraction, OnVisualChanged));
+
+    public double LowFreeFraction
+    {
+        get => (double)GetValue(LowFreeFractionProperty);
+        set => SetValue(LowFreeFractionProperty, value);
+    }
+
     private static void OnVisualChanged(DependencyObject d, DependencyPropertyChangedEventArgs e) =>
         ((DevDriveDiskBar)d).UpdateVisual();
+
+    private static void OnLabelChanged(DependencyObject d, DependencyPropertyChangedEventArgs e) =>
+        ((DevDriveDiskBar)d).UpdateLegend();
+
+    /// <summary>
+    /// Shows each "Name · Size" caption as a name over a stronger size, so the numbers scan as a row.
+    /// </summary>
+    private void UpdateLegend()
+    {
+        Set(UsedLabel, UsedName, UsedValue);
+        Set(RemainingLabel, FreeName, FreeValue);
+        Set(DevDriveLabel, DevName, DevValue);
+
+        static void Set(string? label, TextBlock name, TextBlock value)
+        {
+            (string n, string v) = SplitLabel(label);
+            name.Text = n;
+            value.Text = v;
+            value.Visibility = v.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+        }
+    }
+
+    internal static (string Name, string Value) SplitLabel(string? label)
+    {
+        if (string.IsNullOrEmpty(label))
+        {
+            return (string.Empty, string.Empty);
+        }
+
+        int i = label.IndexOf('\u00B7');
+        return i < 0
+            ? (label.Trim(), string.Empty)
+            : (label[..i].Trim(), label[(i + 1)..].Trim());
+    }
+
+    /// <summary>
+    /// Hides zero-width segments and puts one even gap between each visible neighbour, so an empty
+    /// segment never leaves a doubled gap or a stray margin at the bar's edge.
+    /// </summary>
+    private void ApplyGaps(double usedFraction, double remainingFraction, double devFraction)
+    {
+        Border[] segments = [UsedSegment, FreeSegment, DevSegment];
+        bool[] visible = [usedFraction > 0d, remainingFraction > 0d, devFraction > 0d];
+
+        int first = Array.IndexOf(visible, true);
+        int last = Array.LastIndexOf(visible, true);
+        double half = SegmentGap / 2d;
+
+        for (int i = 0; i < segments.Length; i++)
+        {
+            segments[i].Visibility = visible[i] ? Visibility.Visible : Visibility.Collapsed;
+            segments[i].Margin = new Thickness(i > first ? half : 0d, 0d, i < last ? half : 0d, 0d);
+        }
+    }
 
     private void UpdateVisual()
     {
@@ -119,8 +199,96 @@ public sealed partial class DevDriveDiskBar : UserControl
         RemainingColumn.Width = new GridLength(remainingFraction, GridUnitType.Star);
         DevColumn.Width = new GridLength(devFraction, GridUnitType.Star);
 
+        ApplyGaps(usedFraction, remainingFraction, devFraction);
+        ApplyFreeStyle();
+
         AutomationProperties.SetName(this, $"Dev Drive size {ByteSizeFormatter.Format(ToBytes(SelectedBytes))}");
     }
+
+    /// <summary>
+    /// Colours the free segment by how much of it is left.
+    /// </summary>
+    /// <remarks>
+    /// Amber is the app's "worth your attention" colour, and the size bar is the one place where
+    /// crossing the low-free line is still undoable. Saying it here, live as the slider moves,
+    /// beats saying it once the drive exists. The amber is paired with a sentence, so the state is
+    /// never carried by colour alone.
+    /// <para>
+    /// This bar has no reclaimable band, so amber is unambiguous on it. The shared
+    /// <c>CapacityBar</c> deliberately does <i>not</i> do this: there amber already means
+    /// "reclaimable", and an amber free channel beside an amber reclaimable band would read as one
+    /// band twice the size.
+    /// </para>
+    /// <para>
+    /// A <see cref="Style"/> is applied rather than a <see cref="Brush"/> assigned. A brush pulled
+    /// out of <c>Resources</c> belongs to whichever theme was live when it was read, and assigning
+    /// it sets a local value that outranks the style and never re-resolves — so the segment would
+    /// keep its dark fill after a switch to Light. A style is theme-independent and its setters
+    /// re-resolve, which is the pattern the rest of this app settled on for exactly this seam.
+    /// </para>
+    /// </remarks>
+    private void ApplyFreeStyle()
+    {
+        bool low = DevDriveSizeMath.LeavesSourceLowOnSpace(
+            TotalBytes, MaximumSelectableBytes, SelectedBytes, LowFreeFraction);
+
+        Apply(FreeSegment, low ? "DiskBarFreeSegmentLowStyle" : "DiskBarFreeSegmentStyle");
+        Apply(FreeSwatch, low ? "DiskBarFreeSwatchLowStyle" : "DiskBarFreeSwatchStyle");
+
+        LowSpaceWarning.Text = LowSpaceWarningText(LowFreeFraction);
+        LowSpaceWarning.Visibility = low ? Visibility.Visible : Visibility.Collapsed;
+
+        if (low && _wasKnownNotLow)
+        {
+            AnnounceLowSpace();
+        }
+
+        // Only a state the user could see and then leave counts as "before". Arriving on the room
+        // with a size that is already low, or volume data landing after the room opened, is not a
+        // crossing the user made, and announcing it would talk over the page being read out.
+        _wasKnownNotLow = !low && TotalBytes > 0d && IsLoaded;
+
+        void Apply(Border target, object key)
+        {
+            if (Resources.TryGetValue(key, out object? value) && value is Style style)
+            {
+                target.Style = style;
+            }
+        }
+    }
+
+    private bool _wasKnownNotLow;
+
+    /// <summary>
+    /// Tells a screen reader the moment the size crosses into low-space territory.
+    /// </summary>
+    /// <remarks>
+    /// <c>LiveSetting="Polite"</c> alone never spoke: a <see cref="TextBlock"/> does not raise
+    /// <c>LiveRegionChanged</c> by itself, and the only thing that changes here is
+    /// <see cref="UIElement.Visibility"/>, which is not a text change either. So the event is raised
+    /// explicitly, once per crossing — the caller only gets here on not-low to low, never on each
+    /// slider tick that stays low, which would talk over the slider's own value announcements.
+    /// <para>
+    /// A notification rather than <c>LiveRegionChanged</c>, because it carries its own text instead
+    /// of asking the reader to go and fetch it.
+    /// </para>
+    /// </remarks>
+    private void AnnounceLowSpace()
+    {
+        AutomationPeer? peer = FrameworkElementAutomationPeer.FromElement(LowSpaceWarning)
+            ?? FrameworkElementAutomationPeer.CreatePeerForElement(LowSpaceWarning);
+
+        peer?.RaiseNotificationEvent(
+            AutomationNotificationKind.Other,
+            AutomationNotificationProcessing.ImportantMostRecent,
+            LowSpaceWarning.Text,
+            "DevDriveDiskBarLowSpace");
+    }
+
+    /// <summary>The sentence shown with the amber state, so the warning is not carried by colour alone.</summary>
+    internal static string LowSpaceWarningText(double lowFreeFraction) =>
+        $"This leaves the volume with less than {Math.Round(lowFreeFraction * 100):0}% free. " +
+        "Choose a smaller size to keep room for Windows and apps.";
 
     private static ulong ToBytes(double value) => value <= 0d ? 0UL : (ulong)Math.Round(value);
 }

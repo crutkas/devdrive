@@ -63,11 +63,12 @@ public sealed class PackageCachesViewModelTests
         // The confirm body counts the LIVE eligible rows (2 to start).
         vm.MoveAllCommand.Execute(null);
         Assert.IsTrue(vm.IsConfirmingMoveAll);
-        StringAssert.Contains(vm.MoveAllConfirmBodyText, "2 package cache");
+        StringAssert.Contains(vm.MoveAllConfirmBodyText, "2 package caches");
 
         await vm.ConfirmMoveAllCommand.ExecuteAsync(null);
 
         Assert.IsTrue(vm.ShowMoveAllResult);
+        Assert.IsFalse(vm.MoveAllHasFailures);
         Assert.IsTrue(vm.Caches.All(c => c.IsSet && !c.CanMove), "Every cache moved to the Dev Drive.");
         // Neither immutable snapshot ever flips, so the stale predicate would leave this TRUE; the live
         // CanMove predicate correctly reports nothing left on the system drive.
@@ -75,6 +76,30 @@ public sealed class PackageCachesViewModelTests
         Assert.IsFalse(vm.HasCachesOnSystemDrive, "No eligible caches remain — the warning is cleared.");
         Assert.AreEqual(@"G:\packages\npm", env.GetUserVariable(NpmEnvVar));
         Assert.AreEqual(@"G:\packages\nuget", env.GetUserVariable(NuGetEnvVar));
+    }
+
+    [TestMethod]
+    public async Task DismissingMoveConfirmations_LeavesCachesAndVariablesUntouched()
+    {
+        (PackageCachesViewModel vm, FakeEnvironmentWriter env) = BuildViewModel();
+        vm.Initialize(@"C:\", @"G:\", 'G', 'C');
+        await WaitUntilAsync(() => vm.Caches.Count == 2 && vm.Caches.All(c => c.CanMove));
+
+        vm.MoveAllCommand.Execute(null);
+        Assert.IsTrue(vm.IsConfirmingMoveAll);
+        vm.CancelMoveAllCommand.Execute(null);
+        Assert.IsFalse(vm.IsConfirmingMoveAll);
+        Assert.IsFalse(vm.ShowMoveAllResult);
+
+        PackageCacheRowViewModel row = vm.Caches[0];
+        row.MoveCommand.Execute(null);
+        Assert.IsTrue(row.IsConfirmingMove);
+        row.CancelMoveCommand.Execute(null);
+        Assert.IsFalse(row.IsConfirmingMove);
+
+        Assert.IsTrue(vm.Caches.All(c => c.CanMove && !c.IsMoving));
+        Assert.IsNull(env.GetUserVariable(NpmEnvVar));
+        Assert.IsNull(env.GetUserVariable(NuGetEnvVar));
     }
 
     [TestMethod]

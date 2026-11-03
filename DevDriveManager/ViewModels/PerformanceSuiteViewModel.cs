@@ -46,6 +46,17 @@ public partial class PerformanceSuiteViewModel : ObservableObject
 
     private CancellationTokenSource? _cts;
     private CancellationTokenSource? _toolDetectionCts;
+
+    /// <summary>
+    /// Serialises the three touches of <see cref="_toolDetectionCts"/>. Tool detection is the one
+    /// operation here whose continuation runs off the UI thread (it awaits with
+    /// <c>ConfigureAwait(false)</c>), so its disposal races the UI thread's cancel. Unsynchronised,
+    /// the UI thread could call <c>Cancel()</c> on a source the pool thread had just disposed —
+    /// an <see cref="ObjectDisposedException"/> thrown straight into the drive-refresh path, which
+    /// is not async and does not guard. The sibling run/cancel pair does not need this: those awaits
+    /// resume on the UI thread and are already serialised against each other.
+    /// </summary>
+    private readonly Lock _toolDetectionGate = new();
     private IReadOnlyDictionary<string, InstalledToolInfo>? _toolSnapshot;
     private bool _toolAvailabilityReady;
     private bool _toolDetectionFailed;
@@ -723,8 +734,14 @@ public partial class PerformanceSuiteViewModel : ObservableObject
         }
 
         var cts = new CancellationTokenSource();
-        _toolDetectionCts = cts;
-        int generation = ++_toolDetectionGeneration;
+        int generation;
+
+        lock (_toolDetectionGate)
+        {
+            _toolDetectionCts = cts;
+            generation = ++_toolDetectionGeneration;
+        }
+
         ToolDetectionTask = DetectToolsAsync(generation, cts);
         NotifyRunStatesChanged();
     }
@@ -763,12 +780,17 @@ public partial class PerformanceSuiteViewModel : ObservableObject
         }
         finally
         {
-            if (ReferenceEquals(_toolDetectionCts, cts))
+            // Disposal stays with the task — it is the last user of the token — but it has to be
+            // serialised against a UI-thread Cancel() that may already hold this same reference.
+            lock (_toolDetectionGate)
             {
-                _toolDetectionCts = null;
-            }
+                if (ReferenceEquals(_toolDetectionCts, cts))
+                {
+                    _toolDetectionCts = null;
+                }
 
-            cts.Dispose();
+                cts.Dispose();
+            }
         }
     }
 
@@ -827,9 +849,12 @@ public partial class PerformanceSuiteViewModel : ObservableObject
 
     private void CancelToolDetection()
     {
-        _toolDetectionGeneration++;
-        _toolDetectionCts?.Cancel();
-        _toolDetectionCts = null;
+        lock (_toolDetectionGate)
+        {
+            _toolDetectionGeneration++;
+            _toolDetectionCts?.Cancel();
+            _toolDetectionCts = null;
+        }
     }
 
     private void ApplyPendingConfiguration()

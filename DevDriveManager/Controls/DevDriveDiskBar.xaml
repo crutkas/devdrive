@@ -12,34 +12,44 @@
     <UserControl.Resources>
         <ResourceDictionary>
             <ResourceDictionary.ThemeDictionaries>
-                <!--  Segments come from the user's accent palette (theming.md "accent color palette"), so the
-                      whole bar is one cohesive family and tracks the user's chosen accent. Used = darkest
-                      shade, Free = a mid shade with a diagonal hatch as a second cue, Dev Drive = the base
-                      accent. Dark mirrors to the Light shades for contrast; High Contrast swaps to SystemColor*
-                      so it auto-corrects. The hatch stops are ordered so a pad fallback degrades to solid Dark1
-                      (never back to invisible white).  -->
+                <!--  Segments are the app's category hues, not shades of one accent. Three tints of a
+                      single colour (which is what SystemAccentColorLight1/2/3 are) differ only in
+                      lightness, so the bar read as one muted block and the reader had to consult the
+                      legend to find the boundary they came for.
+
+                      The hues are the ones the rest of the app already assigns: the source volume is
+                      painted with the system-volume colour and the new Dev Drive with the Dev Drive
+                      colour, the same pairing the drive strip and every capacity bar use for C: and
+                      G:. So the carve-out is coloured like the thing it is about to become rather
+                      than like a lighter piece of the drive it came from.
+
+                      Free is a desaturated slate, and reads as absence through saturation rather
+                      than through texture. It used to be hatched with a LinearGradientBrush set to
+                      SpreadMethod="Repeat", which is why this bar looked muted: a repeating brush
+                      needs a tile surface, and its presence anywhere in this UserControl composited
+                      everything EXCEPT the element carrying it at ~50% alpha. Measured, not guessed
+                      — a #FF0000 probe rendered #8F1116, and solving the two channels gives
+                      alpha 0.502 over the card background. Both bar segments and all three legend
+                      swatches were affected, in two separate Grids, and moving the brush onto a
+                      nested Rectangle only moved which element escaped. Every other bar in the app
+                      uses solid fills and renders exactly, so Free joins them.
+
+                      High Contrast swaps to SystemColor* so it auto-corrects, and keeps Used and Dev
+                      on different system colours because a bar whose segments match is unreadable.  -->
                 <ResourceDictionary x:Key="Light">
-                    <SolidColorBrush x:Key="DiskBarUsedBrush" Color="{ThemeResource SystemAccentColorDark3}" />
-                    <SolidColorBrush x:Key="DiskBarDevBrush" Color="{ThemeResource SystemAccentColor}" />
-                    <LinearGradientBrush x:Key="DiskBarFreeBrush" EndPoint="6,6" MappingMode="Absolute" SpreadMethod="Repeat" StartPoint="0,0">
-                        <GradientStop Offset="0.0" Color="#40FFFFFF" />
-                        <GradientStop Offset="0.2" Color="#40FFFFFF" />
-                        <GradientStop Offset="0.2" Color="{ThemeResource SystemAccentColorDark1}" />
-                        <GradientStop Offset="1.0" Color="{ThemeResource SystemAccentColorDark1}" />
-                    </LinearGradientBrush>
+                    <StaticResource x:Key="DiskBarUsedBrush" ResourceKey="SmCategory0Brush" />
+                    <StaticResource x:Key="DiskBarDevBrush" ResourceKey="SmCategory2Brush" />
+                    <StaticResource x:Key="DiskBarFreeBrush" ResourceKey="SmFreeTrackBrush" />
+                    <StaticResource x:Key="DiskBarFreeLowBrush" ResourceKey="SmCategory3Brush" />
                     <SolidColorBrush x:Key="DiskBarSeamBrush" Color="#59FFFFFF" />
                     <SolidColorBrush x:Key="DiskBarFreeBorderBrush" Color="Transparent" />
                     <Thickness x:Key="DiskBarFreeBorderThickness">0</Thickness>
                 </ResourceDictionary>
                 <ResourceDictionary x:Key="Dark">
-                    <SolidColorBrush x:Key="DiskBarUsedBrush" Color="{ThemeResource SystemAccentColorLight3}" />
-                    <SolidColorBrush x:Key="DiskBarDevBrush" Color="{ThemeResource SystemAccentColorLight2}" />
-                    <LinearGradientBrush x:Key="DiskBarFreeBrush" EndPoint="6,6" MappingMode="Absolute" SpreadMethod="Repeat" StartPoint="0,0">
-                        <GradientStop Offset="0.0" Color="#59000000" />
-                        <GradientStop Offset="0.2" Color="#59000000" />
-                        <GradientStop Offset="0.2" Color="{ThemeResource SystemAccentColorLight1}" />
-                        <GradientStop Offset="1.0" Color="{ThemeResource SystemAccentColorLight1}" />
-                    </LinearGradientBrush>
+                    <StaticResource x:Key="DiskBarUsedBrush" ResourceKey="SmCategory0Brush" />
+                    <StaticResource x:Key="DiskBarDevBrush" ResourceKey="SmCategory2Brush" />
+                    <StaticResource x:Key="DiskBarFreeBrush" ResourceKey="SmFreeTrackBrush" />
+                    <StaticResource x:Key="DiskBarFreeLowBrush" ResourceKey="SmCategory3Brush" />
                     <SolidColorBrush x:Key="DiskBarSeamBrush" Color="#59000000" />
                     <SolidColorBrush x:Key="DiskBarFreeBorderBrush" Color="Transparent" />
                     <Thickness x:Key="DiskBarFreeBorderThickness">0</Thickness>
@@ -48,88 +58,166 @@
                     <StaticResource x:Key="DiskBarUsedBrush" ResourceKey="SystemColorWindowTextColorBrush" />
                     <StaticResource x:Key="DiskBarDevBrush" ResourceKey="SystemColorHighlightColorBrush" />
                     <StaticResource x:Key="DiskBarFreeBrush" ResourceKey="SystemColorWindowColorBrush" />
+                    <StaticResource x:Key="DiskBarFreeLowBrush" ResourceKey="SystemColorWindowColorBrush" />
                     <StaticResource x:Key="DiskBarSeamBrush" ResourceKey="SystemColorWindowTextColorBrush" />
                     <StaticResource x:Key="DiskBarFreeBorderBrush" ResourceKey="SystemColorWindowTextColorBrush" />
                     <Thickness x:Key="DiskBarFreeBorderThickness">2</Thickness>
                 </ResourceDictionary>
             </ResourceDictionary.ThemeDictionaries>
+
+            <!--
+                The free channel is swapped between two states in code, and a Brush cannot be handed
+                across that seam. Resources.TryGetValue returns the instance belonging to whichever
+                theme dictionary is live at the moment it is called, and assigning it to Background
+                sets a local value that outranks the style and never re-resolves — so the bar would
+                keep its dark ink after a switch to Light. This is the fifth site in this app to hit
+                that; the established answer is to hand over a Style instead.
+
+                A Style object is theme-independent, so a static lookup of it is safe, and its
+                ThemeResource setters re-resolve when the theme changes. Both styles live here, at
+                dictionary root, deliberately outside ThemeDictionaries.
+            -->
+            <Style x:Key="DiskBarFreeSegmentStyle" TargetType="Border">
+                <Setter Property="Background" Value="{ThemeResource DiskBarFreeBrush}" />
+                <Setter Property="BorderBrush" Value="{ThemeResource DiskBarFreeBorderBrush}" />
+                <Setter Property="BorderThickness" Value="{ThemeResource DiskBarFreeBorderThickness}" />
+            </Style>
+
+            <Style
+                x:Key="DiskBarFreeSegmentLowStyle"
+                BasedOn="{StaticResource DiskBarFreeSegmentStyle}"
+                TargetType="Border">
+                <Setter Property="Background" Value="{ThemeResource DiskBarFreeLowBrush}" />
+            </Style>
+
+            <Style x:Key="DiskBarFreeSwatchStyle" TargetType="Border">
+                <Setter Property="Width" Value="8" />
+                <Setter Property="Height" Value="8" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+                <Setter Property="CornerRadius" Value="4" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="BorderBrush" Value="{ThemeResource DiskBarSeamBrush}" />
+                <Setter Property="Background" Value="{ThemeResource DiskBarFreeBrush}" />
+            </Style>
+
+            <Style
+                x:Key="DiskBarFreeSwatchLowStyle"
+                BasedOn="{StaticResource DiskBarFreeSwatchStyle}"
+                TargetType="Border">
+                <Setter Property="Background" Value="{ThemeResource DiskBarFreeLowBrush}" />
+            </Style>
+
+            <Style x:Key="DiskBarSwatchStyle" TargetType="Border">
+                <Setter Property="Width" Value="8" />
+                <Setter Property="Height" Value="8" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+                <Setter Property="CornerRadius" Value="4" />
+            </Style>
+
+            <Style
+                x:Key="DiskBarLegendNameStyle"
+                BasedOn="{StaticResource CaptionTextBlockStyle}"
+                TargetType="TextBlock">
+                <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
+                <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+            </Style>
+
+            <Style
+                x:Key="DiskBarLegendValueStyle"
+                BasedOn="{StaticResource BodyStrongTextBlockStyle}"
+                TargetType="TextBlock">
+                <Setter Property="Margin" Value="14,0,0,0" />
+                <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+            </Style>
         </ResourceDictionary>
     </UserControl.Resources>
 
-    <StackPanel Spacing="8">
+    <StackPanel Spacing="12">
 
-        <!--  Read-only visualization: used + protected | shrinkable free (hatched) | carved Dev Drive.
-              Non-interactive on purpose — the page's Slider + NumberBox change the size.  -->
-        <Border
-            Height="32"
-            Background="{ThemeResource ControlFillColorDefaultBrush}"
-            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-            BorderThickness="1"
-            CornerRadius="{StaticResource ControlCornerRadius}">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition x:Name="UsedColumn" Width="0*" />
-                    <ColumnDefinition x:Name="RemainingColumn" Width="0*" />
-                    <ColumnDefinition x:Name="DevColumn" Width="1*" />
-                </Grid.ColumnDefinitions>
-                <Border
-                    Grid.Column="0"
-                    Background="{ThemeResource DiskBarUsedBrush}"
-                    BorderBrush="{ThemeResource DiskBarSeamBrush}"
-                    BorderThickness="0,0,1,0" />
-                <Border
-                    Grid.Column="1"
-                    Background="{ThemeResource DiskBarFreeBrush}"
-                    BorderBrush="{ThemeResource DiskBarFreeBorderBrush}"
-                    BorderThickness="{ThemeResource DiskBarFreeBorderThickness}" />
-                <Border
-                    Grid.Column="2"
-                    Background="{ThemeResource DiskBarDevBrush}"
-                    BorderBrush="{ThemeResource DiskBarSeamBrush}"
-                    BorderThickness="1,0,0,0" />
-            </Grid>
-        </Border>
+        <!--  Read-only visualization: used + protected | free | carved Dev Drive.
+              Non-interactive on purpose — the page's Slider + NumberBox change the size.
 
-        <!--  Legend (swatches match the bar's segment fills).  -->
-        <StackPanel Orientation="Horizontal" Spacing="16">
-            <StackPanel Orientation="Horizontal" Spacing="6">
-                <Border
-                    Width="10"
-                    Height="10"
-                    VerticalAlignment="Center"
-                    Background="{ThemeResource DiskBarUsedBrush}"
-                    CornerRadius="2" />
-                <TextBlock
-                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                    Style="{StaticResource CaptionTextBlockStyle}"
-                    Text="{x:Bind UsedLabel, Mode=OneWay}" />
+              Every segment is its own rounded block of the same height, separated by an even gap,
+              with no track or frame around them. The old bar put flush, square Used/Free bands in a
+              bordered track and inset only the Dev Drive, so the three pieces had different heights,
+              corners and edges and read as misaligned rather than as one chart. The gaps (applied in
+              code so a zero-width segment doesn't leave a double gap) still say the Dev Drive is a
+              separate volume.  -->
+        <Grid Height="16">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition x:Name="UsedColumn" Width="0*" />
+                <ColumnDefinition x:Name="RemainingColumn" Width="1*" />
+                <ColumnDefinition x:Name="DevColumn" Width="0*" />
+            </Grid.ColumnDefinitions>
+            <Border
+                x:Name="UsedSegment"
+                Grid.Column="0"
+                Background="{ThemeResource DiskBarUsedBrush}"
+                CornerRadius="4" />
+            <Border
+                x:Name="FreeSegment"
+                Grid.Column="1"
+                CornerRadius="4"
+                Style="{StaticResource DiskBarFreeSegmentStyle}" />
+            <!--  MinWidth keeps a tiny selection visible as a sliver rather than collapsing to
+                  nothing at the low end of the slider.  -->
+            <Border
+                x:Name="DevSegment"
+                Grid.Column="2"
+                MinWidth="6"
+                Background="{ThemeResource DiskBarDevBrush}"
+                CornerRadius="4" />
+        </Grid>
+
+        <!--
+            Legend: one column per segment, in bar order, name over value. Three equal columns fit
+            the 336px column this bar can live in without wrapping, and the size on its own line in
+            a stronger weight makes the numbers the reader came for scannable at a glance.
+        -->
+        <Grid ColumnSpacing="12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <StackPanel Grid.Column="0" Spacing="2">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <Border Background="{ThemeResource DiskBarUsedBrush}" Style="{StaticResource DiskBarSwatchStyle}" />
+                    <TextBlock x:Name="UsedName" Style="{StaticResource DiskBarLegendNameStyle}" />
+                </StackPanel>
+                <TextBlock x:Name="UsedValue" Style="{StaticResource DiskBarLegendValueStyle}" />
             </StackPanel>
-            <StackPanel Orientation="Horizontal" Spacing="6">
-                <Border
-                    Width="10"
-                    Height="10"
-                    VerticalAlignment="Center"
-                    Background="{ThemeResource DiskBarFreeBrush}"
-                    BorderBrush="{ThemeResource DiskBarSeamBrush}"
-                    BorderThickness="1"
-                    CornerRadius="2" />
-                <TextBlock
-                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                    Style="{StaticResource CaptionTextBlockStyle}"
-                    Text="{x:Bind RemainingLabel, Mode=OneWay}" />
+
+            <StackPanel Grid.Column="1" Spacing="2">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <Border x:Name="FreeSwatch" Style="{StaticResource DiskBarFreeSwatchStyle}" />
+                    <TextBlock x:Name="FreeName" Style="{StaticResource DiskBarLegendNameStyle}" />
+                </StackPanel>
+                <TextBlock x:Name="FreeValue" Style="{StaticResource DiskBarLegendValueStyle}" />
             </StackPanel>
-            <StackPanel Orientation="Horizontal" Spacing="6">
-                <Border
-                    Width="10"
-                    Height="10"
-                    VerticalAlignment="Center"
-                    Background="{ThemeResource DiskBarDevBrush}"
-                    CornerRadius="2" />
-                <TextBlock
-                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                    Style="{StaticResource CaptionTextBlockStyle}"
-                    Text="{x:Bind DevDriveLabel, Mode=OneWay}" />
+
+            <StackPanel Grid.Column="2" Spacing="2">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <Border Background="{ThemeResource DiskBarDevBrush}" Style="{StaticResource DiskBarSwatchStyle}" />
+                    <TextBlock x:Name="DevName" Style="{StaticResource DiskBarLegendNameStyle}" />
+                </StackPanel>
+                <TextBlock x:Name="DevValue" Style="{StaticResource DiskBarLegendValueStyle}" />
             </StackPanel>
-        </StackPanel>
+        </Grid>
+
+        <!--
+            The words behind the amber. Colour alone fails a colour-blind reader, a greyscale
+            screenshot and a screen reader, and it never says what the problem is. Shown only while
+            the free segment is in its low state; the text is set in ApplyFreeStyle.
+        -->
+        <TextBlock
+            x:Name="LowSpaceWarning"
+            AutomationProperties.AutomationId="DiskBarLowSpaceWarning"
+            AutomationProperties.LiveSetting="Polite"
+            Foreground="{ThemeResource SmWarnBrush}"
+            Style="{StaticResource CaptionTextBlockStyle}"
+            TextWrapping="Wrap"
+            Visibility="Collapsed" />
     </StackPanel>
 </UserControl>

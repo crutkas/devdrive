@@ -266,12 +266,6 @@ public sealed class VolumeResizerTests
         await Assert.ThrowsExactlyAsync<ArgumentNullException>(async () => await resizer.ExecuteAsync(null!));
     }
 
-    [TestMethod]
-    public void CreateDefault_ReturnsInstance()
-    {
-        Assert.IsNotNull(VolumeResizer.CreateDefault());
-    }
-
     // A fake broker that records the request and returns a canned response — never elevates or runs the
     // helper, so no real disk op can occur.
     private sealed class RecordingBroker : IElevatedResizeBroker

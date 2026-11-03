@@ -7,6 +7,7 @@ using DevDriveManager.Views;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Navigation;
 using Windows.System;
 
@@ -37,33 +38,140 @@ public sealed partial class ShellPage : Page
         InitializeComponent();
         Current = this;
 
+        BuildNavigationItems();
+
         ViewModel.NavigateToCreateRequested += OnNavigateToCreateRequested;
         ViewModel.LaunchUriRequested += OnLaunchUriRequested;
         ViewModel.PerformanceModeEnableRequested += OnPerformanceModeEnableRequested;
+
+        // The shell lives as long as the window, so this subscription does not need releasing.
+        App.SharedCreate.PropertyChanged += OnCreatePropertyChanged;
 
         Loaded += OnLoaded;
         ActualThemeChanged += OnActualThemeChanged;
     }
 
+    private const string CreateTag = "create";
+
+    /// <summary>
+    /// True while Create is running a disk operation. Every way out of the room checks it: the rail
+    /// items are disabled, and <see cref="SelectNavItem"/> and <see cref="Navigate"/> refuse anything
+    /// but Create. Leaving would detach the screen from an elevated operation that cannot be stopped,
+    /// and the room's progress and outcome are the only account the user gets of it.
+    /// </summary>
+    private static bool IsNavigationLocked => App.SharedCreate.IsBusy;
+
+    private void OnCreatePropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(CreateDevDriveViewModel.IsBusy))
+        {
+            DispatcherQueue.TryEnqueue(UpdateNavigationLock);
+        }
+    }
+
+    private IEnumerable<NavigationViewItem> AllNavItems() =>
+        ShellNavView.MenuItems.Concat(ShellNavView.FooterMenuItems).OfType<NavigationViewItem>();
+
+    /// <remarks>
+    /// The explanation is carried by <c>AutomationProperties.HelpText</c> and by the Create room's
+    /// status bar, not by a tooltip. A disabled <see cref="NavigationViewItem"/> never opens its
+    /// tooltip, so the old "Unavailable while…" tooltip was set on exactly the items that could not
+    /// show it. HelpText is still read by a screen reader on a disabled item.
+    /// </remarks>
+    private void UpdateNavigationLock()
+    {
+        bool locked = IsNavigationLocked;
+        foreach (NavigationViewItem item in AllNavItems())
+        {
+            bool isCreate = item.Tag as string == CreateTag;
+            item.IsEnabled = !locked || isCreate;
+            AutomationProperties.SetHelpText(item, locked && !isCreate
+                ? CreateDevDrivePage.NavigationLockedText
+                : string.Empty);
+        }
+    }
+
+    /// <summary>
+    /// Builds native navigation items from the route registry. Section boundaries remain separators;
+    /// a narrow Store-style rail does not have room for full-width section headers.
+    /// </summary>
+    private void BuildNavigationItems()
+    {
+        RoomSection? previous = null;
+
+        foreach (Room room in RoomRegistry.All)
+        {
+            if (previous is not null && room.Section != previous)
+            {
+                ShellNavView.MenuItems.Add(new NavigationViewItemSeparator());
+            }
+
+            var item = new NavigationViewItem
+            {
+                Content = RailLabel(room.Title),
+                Icon = new FontIcon { Glyph = room.Glyph, FontSize = 20 },
+                Style = (Style)Application.Current.Resources["StoreNavigationViewItemStyle"],
+                Tag = room.Tag,
+            };
+            AutomationProperties.SetAutomationId(item, room.AutomationId);
+            AutomationProperties.SetName(item, room.Title);
+            ToolTipService.SetToolTip(item, room.Title);
+            ShellNavView.MenuItems.Add(item);
+            previous = room.Section;
+        }
+    }
+
+    /// <summary>
+    /// Shortens a room title to something that fits the rail without ellipsing. Only titles
+    /// that genuinely do not fit are shortened; the full title stays on the tooltip and the
+    /// accessible name.
+    /// </summary>
+    private static string RailLabel(string title) => title switch
+    {
+        "Package caches" => "Caches",
+        "Create Dev Drive" => "Create",
+        _ => title,
+    };
+
     /// <summary>Select a top-level nav item by its tag (e.g. "caches"), updating the rail and the content frame.</summary>
     public void SelectNavItem(string tag)
     {
-        foreach (object item in NavView.MenuItems)
+        if (IsNavigationLocked && tag != CreateTag)
         {
-            if (item is NavigationViewItem nvi && (nvi.Tag as string) == tag)
-            {
-                NavView.SelectedItem = nvi;
-                return;
-            }
+            return;
+        }
+
+        NavigationViewItem? item = AllNavItems().FirstOrDefault(item => item.Tag as string == tag);
+        if (item is null) return;
+
+        // All callers (including attention signals and the shared Create request) use the same
+        // selection path. Re-selecting the current destination never reconstructs its page.
+        ShellNavView.SelectedItem = item;
+        Navigate(tag);
+    }
+
+    /// <summary>
+    /// NavigationView owns IsSelected and exposes SelectionItem to assistive technology.
+    /// ItemStatus is retained as well for existing automation clients of the old rail.
+    /// </summary>
+    private void ShellNavView_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
+    {
+        foreach (NavigationViewItem item in sender.MenuItems.Concat(sender.FooterMenuItems).OfType<NavigationViewItem>())
+        {
+            AutomationProperties.SetItemStatus(item, ReferenceEquals(item, args.SelectedItem) ? "Selected" : string.Empty);
+        }
+        if (args.SelectedItem is NavigationViewItem { Tag: string tag })
+        {
+            Navigate(tag);
         }
     }
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
-        // Land on the Dashboard and kick off the one-time load.
-        if (NavView.MenuItems.Count > 0 && NavView.SelectedItem is null)
+        // Land on the default room and kick off the one-time load.
+        if (ContentFrame.Content is null)
         {
-            NavView.SelectedItem = NavView.MenuItems[0];
+            SelectNavItem(RoomRegistry.Default.Tag);
         }
 
         if (!ViewModel.HasLoaded)
@@ -82,50 +190,58 @@ public sealed partial class ShellPage : Page
         }
     }
 
-    private void NavView_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
+    private void Navigate(string tag)
     {
-        if (args.IsSettingsSelected)
+        if (IsNavigationLocked && tag != CreateTag)
         {
-            ContentFrame.Navigate(typeof(SettingsPage));
+            // Put the rail back on Create. Disabled items cannot be clicked, so this is the
+            // programmatic path — keyboard selection, or a caller that skipped SelectNavItem.
+            if (AllNavItems().FirstOrDefault(i => i.Tag as string == CreateTag) is { } create &&
+                !ReferenceEquals(ShellNavView.SelectedItem, create))
+            {
+                ShellNavView.SelectedItem = create;
+            }
+
             return;
         }
 
-        if (args.SelectedItem is NavigationViewItem { Tag: string tag })
-        {
-            Navigate(tag);
-        }
-    }
-
-    private void Navigate(string tag)
-    {
-        Type? target = tag switch
-        {
-            "dashboard" => typeof(DashboardPage),
-            "caches" => typeof(PackageCachesPage),
-            "benchmarks" => typeof(BenchmarksPage),
-            "drives" => typeof(DrivesPage),
-            "create" => typeof(CreateDevDrivePage),
-            _ => null,
-        };
+        Type? target = tag == "settings" ? typeof(SettingsPage) : RoomRegistry.Find(tag)?.PageType;
 
         if (target is not null && ContentFrame.CurrentSourcePageType != target)
         {
+            PageTitle.Text = tag == "settings" ? "Settings" : RoomRegistry.Find(tag)!.Title;
+            // These pages own their title row so the room's actions can sit beside the title.
+            bool pageOwnsHeader = target == typeof(SpacePage) || target == typeof(PackageCachesPage) ||
+                target == typeof(DashboardPage) || target == typeof(ReclaimPage) ||
+                target == typeof(DrivesPage) || target == typeof(BenchmarksPage) ||
+                target == typeof(CreateDevDrivePage);
+            PageHeader.Visibility = pageOwnsHeader ? Visibility.Collapsed : Visibility.Visible;
+            AutomationProperties.SetAutomationId(PageTitle,
+                pageOwnsHeader ? "ShellPageTitle" : tag == "settings" ? "SettingsTitle" : "PageTitle");
             ContentFrame.Navigate(target, null, new Microsoft.UI.Xaml.Media.Animation.SuppressNavigationTransitionInfo());
         }
     }
 
-    /// <summary>"Create Dev Drive" raised from a page (e.g. the Dashboard empty state): select the nav item.</summary>
-    private void OnNavigateToCreateRequested()
+    /// <summary>
+    /// A page constructor that throws would otherwise either take the process down or leave an
+    /// empty content pane with the rail still highlighting the room, which reads as "this room is
+    /// blank" rather than "this room failed to open".
+    /// </summary>
+    private void OnNavigationFailed(object sender, Microsoft.UI.Xaml.Navigation.NavigationFailedEventArgs e)
     {
-        foreach (object item in NavView.MenuItems)
+        e.Handled = true;
+        System.Diagnostics.Debug.WriteLine($"[navigation] {e.SourcePageType}: {e.Exception}");
+
+        ContentFrame.Content = new TextBlock
         {
-            if (item is NavigationViewItem { Tag: "create" } createItem)
-            {
-                NavView.SelectedItem = createItem;
-                return;
-            }
-        }
+            Text = "This section could not be opened. Try another room, or restart the app.",
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(32),
+        };
     }
+
+    /// <summary>"Create Dev Drive" raised from a page (e.g. the Dashboard empty state): select the nav item.</summary>
+    private void OnNavigateToCreateRequested() => SelectNavItem("create");
 
     /// <summary>Launches a shell URI (e.g. <c>ms-settings:storage</c>). Best-effort and safe.</summary>
     private async void OnLaunchUriRequested(string uri)
@@ -201,10 +317,18 @@ public sealed partial class ShellPage : Page
                     "PerformanceModeGuidanceDialog");
             }
         }
-        finally
+            catch (Exception exception)
         {
-            _isDialogOpen = false;
-        }
+                // ShowAsync throws if the XamlRoot has gone (page detached) or if another ContentDialog
+                // is already up — "only one ContentDialog can be open at a time". The _isDialogOpen flag
+                // is local to this handler, so it cannot see a dialog a room opened. In an async void
+                // that throw is a process kill, which is a violent end for declining a nudge.
+                System.Diagnostics.Debug.WriteLine($"[perf-mode dialog] {exception}");
+            }
+            finally
+            {
+                _isDialogOpen = false;
+            }
     }
 
     /// <summary>

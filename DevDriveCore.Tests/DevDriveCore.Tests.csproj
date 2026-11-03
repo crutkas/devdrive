@@ -31,6 +31,12 @@
 
   <ItemGroup>
     <ProjectReference Include="..\DevDriveCore\DevDriveCore.csproj" />
+    <!--
+      MutationComposition is linked in below and now hands out an IReclaimExecutor, so the reclaim
+      contracts have to resolve here as well. The reference is deliberately to the library and not
+      to the WinUI app: this project asserts UI-agnostic code only.
+    -->
+    <ProjectReference Include="..\DevDriveReclaim\DevDriveReclaim.csproj" />
   </ItemGroup>
 
   <!--
@@ -46,6 +52,13 @@
     <!--  Trust/filters sub-VM: also UI-agnostic (CommunityToolkit.Mvvm + DevDriveCore + IElevatedFilterProbe),
           so the "See Filters" elevated-probe flow + trust projection are unit-tested headlessly with a fake probe.  -->
     <Compile Include="..\DevDriveManager\ViewModels\TrustFiltersViewModel.cs" Link="SuiteViewModels\TrustFiltersViewModel.cs" />
+    <!--  The filter row VM is what the trust VM projects the elevated probe's output into, so it comes
+          along for compilation and the projection is assertable here rather than only on screen.  -->
+    <Compile Include="..\DevDriveManager\ViewModels\FilterRowViewModel.cs" Link="SuiteViewModels\FilterRowViewModel.cs" />
+    <!--  The volumes-table row VM turns a VolumeInfo into the pills and numbers a person reads, which
+          makes it where "we could not read this" either survives or gets flattened into a confident
+          wrong answer. Pure string formatting over DevDriveCore types, so it tests headlessly.  -->
+    <Compile Include="..\DevDriveManager\ViewModels\VolumeRowViewModel.cs" Link="SuiteViewModels\VolumeRowViewModel.cs" />
   </ItemGroup>
 
   <!--
@@ -62,6 +75,18 @@
     <Compile Include="..\DevDriveManager\Services\SafeFakePackageCacheMover.cs" Link="CacheViewModels\SafeFakePackageCacheMover.cs" />
     <Compile Include="..\DevDriveManager\Services\SafeFakeVhdProvisioner.cs" Link="CacheViewModels\SafeFakeVhdProvisioner.cs" />
     <Compile Include="..\DevDriveManager\Services\SafeFakeVolumeResizer.cs" Link="CacheViewModels\SafeFakeVolumeResizer.cs" />
+    <Compile Include="..\DevDriveManager\Services\SafeFakeReclaimExecutor.cs" Link="CacheViewModels\SafeFakeReclaimExecutor.cs" />
+  </ItemGroup>
+
+  <!--
+    The reclaim confirmation is the last screen before data stops existing, and its wording is a
+    safety behaviour rather than copy: whether it says "can be restored" is the difference between an
+    informed delete and a surprise. It carries no XAML dependency precisely so it can be asserted
+    here. The rest of ReclaimViewModel cannot follow it, because StatusEmphasis lives in a control's
+    code-behind and would drag Microsoft.UI.Xaml in with it.
+  -->
+  <ItemGroup>
+    <Compile Include="..\DevDriveManager\ViewModels\ReclaimConfirmation.cs" Link="ReclaimViewModels\ReclaimConfirmation.cs" />
   </ItemGroup>
 
   <!--
@@ -72,6 +97,16 @@
   <ItemGroup>
     <Compile Include="..\DevDriveManager\ViewModels\EcosystemCardViewModel.cs" Link="EcosystemViewModels\EcosystemCardViewModel.cs" />
     <Compile Include="..\DevDriveManager\ViewModels\EcosystemsViewModel.cs" Link="EcosystemViewModels\EcosystemsViewModel.cs" />
+  </ItemGroup>
+
+  <!--
+    The theme dictionary is copied in, not linked as source, because the thing under test is the
+    shipped XAML itself: the free-space channel was once painted with a divider brush and measured
+    1.12:1 against its own card. A colour that cannot be seen is not catchable by any test that
+    reads C#, so the test reads the file the app actually loads.
+  -->
+  <ItemGroup>
+    <None Include="..\DevDriveManager\Themes\StorageManagerTheme.xaml" Link="Themes\StorageManagerTheme.xaml" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

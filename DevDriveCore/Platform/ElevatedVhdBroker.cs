@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using DevDriveCore.Abstractions;
 using DevDriveCore.Models;
+using DevDriveCore.Serialization;
 
 namespace DevDriveCore.Platform;
 
@@ -154,9 +155,9 @@ public sealed class ElevatedVhdBroker : IElevatedVhdBroker
         {
             if (request.Mode == VhdBrokerMode.Create)
             {
-                VhdProvisionPlan? plan = JsonSerializer.Deserialize<VhdProvisionPlan>(
+                VhdProvisionPlan? plan = InitializerPreservingJson.Deserialize(
                     request.PlanJson,
-                    JsonOptions);
+                    HelperJsonContext.Default.VhdProvisionPlan);
                 if (plan is not null)
                 {
                     filePath = plan.FilePath;
@@ -165,9 +166,9 @@ public sealed class ElevatedVhdBroker : IElevatedVhdBroker
             }
             else
             {
-                VhdRevertPlan? plan = JsonSerializer.Deserialize<VhdRevertPlan>(
+                VhdRevertPlan? plan = InitializerPreservingJson.Deserialize(
                     request.PlanJson,
-                    JsonOptions);
+                    HelperJsonContext.Default.VhdRevertPlan);
                 filePath = plan?.FilePath ?? string.Empty;
             }
         }
@@ -186,7 +187,7 @@ public sealed class ElevatedVhdBroker : IElevatedVhdBroker
                 FilePath = filePath,
                 DriveLetter = driveLetter,
             },
-            JsonOptions);
+            HelperJsonContext.Default.VhdProvisionResult);
     }
 
     private static string ResolveHelperPath()
@@ -216,9 +217,4 @@ public sealed class ElevatedVhdBroker : IElevatedVhdBroker
             // Temp-result cleanup must not mask the operation outcome.
         }
     }
-
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        PropertyNameCaseInsensitive = true,
-    };
 }

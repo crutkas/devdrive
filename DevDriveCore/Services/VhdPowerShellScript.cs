@@ -1,5 +1,6 @@
 using System.Text.Json;
 using DevDriveCore.Models;
+using DevDriveCore.Serialization;
 
 namespace DevDriveCore.Services;
 
@@ -144,9 +145,9 @@ if ($LASTEXITCODE -ne 0) { throw "Windows did not verify the formatted volume as
 
         try
         {
-            VhdFinalState? parsed = JsonSerializer.Deserialize<VhdFinalState>(
+            VhdFinalState? parsed = InitializerPreservingJson.Deserialize(
                 json,
-                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                HelperJsonContext.Default.VhdFinalState);
             if (parsed is null ||
                 parsed.DriveLetter is < 'D' or > 'Z' ||
                 parsed.SizeBytes == 0 ||
@@ -175,9 +176,9 @@ if ($LASTEXITCODE -ne 0) { throw "Windows did not verify the formatted volume as
 
         try
         {
-            VhdCapabilityState? parsed = JsonSerializer.Deserialize<VhdCapabilityState>(
+            VhdCapabilityState? parsed = InitializerPreservingJson.Deserialize(
                 json,
-                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                HelperJsonContext.Default.VhdCapabilityState);
             if (parsed is null || parsed.Build <= 0 || parsed.Revision < 0)
             {
                 return false;

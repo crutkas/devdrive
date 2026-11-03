@@ -233,10 +233,4 @@ public sealed class DevDriveCreationServiceTests
     {
         Assert.ThrowsExactly<ArgumentNullException>(() => new DevDriveCreationService(null!));
     }
-
-    [TestMethod]
-    public void CreateDefault_ReturnsInstance()
-    {
-        Assert.IsNotNull(DevDriveCreationService.CreateDefault());
-    }
 }

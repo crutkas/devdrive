@@ -94,6 +94,9 @@ public partial class MainPageViewModel : ObservableObject
     /// <summary>All fixed volumes on the system.</summary>
     public ObservableCollection<VolumeRowViewModel> Volumes { get; } = new();
 
+    /// <summary>How many swatch colours the theme's category ramp holds. Volume colours wrap through it.</summary>
+    private const int VolumeSwatchCount = 6;
+
     [ObservableProperty]
     public partial bool IsLoading { get; set; }
 
@@ -151,7 +154,11 @@ public partial class MainPageViewModel : ObservableObject
             int volumeIndex = 0;
             foreach (VolumeInfo volume in result.volumes)
             {
-                Volumes.Add(new VolumeRowViewModel(volume) { BandAlt = (volumeIndex++ % 2) == 1 });
+                Volumes.Add(new VolumeRowViewModel(volume)
+                {
+                    CategoryIndex = volumeIndex % VolumeSwatchCount,
+                });
+                volumeIndex++;
             }
 
             // Authoritative per-volume effective performance mode: from the (reliable, unelevated-readable)
