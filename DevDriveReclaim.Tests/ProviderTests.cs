@@ -148,6 +148,87 @@ public sealed class ProviderTests
     }
 
     [TestMethod]
+    public void TheWalkStreamsWhatItFindsAndReturnsItSortedByPath()
+    {
+        using var fixture = new ReclaimFixture();
+        fixture.Repo(@"b\two");
+        fixture.Repo(@"a\one");
+        fixture.Repo(@"c\deep\three");
+        var streamed = new System.Collections.Concurrent.ConcurrentBag<string>();
+        int folders = 0;
+
+        IReadOnlyList<DiscoveredRepository> found = RepositoryWalker.Walk(
+            [new WalkRoot(fixture.Root, 4)],
+            new RepositoryWalkOptions { Found = r => streamed.Add(r.Name), FolderRead = () => Interlocked.Increment(ref folders) });
+
+        CollectionAssert.AreEqual(new[] { "one", "two", "three" }, found.Select(r => r.Name).ToArray());
+        CollectionAssert.AreEquivalent(new[] { "one", "two", "three" }, streamed.ToArray());
+        Assert.IsGreaterThanOrEqualTo(7, folders);
+    }
+
+    [TestMethod]
+    public void EachRootHasItsOwnDepthAndAFolderReachedTwiceIsReadToTheDeeperOne()
+    {
+        using var fixture = new ReclaimFixture();
+        string shallow = fixture.Dir("shallow");
+        fixture.Repo(@"shallow\one\two\repo");
+
+        Assert.IsEmpty(RepositoryWalker.Walk([new WalkRoot(shallow, 1)]));
+
+        IReadOnlyList<DiscoveredRepository> found = RepositoryWalker.Walk(
+            [new WalkRoot(shallow, 1), new WalkRoot(fixture.Root, 4)]);
+
+        Assert.HasCount(1, found);
+        Assert.AreEqual("repo", found[0].Name);
+    }
+
+    [TestMethod]
+    public void ExcludedFoldersAreNeverEntered()
+    {
+        using var fixture = new ReclaimFixture();
+        fixture.Repo(@"kept\repo");
+        string cloud = fixture.Dir("OneDrive");
+        fixture.Repo(@"OneDrive\synced");
+
+        IReadOnlyList<DiscoveredRepository> found = RepositoryWalker.Walk(
+            [new WalkRoot(fixture.Root, 4)],
+            new RepositoryWalkOptions { Excluded = [cloud + Path.DirectorySeparatorChar] });
+
+        Assert.HasCount(1, found);
+        Assert.AreEqual("repo", found[0].Name);
+    }
+
+    [TestMethod]
+    public void AJunctionIsNotFollowed()
+    {
+        using var fixture = new ReclaimFixture();
+        string target = fixture.Repo(@"real\repo");
+        string link = Path.Combine(fixture.Root, "linked");
+        using (var mklink = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(
+            "cmd.exe", $"/c mklink /J \"{link}\" \"{Path.GetDirectoryName(target)}\"") { CreateNoWindow = true, UseShellExecute = false })!)
+        {
+            mklink.WaitForExit();
+        }
+
+        Assert.IsTrue(Directory.Exists(Path.Combine(link, "repo")), "the junction wasn't made");
+        IReadOnlyList<DiscoveredRepository> found = RepositoryWalker.Walk([new WalkRoot(fixture.Root, 4)]);
+
+        Assert.HasCount(1, found);
+        Assert.AreEqual(target, found[0].Path);
+    }
+
+    [TestMethod]
+    public void ACancelledWalkThrows()
+    {
+        using var fixture = new ReclaimFixture();
+        fixture.Repo("repo");
+        using var cancel = new CancellationTokenSource();
+        cancel.Cancel();
+
+        Assert.ThrowsExactly<OperationCanceledException>(() => RepositoryWalker.Walk([new WalkRoot(fixture.Root, 4)], null, cancel.Token));
+    }
+
+    [TestMethod]
     public async Task PackageCachesAreMeasuredWhereTheEnvironmentVariablePointsThem()
     {
         using var fixture = new ReclaimFixture();
