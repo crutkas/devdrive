@@ -72,10 +72,13 @@ public static class ReclaimRegistry
         string profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         var candidates = new List<string>();
 
-        foreach (string folder in (string[])["source", "src", "repos", "dev", "code", "git", "Projects"])
+        foreach (string folder in (string[])["source", "src", "repos", "dev", "code", "git", "github", "workspace", "workspaces", "Projects"])
         {
             candidates.Add(Path.Combine(profile, folder));
         }
+
+        // GitHub Desktop's default.
+        candidates.Add(Path.Combine(profile, "Documents", "GitHub"));
 
         // Where the GitHub Copilot app clones repositories and parks its per-session worktrees
         // (.copilot\repos\copilot-worktrees\<repo>\<session>). On a machine that develops mostly
@@ -84,7 +87,7 @@ public static class ReclaimRegistry
 
         foreach (string volume in volumeRoots)
         {
-            foreach (string folder in (string[])["src", "source", "repos", "dev", "code", "git", "projects"])
+            foreach (string folder in (string[])["src", "source", "repos", "dev", "code", "git", "github", "workspace", "workspaces", "projects"])
             {
                 candidates.Add(Path.Combine(volume, folder));
             }

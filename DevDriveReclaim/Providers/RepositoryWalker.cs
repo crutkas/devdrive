@@ -1,7 +1,29 @@
+using System.Collections.Concurrent;
+using System.IO.Enumeration;
+
 namespace DevDriveReclaim.Providers;
 
 /// <summary>A git repository found beneath a source root.</summary>
 public sealed record DiscoveredRepository(string Path, string Name, bool IsWorktree);
+
+/// <summary>A folder to look for repositories in, and how many levels below it to look.</summary>
+public sealed record WalkRoot(string Path, int MaxDepth);
+
+/// <summary>How <see cref="RepositoryWalker.Walk"/> runs.</summary>
+public sealed record RepositoryWalkOptions
+{
+    /// <summary>Called as each repository is found, on the walk's threads, before the walk returns.</summary>
+    public Action<DiscoveredRepository>? Found { get; init; }
+
+    /// <summary>Called after each folder is read, on the walk's threads (a progress count).</summary>
+    public Action? FolderRead { get; init; }
+
+    /// <summary>Folders the walk never enters, such as a cloud drive's sync root or the Windows folder.</summary>
+    public IEnumerable<string> Excluded { get; init; } = [];
+
+    /// <summary>How many folders are read at once.</summary>
+    public int Parallelism { get; init; } = Math.Clamp(Environment.ProcessorCount, 2, 8);
+}
 
 /// <summary>
 /// A folder sitting among worktrees that no longer has a <c>.git</c>, and so is invisible to a
@@ -24,6 +46,13 @@ public sealed record OrphanedWorktree(string Path, string Name, int SiblingWorkt
 /// not separate repos and continuing into <c>node_modules</c> to look for more is how a scan turns
 /// into a five-minute stall. Nested submodules are the deliberate cost of that decision.
 /// </para>
+/// <para>
+/// Each folder is read once: its listing says both whether it is a repo (a <c>.git</c> child) and
+/// where to go next. Folders are read in parallel. A folder that isn't on this disk is never
+/// entered: a cloud placeholder (recall on open or on data access), an offline file's folder, or a
+/// junction or symbolic link, because listing a placeholder can download it and a link can lead
+/// back to where the walk has been.
+/// </para>
 /// </remarks>
 public static class RepositoryWalker
 {
@@ -37,6 +66,20 @@ public static class RepositoryWalker
         "packages", ".vs", ".vscode", "$RECYCLE.BIN", "System Volume Information",
     };
 
+    private const FileAttributes RecallOnOpen = (FileAttributes)0x00040000;
+    private const FileAttributes RecallOnDataAccess = (FileAttributes)0x00400000;
+    private const FileAttributes NotOnThisDisk = FileAttributes.ReparsePoint | FileAttributes.Offline | RecallOnOpen | RecallOnDataAccess;
+
+    private static readonly EnumerationOptions ListOptions = new()
+    {
+        RecurseSubdirectories = false,
+        IgnoreInaccessible = true,
+        AttributesToSkip = 0,
+        ReturnSpecialDirectories = false,
+    };
+
+    private readonly record struct Entry(string Name, FileAttributes Attributes, bool IsDirectory);
+
     public static IReadOnlyList<DiscoveredRepository> Discover(
         IEnumerable<string> sourceRoots,
         CancellationToken cancellationToken = default,
@@ -44,58 +87,189 @@ public static class RepositoryWalker
     {
         ArgumentNullException.ThrowIfNull(sourceRoots);
 
-        var found = new List<DiscoveredRepository>();
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        return Walk(
+            [.. sourceRoots.Where(r => !string.IsNullOrWhiteSpace(r)).Select(r => new WalkRoot(r, maxDepth))],
+            options: null,
+            cancellationToken);
+    }
 
-        foreach (string root in sourceRoots)
+    /// <summary>
+    /// Finds the repositories under <paramref name="roots"/>, each root to its own depth, sorted by path.
+    /// A folder reached from two roots is read once, to the deeper of the two depths.
+    /// </summary>
+    /// <exception cref="OperationCanceledException">The walk was cancelled; what it found so far went to <see cref="RepositoryWalkOptions.Found"/>.</exception>
+    public static IReadOnlyList<DiscoveredRepository> Walk(
+        IEnumerable<WalkRoot> roots,
+        RepositoryWalkOptions? options = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(roots);
+        options ??= new RepositoryWalkOptions();
+
+        var excluded = new HashSet<string>(options.Excluded.Select(Trim), StringComparer.OrdinalIgnoreCase);
+        var work = new ConcurrentStack<(string Path, int Left)>();
+        var visited = new ConcurrentDictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var found = new ConcurrentDictionary<string, DiscoveredRepository>(StringComparer.OrdinalIgnoreCase);
+        int pending = 0;
+
+        foreach (WalkRoot root in roots)
         {
-            if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
+            if (string.IsNullOrWhiteSpace(root.Path) || excluded.Contains(Trim(root.Path)))
             {
                 continue;
             }
 
-            var stack = new Stack<(string Path, int Depth)>();
-            stack.Push((root, 0));
+            pending++;
+            work.Push((Trim(root.Path), Math.Max(0, root.MaxDepth)));
+        }
 
-            while (stack.Count > 0)
+        if (pending == 0)
+        {
+            return [];
+        }
+
+        int workers = Math.Clamp(options.Parallelism, 1, 64);
+        Parallel.For(
+            0,
+            workers,
+            new ParallelOptions { MaxDegreeOfParallelism = workers, CancellationToken = cancellationToken },
+            _ =>
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                (string current, int depth) = stack.Pop();
-
-                string gitPath = Path.Combine(current, ".git");
-                bool isRepo = Directory.Exists(gitPath) || File.Exists(gitPath);
-
-                if (isRepo)
+                var spin = new SpinWait();
+                while (true)
                 {
-                    if (seen.Add(current))
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (work.TryPop(out (string Path, int Left) item))
                     {
-                        // A .git *file* rather than a folder means this working tree points at a
-                        // gitdir elsewhere — that is exactly what `git worktree add` produces.
-                        found.Add(new DiscoveredRepository(
-                            current, Path.GetFileName(current), IsWorktree: File.Exists(gitPath)));
-                    }
+                        try
+                        {
+                            Visit(item.Path, item.Left);
+                        }
+                        finally
+                        {
+                            Interlocked.Decrement(ref pending);
+                        }
 
+                        spin.Reset();
+                    }
+                    else if (Volatile.Read(ref pending) == 0)
+                    {
+                        return;
+                    }
+                    else
+                    {
+                        spin.SpinOnce();
+                    }
+                }
+            });
+
+        return [.. found.Values.OrderBy(r => r.Path, StringComparer.OrdinalIgnoreCase)];
+
+        void Visit(string folder, int left)
+        {
+            if (!Claim(folder, left))
+            {
+                return;
+            }
+
+            List<Entry>? entries = List(folder);
+            options.FolderRead?.Invoke();
+            if (entries is null)
+            {
+                return;
+            }
+
+            foreach (Entry entry in entries)
+            {
+                if (!entry.Name.Equals(".git", StringComparison.OrdinalIgnoreCase))
+                {
                     continue;
                 }
 
-                if (depth >= maxDepth)
+                // A .git *file* rather than a folder means this working tree points at a gitdir
+                // elsewhere — that is exactly what `git worktree add` produces.
+                var repo = new DiscoveredRepository(folder, Path.GetFileName(Trim(folder)), IsWorktree: !entry.IsDirectory);
+                if (found.TryAdd(folder, repo))
+                {
+                    options.Found?.Invoke(repo);
+                }
+
+                return;
+            }
+
+            if (left <= 0)
+            {
+                return;
+            }
+
+            foreach (Entry entry in entries)
+            {
+                if (!entry.IsDirectory || (entry.Attributes & NotOnThisDisk) != 0 || SkipFolders.Contains(entry.Name))
                 {
                     continue;
                 }
 
-                foreach (string child in SafeSubdirectories(current))
+                string child = Path.Combine(folder, entry.Name);
+                if (excluded.Contains(child))
                 {
-                    if (SkipFolders.Contains(Path.GetFileName(child)))
-                    {
-                        continue;
-                    }
-
-                    stack.Push((child, depth + 1));
+                    continue;
                 }
+
+                Interlocked.Increment(ref pending);
+                work.Push((child, left - 1));
             }
         }
 
-        return found;
+        // The first visit of a folder reads it; a later one only when it may look deeper than that did.
+        bool Claim(string folder, int left)
+        {
+            while (true)
+            {
+                if (visited.TryGetValue(folder, out int had))
+                {
+                    if (had >= left)
+                    {
+                        return false;
+                    }
+
+                    if (visited.TryUpdate(folder, left, had))
+                    {
+                        return true;
+                    }
+                }
+                else if (visited.TryAdd(folder, left))
+                {
+                    return true;
+                }
+            }
+        }
+    }
+
+    /// <summary>A folder's entries in one read; null when it can't be read.</summary>
+    private static List<Entry>? List(string folder)
+    {
+        try
+        {
+            return
+            [
+                .. new FileSystemEnumerable<Entry>(
+                    folder,
+                    (ref FileSystemEntry e) => new Entry(e.FileName.ToString(), e.Attributes, e.IsDirectory),
+                    ListOptions),
+            ];
+        }
+        catch (Exception exception) when (
+            exception is UnauthorizedAccessException or IOException or
+                System.Security.SecurityException or ArgumentException)
+        {
+            return null;
+        }
+    }
+
+    private static string Trim(string path)
+    {
+        string trimmed = path.TrimEnd('\\', '/');
+        return trimmed.Length == 0 || trimmed.EndsWith(':') ? trimmed + Path.DirectorySeparatorChar : trimmed;
     }
 
     /// <summary>
