@@ -2,7 +2,10 @@ using DevDriveReclaim.Providers;
 
 namespace DevDriveReclaim;
 
-/// <summary>What changed since the scan that made a run keep a row it was asked to remove, as data.</summary>
+/// <summary>
+/// Why a run kept a row it was asked to remove, as data: something its grade rested on changed since the scan, or (for a
+/// duplicate) the run itself removes the copy that was to stay.
+/// </summary>
 public enum ReclaimChange
 {
     /// <summary>Nothing: the row is as the scan found it.</summary>
@@ -34,6 +37,15 @@ public enum ReclaimChange
 
     /// <summary>The clone holds more stashes.</summary>
     Stashes,
+
+    /// <summary>A duplicate's kept copy isn't there any more, or can't be read.</summary>
+    KeptCopyGone,
+
+    /// <summary>A duplicate's kept copy isn't the same size as it any more.</summary>
+    KeptCopyChanged,
+
+    /// <summary>A duplicate's kept copy is being removed in the same run (it is, or is inside, another row of the run).</summary>
+    KeptCopyRemovedToo,
 }
 
 /// <summary>Why a run keeps a row: what changed since the scan, as data, and in words for the row.</summary>
@@ -61,6 +73,11 @@ public sealed record ReclaimChanged(ReclaimChange Change, string Reason);
 /// <para>
 /// Reads only (<c>git status</c> runs with optional locks off), so a dry run asks it too.
 /// </para>
+/// <para>
+/// A duplicate (<see cref="ReclaimCandidate.KeptCopy"/>) is only safe to remove while the copy kept in its place stays. So the
+/// run keeps it when that copy is gone, isn't the same size any more (a cheap look; the scan compared every byte), or is going
+/// in the same run, being, or being inside, another row of it.
+/// </para>
 /// </remarks>
 public sealed class ReclaimRecheck
 {
@@ -77,13 +94,24 @@ public sealed class ReclaimRecheck
     public static ReclaimRecheck Default { get; } = new(new GitWorktreeInspector());
 
     /// <summary>
-    /// What changed since the scan that means a run should keep <paramref name="candidate"/>, or null when it can go. A row with
-    /// nothing to ask again about (no <see cref="ReclaimCandidate.GitEvidence"/>) can always go, as far as this is concerned.
+    /// What means a run should keep <paramref name="candidate"/> now, or null when it can go. A row with nothing to ask again
+    /// about (no <see cref="ReclaimCandidate.GitEvidence"/> or <see cref="ReclaimCandidate.KeptCopy"/>) can always go, as far as
+    /// this is concerned.
     /// </summary>
+    /// <param name="candidate">The row about to be removed.</param>
+    /// <param name="run">Everything the run removes, so a duplicate whose kept copy goes in the same run is kept.</param>
+    /// <param name="cancellationToken">Stops a git that's being asked.</param>
     /// <exception cref="OperationCanceledException">The run was stopped while git was being asked.</exception>
-    public ReclaimChanged? WhatChanged(ReclaimCandidate candidate, CancellationToken cancellationToken)
+    public ReclaimChanged? WhatChanged(
+        ReclaimCandidate candidate, IReadOnlyCollection<ReclaimCandidate> run, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(candidate);
+        ArgumentNullException.ThrowIfNull(run);
+
+        if (candidate.KeptCopy is { } kept)
+        {
+            return KeptCopyChanged(candidate, kept, run);
+        }
 
         if (candidate.GitEvidence is not { } before || before.State.IsUnknown)
         {
@@ -99,17 +127,56 @@ public sealed class ReclaimRecheck
     }
 
     /// <summary>
-    /// The outcome for a row a run left where it was because it changed since the scan: kept, nothing attempted, nothing freed,
-    /// with what changed in words and as data. One wording for the run and the dry run.
+    /// The outcome for a row a run left where it was: kept, nothing attempted, nothing freed, with why in words and as data.
+    /// One wording for the run and the dry run.
     /// </summary>
     public static ReclaimItemOutcome Kept(ReclaimCandidate candidate, ReclaimChanged changed)
     {
         ArgumentNullException.ThrowIfNull(candidate);
         ArgumentNullException.ThrowIfNull(changed);
-        return new(candidate, ReclaimItemStatus.Failed, 0, $"kept — changed since the scan: {changed.Reason}")
+
+        // A kept copy going in this same run isn't a change since the scan; it's this run.
+        string why = changed.Change == ReclaimChange.KeptCopyRemovedToo
+            ? changed.Reason
+            : $"changed since the scan: {changed.Reason}";
+
+        return new(candidate, ReclaimItemStatus.Failed, 0, $"kept — {why}")
         {
             Change = changed.Change,
         };
+    }
+
+    /// <summary>Why a duplicate can't go now that the copy kept in its place has moved on, or null when it can.</summary>
+    private static ReclaimChanged? KeptCopyChanged(ReclaimCandidate candidate, string kept, IReadOnlyCollection<ReclaimCandidate> run)
+    {
+        if (run.FirstOrDefault(other => !ReferenceEquals(other, candidate) && ReclaimOverlapResolver.Covers(other.Path, kept)) is { } going)
+        {
+            return new(
+                ReclaimChange.KeptCopyRemovedToo,
+                $"the copy kept in its place, {kept}, is being removed in this run too, with {going.DisplayName}");
+        }
+
+        try
+        {
+            var keptFile = new FileInfo(kept);
+            if (!keptFile.Exists)
+            {
+                return new(ReclaimChange.KeptCopyGone, $"the copy kept in its place, {kept}, isn't there any more");
+            }
+
+            var copy = new FileInfo(candidate.Path);
+            if (copy.Exists && copy.Length != keptFile.Length)
+            {
+                return new(ReclaimChange.KeptCopyChanged, $"the copy kept in its place, {kept}, isn't the same size any more");
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException
+            or NotSupportedException or System.Security.SecurityException)
+        {
+            return new(ReclaimChange.KeptCopyGone, $"the copy kept in its place, {kept}, couldn't be read");
+        }
+
+        return null;
     }
 
     /// <summary>

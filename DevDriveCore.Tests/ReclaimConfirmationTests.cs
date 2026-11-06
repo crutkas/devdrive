@@ -397,6 +397,36 @@ public sealed class SafeFakeReclaimExecutorTests
         public DevDriveReclaim.Providers.WorktreeState Inspect(string worktreePath, CancellationToken cancellationToken) => state;
     }
 
+    /// <summary>The fake keeps a duplicate whose kept copy goes in the same run, as the real run does (Dev Config #347).</summary>
+    [TestMethod]
+    public async Task ADuplicateWhoseKeptCopyGoesTooIsKept()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "ddm-safe-" + Guid.NewGuid().ToString("N"));
+        string bin = Path.Combine(root, "bin");
+        Directory.CreateDirectory(bin);
+        string kept = Path.Combine(bin, "model.onnx");
+        string asset = Path.Combine(root, "model.onnx");
+        File.WriteAllText(kept, "same");
+        File.WriteAllText(asset, "same");
+        try
+        {
+            SafeFakeReclaimExecutor executor = new(TestBins.Recycles);
+            ReclaimCandidate duplicate = new("duplicates", asset, "model.onnx", 1_000_000, ReclaimRisk.Check, "identical", "copy it back")
+            {
+                KeptCopy = kept,
+            };
+
+            ReclaimOutcome outcome = await executor.ExecuteAsync([Candidate(bin, "bin"), duplicate], null, default);
+
+            Assert.AreEqual(ReclaimChange.KeptCopyRemovedToo, outcome.Items.Single(i => i.Candidate.Path == asset).Change);
+            CollectionAssert.AreEqual(new[] { bin }, executor.Removed.ToArray());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     /// <summary>Something the confirmation named as permanent is reported as freed, not recycled.</summary>
     [TestMethod]
     public async Task AConsentedPermanentItemCountsAsFreed()

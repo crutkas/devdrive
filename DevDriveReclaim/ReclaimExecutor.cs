@@ -48,7 +48,8 @@ namespace DevDriveReclaim;
 /// <b>A grade read from git is read again.</b> A worktree or dormant clone graded from git at the scan
 /// (<see cref="ReclaimCandidate.GitEvidence"/>) is asked about again just before it goes, and kept, with what changed, when
 /// git's answer is riskier now (<see cref="ReclaimRecheck"/>). The scan can be hours old, and a Safe worktree someone has
-/// since edited holds the only copy of that edit.
+/// since edited holds the only copy of that edit. A duplicate is kept the same way when the copy kept in its place
+/// (<see cref="ReclaimCandidate.KeptCopy"/>) is gone, changed, or being removed by this same run.
 /// </para>
 /// </remarks>
 public sealed class ReclaimExecutor : IReclaimExecutor
@@ -194,7 +195,7 @@ public sealed class ReclaimExecutor : IReclaimExecutor
                 continue;
             }
 
-            ReclaimItemOutcome outcome = Remove(candidate, preflight, owners, recheck, cancellationToken);
+            ReclaimItemOutcome outcome = Remove(candidate, selection, preflight, owners, recheck, cancellationToken);
             outcomes.Add(outcome);
             rootOutcomes[candidate.Path] = outcome;
             cancelled |= outcome.Status == ReclaimItemStatus.Cancelled;
@@ -253,6 +254,7 @@ public sealed class ReclaimExecutor : IReclaimExecutor
 
     private static ReclaimItemOutcome Remove(
         ReclaimCandidate candidate,
+        IReadOnlyList<ReclaimCandidate> run,
         Func<ReclaimCandidate, string, RecycleBinCheck> preflight,
         IReclaimOwnerRemoval owners,
         ReclaimRecheck recheck,
@@ -280,7 +282,7 @@ public sealed class ReclaimExecutor : IReclaimExecutor
         ReclaimChanged? changed;
         try
         {
-            changed = recheck.WhatChanged(candidate, cancellationToken);
+            changed = recheck.WhatChanged(candidate, run, cancellationToken);
         }
         catch (OperationCanceledException)
         {

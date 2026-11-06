@@ -160,6 +160,14 @@ public sealed record ReclaimCandidate
     public Providers.GitEvidence? GitEvidence { get; init; }
 
     /// <summary>
+    /// For a copy of a file kept elsewhere (a duplicate), the copy that stays when this one goes; null otherwise. Removing this
+    /// row is only safe while that copy is there, so a scan doesn't offer the row when the kept copy is inside another of its
+    /// rows, and a run keeps it when the kept copy is gone, changed, or being removed in the same run
+    /// (<see cref="ReclaimRecheck"/>).
+    /// </summary>
+    public string? KeptCopy { get; init; }
+
+    /// <summary>
     /// The same candidate, marked for permanent deletion. Only <see cref="ReclaimPlan.ConsentedSelection"/>
     /// should call this: it is the record that the confirmation named the item as permanent.
     /// </summary>
@@ -170,6 +178,7 @@ public sealed record ReclaimCandidate
                 LastUsedUtc, ItemCount, Detail, supportsRecycleBin: false, Owner)
             {
                 GitEvidence = GitEvidence,
+                KeptCopy = KeptCopy,
             }
             : this;
 

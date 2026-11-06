@@ -18,8 +18,9 @@ namespace DevDriveManager.Services;
 /// because the room's job under test is to render outcomes correctly, including the difference
 /// between space freed and space moved into the bin. It also runs the same read-only Recycle Bin
 /// preflight, so an item the bin would not take is kept here exactly as it would be for real, and asks
-/// git again about rows graded from git (<see cref="ReclaimRecheck"/>, read-only), so a worktree that
-/// changed since the scan is kept here as it would be for real.
+/// again about rows whose grade can change after the scan (<see cref="ReclaimRecheck"/>, read-only), so a
+/// worktree that changed since the scan, or a duplicate whose kept copy goes too, is kept here as it would
+/// be for real.
 /// </para>
 /// </remarks>
 public sealed class SafeFakeReclaimExecutor(
@@ -82,7 +83,7 @@ public sealed class SafeFakeReclaimExecutor(
                         candidate, ReclaimItemStatus.AlreadyGone, 0,
                         "already gone — something else removed it since the scan"),
 
-                _ => Simulate(candidate, verdict, preflight, _recheck, cancellationToken),
+                _ => Simulate(candidate, selection, verdict, preflight, _recheck, cancellationToken),
             };
 
             if (outcome.Removed)
@@ -129,16 +130,18 @@ public sealed class SafeFakeReclaimExecutor(
 
     private static ReclaimItemOutcome Simulate(
         ReclaimCandidate candidate,
+        IReadOnlyList<ReclaimCandidate> run,
         ReclaimGuardVerdict verdict,
         Func<ReclaimCandidate, RecycleBinCheck> preflight,
         ReclaimRecheck recheck,
         CancellationToken cancellationToken)
     {
-        // A row that changed since the scan is kept, as the real run keeps it. Asking git is read-only.
+        // A row that changed since the scan, or a duplicate whose kept copy goes in the same run, is kept, as the real run
+        // keeps it. Asking is read-only.
         ReclaimChanged? changed;
         try
         {
-            changed = recheck.WhatChanged(candidate, cancellationToken);
+            changed = recheck.WhatChanged(candidate, run, cancellationToken);
         }
         catch (OperationCanceledException)
         {

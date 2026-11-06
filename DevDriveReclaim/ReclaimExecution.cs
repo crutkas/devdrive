@@ -57,8 +57,8 @@ public sealed record ReclaimItemOutcome(
     public bool NeedsAttention => Status is ReclaimItemStatus.Refused or ReclaimItemStatus.Failed;
 
     /// <summary>
-    /// What changed since the scan, when that is why the run kept it (<see cref="ReclaimRecheck"/>); <see cref="ReclaimChange.None"/>
-    /// otherwise. The <see cref="Message"/> says it in words.
+    /// Why the run kept it when it changed since the scan, or its kept copy goes in the same run (<see cref="ReclaimRecheck"/>);
+    /// <see cref="ReclaimChange.None"/> otherwise. The <see cref="Message"/> says it in words.
     /// </summary>
     public ReclaimChange Change { get; init; }
 

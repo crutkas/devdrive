@@ -238,6 +238,11 @@ what changed as data. The dry run (`SafeFakeReclaimExecutor`) asks the same ques
   a branch no longer merged, a new local-only ignored file (a `.env`), more stashes (a dormant
   clone), or when git can't answer. A row graded without git (an orphaned worktree folder) has
   nothing to ask about.
+- **Duplicates** name the copy kept in their place (`ReclaimCandidate.KeptCopy`). Nothing under
+  `$Recycle.Bin` or `System Volume Information` is a copy, kept or offered; the engine doesn't offer a
+  row whose kept copy is inside another row of the scan (a build output, a dormant project, a
+  model); and the run keeps one whose kept copy is gone, isn't the same size any more, or is being
+  removed in the same run ("kept — the copy kept in its place, …, is being removed in this run too").
 
 ## Reclaim: AI models
 

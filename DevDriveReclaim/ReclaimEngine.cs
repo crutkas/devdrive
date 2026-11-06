@@ -140,7 +140,29 @@ public sealed class ReclaimEngine(IEnumerable<IReclaimProvider> providers)
             _providers.Select(p => RunProviderAsync(p, context, progress, cancellationToken));
 
         ReclaimCategoryResult[] results = await Task.WhenAll(tasks);
-        return new ReclaimResult(results, DateTimeOffset.UtcNow);
+        return new ReclaimResult(WithoutCopiesKeptInOtherRows(results), DateTimeOffset.UtcNow);
+    }
+
+    /// <summary>
+    /// Drops each row whose kept copy (<see cref="ReclaimCandidate.KeptCopy"/>) is inside another row of the scan.
+    /// </summary>
+    /// <remarks>
+    /// A duplicate is offered on the strength of the copy that stays. When that copy sits in a build output, a dormant project
+    /// or any other row, ticking both rows removes every copy — and the one offered is often the original (an asset), the kept
+    /// one the build's copy of it, because the shorter path is kept. Providers run concurrently and can't see each other's
+    /// rows, so this is decided here, once they've all finished. A row whose category didn't finish can't be seen here either;
+    /// the run checks the kept copy again (<see cref="ReclaimRecheck"/>).
+    /// </remarks>
+    internal static IEnumerable<ReclaimCategoryResult> WithoutCopiesKeptInOtherRows(IReadOnlyList<ReclaimCategoryResult> results)
+    {
+        ReclaimCandidate[] all = [.. results.SelectMany(r => r.Candidates)];
+
+        bool KeptInsideAnother(ReclaimCandidate candidate) =>
+            candidate.KeptCopy is { } kept && all.Any(other => ReclaimOverlapResolver.Covers(other.Path, kept));
+
+        return results.Select(result => result.Candidates.Any(KeptInsideAnother)
+            ? result with { Candidates = [.. result.Candidates.Where(c => !KeptInsideAnother(c))] }
+            : result);
     }
 
     private static async Task<ReclaimCategoryResult> RunProviderAsync(
