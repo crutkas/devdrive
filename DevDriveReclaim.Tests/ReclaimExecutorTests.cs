@@ -343,7 +343,8 @@ public sealed class ReclaimExecutorTests
             Candidate(windows), Candidate(Path.Combine(windows, "Temp")));
 
         Assert.AreEqual(0, outcome.RemovedCount);
-        Assert.AreEqual(2, outcome.FailedCount);
+        Assert.AreEqual(1, outcome.FailedCount, "the child is counted with its container, as the confirmation counts it");
+        Assert.AreEqual(2, outcome.Failures.Count(), "both rows say why they're still there");
         Assert.IsTrue(Directory.Exists(windows));
     }
 

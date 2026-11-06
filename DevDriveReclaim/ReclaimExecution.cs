@@ -82,11 +82,27 @@ public sealed record ReclaimOutcome(IReadOnlyList<ReclaimItemOutcome> Items, boo
     /// <summary>Bytes moved into a Recycle Bin. They come back when the bin is emptied, not before.</summary>
     public long BytesRecycled => Items.Sum(i => i.BytesRecycled);
 
-    public int RemovedCount => Items.Count(i => i.Removed);
+    public int RemovedCount => Roots.Count(i => i.Removed);
 
-    public int FailedCount => Items.Count(i => i.NeedsAttention);
+    public int FailedCount => Roots.Count(i => i.NeedsAttention);
 
+    /// <summary>Everything that needs attention, nested rows included, so each row can say why it's still there.</summary>
     public IEnumerable<ReclaimItemOutcome> Failures => Items.Where(i => i.NeedsAttention);
+
+    /// <summary>
+    /// The outcomes of the containment roots: the items the confirmation counts. A selected row inside another selected row
+    /// goes, or stays, with it, so it isn't counted again; <see cref="RemovedCount"/> and <see cref="FailedCount"/> count
+    /// these.
+    /// </summary>
+    public IEnumerable<ReclaimItemOutcome> Roots
+    {
+        get
+        {
+            var roots = new HashSet<string>(
+                ReclaimOverlapResolver.Roots(Items.Select(i => i.Candidate)).Select(c => c.Path), StringComparer.OrdinalIgnoreCase);
+            return Items.Where(i => roots.Contains(i.Candidate.Path));
+        }
+    }
 
     /// <summary>Bytes freed now per volume root, for the after-picture. Recycled bytes are excluded.</summary>
     public IReadOnlyDictionary<string, long> BytesFreedByVolume =>

@@ -118,7 +118,8 @@ public sealed class ReclaimOrderingTests
             [Folder(windows), Folder(child)], null, default);
 
         Assert.AreEqual(0, outcome.RemovedCount, "Nothing was removed, so nothing may be reported removed.");
-        Assert.AreEqual(2, outcome.FailedCount, "Both the refused container and its child need attention.");
+        Assert.AreEqual(1, outcome.FailedCount, "Counted once, as the confirmation counts it.");
+        Assert.AreEqual(2, outcome.Failures.Count(), "Both the refused container and its child need attention.");
         Assert.IsEmpty(executor.Removed);
         Assert.IsTrue(Directory.Exists(windows));
     }
@@ -141,7 +142,7 @@ public sealed class ReclaimOrderingTests
             ReclaimOutcome outcome = await executor.ExecuteAsync(
                 [Folder(outer), Folder(inner)], null, default);
 
-            Assert.AreEqual(2, outcome.RemovedCount);
+            Assert.AreEqual(1, outcome.RemovedCount, "the child went with its container, and is counted with it");
             Assert.AreEqual(
                 ReclaimItemStatus.Absorbed,
                 outcome.Items.Single(i => i.Candidate.Path == inner).Status);

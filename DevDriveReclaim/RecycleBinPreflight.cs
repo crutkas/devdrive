@@ -32,11 +32,20 @@ public sealed record RecycleBinCheck(RecycleBinVerdict Verdict, string Reason)
 /// <param name="HasRecycleBin">False for removable, network and other volumes the shell never recycles on.</param>
 /// <param name="RecyclingDisabled">The bin is set to delete immediately, by the user or by policy.</param>
 /// <param name="MaxCapacityBytes">The bin's size limit, or null when Windows has not recorded one.</param>
+/// <param name="UsedBytes">What the bin holds now, or null when it could not be read.</param>
 public sealed record RecycleBinVolumeSettings(
     string VolumeRoot,
     bool HasRecycleBin,
     bool RecyclingDisabled,
-    long? MaxCapacityBytes);
+    long? MaxCapacityBytes,
+    long? UsedBytes = null)
+{
+    /// <summary>
+    /// What the bin can still take before Windows makes room by deleting its oldest items for good, or null when the limit
+    /// or the contents are unknown.
+    /// </summary>
+    public long? RoomBytes => MaxCapacityBytes is long max && UsedBytes is long used ? Math.Max(0, max - used) : null;
+}
 
 /// <summary>
 /// Predicts, before anything is removed, whether the shell will recycle an item or silently delete
@@ -57,6 +66,13 @@ public sealed record RecycleBinVolumeSettings(
 /// <c>NukeOnDelete</c>, and the <c>NoRecycleFiles</c> policy turns recycling off everywhere. This is a
 /// prediction, not a guarantee — the shell can still decline for reasons it does not publish — which
 /// is why the executor also asks the shell to warn before any permanent delete it did not plan.
+/// </para>
+/// <para>
+/// <b>The limit is for the whole bin, not each item.</b> An item that fits the limit but not what is left of it is still
+/// recycled, and the shell makes room by deleting the bin's oldest items for good, without a prompt
+/// (<c>FOF_WANTNUKEWARNING</c> doesn't fire: the item itself was recycled). In one run those are the items it recycled
+/// first. So an item is checked against the bin's room (<see cref="RecycleBinVolumeSettings.RoomBytes"/>), and a plan or
+/// run shares that room across its items (<see cref="CreateBudget"/>).
 /// </para>
 /// </remarks>
 public static class RecycleBinPreflight
@@ -94,31 +110,94 @@ public static class RecycleBinPreflight
                 DevDriveCore.ByteSizeFormatter.Format((ulong)Math.Max(0, max)));
         }
 
+        if (settings.RoomBytes is long room && sizeBytes > room)
+        {
+            return new RecycleBinCheck(
+                RecycleBinVerdict.WillNotRecycle,
+                $"no room left for it in the Recycle Bin on {volume}, which holds up to " +
+                DevDriveCore.ByteSizeFormatter.Format((ulong)Math.Max(0, settings.MaxCapacityBytes!.Value)));
+        }
+
         return RecycleBinCheck.Recycles;
     }
 
     /// <summary>
-    /// A checker that reads each volume's settings at most once. Create one per confirmation or run:
-    /// the settings are cheap to read but are read per root, and a selection can hold hundreds.
+    /// A checker that reads each volume's settings at most once. It checks each item on its own: for a plan or a run, where
+    /// the items share the bin's room, use <see cref="CreateBudget"/>.
     /// </summary>
     public static Func<ReclaimCandidate, RecycleBinCheck> CreateChecker(
         Func<string, RecycleBinVolumeSettings?>? readSettings = null)
     {
-        Func<string, RecycleBinVolumeSettings?> read = readSettings ?? ReadSettings;
-        var cache = new Dictionary<string, RecycleBinVolumeSettings?>(StringComparer.OrdinalIgnoreCase);
+        Func<string, RecycleBinVolumeSettings?> read = Cached(readSettings);
+
+        return candidate =>
+        {
+            ArgumentNullException.ThrowIfNull(candidate);
+            return Evaluate(candidate.SizeBytes, read(candidate.VolumeRoot));
+        };
+    }
+
+    /// <summary>
+    /// A checker for one plan or run, called once per root that asks for the bin, in the order they take its room: each
+    /// item that will be recycled takes its size from its volume's room, so the items after it are checked against what's
+    /// left. A volume whose bin is among <paramref name="roots"/> starts empty, because a run empties a bin before it
+    /// recycles anything into it.
+    /// </summary>
+    public static Func<ReclaimCandidate, RecycleBinCheck> CreateBudget(
+        IEnumerable<ReclaimCandidate> roots,
+        Func<string, RecycleBinVolumeSettings?>? readSettings = null)
+    {
+        ArgumentNullException.ThrowIfNull(roots);
+
+        Func<string, RecycleBinVolumeSettings?> read = Cached(readSettings);
+        var emptied = new HashSet<string>(
+            roots.Where(r => string.Equals(r.CategoryId, Providers.RecycleBinReclaimProvider.ReclaimCategory.Id, StringComparison.OrdinalIgnoreCase))
+                .Select(r => r.VolumeRoot),
+            StringComparer.OrdinalIgnoreCase);
+        var taken = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
 
         return candidate =>
         {
             ArgumentNullException.ThrowIfNull(candidate);
 
             string root = candidate.VolumeRoot;
+            RecycleBinVolumeSettings? settings = read(root);
+            long sofar = taken.GetValueOrDefault(root);
+            if (settings is not null)
+            {
+                // What the bin held before may be unknown, but it holds at least what this run put there.
+                long before = emptied.Contains(root) ? 0 : settings.UsedBytes ?? 0;
+                settings = settings with { UsedBytes = before + sofar };
+            }
+
+            RecycleBinCheck check = Evaluate(candidate.SizeBytes, settings);
+            if (!check.WillDeletePermanently)
+            {
+                taken[root] = sofar + candidate.SizeBytes;
+            }
+
+            return check;
+        };
+    }
+
+    /// <summary>
+    /// <paramref name="readSettings"/> (this machine's by default), reading each volume at most once. The settings are cheap
+    /// to read but are read per root, and a selection can hold hundreds.
+    /// </summary>
+    public static Func<string, RecycleBinVolumeSettings?> Cached(Func<string, RecycleBinVolumeSettings?>? readSettings = null)
+    {
+        Func<string, RecycleBinVolumeSettings?> read = readSettings ?? ReadSettings;
+        var cache = new Dictionary<string, RecycleBinVolumeSettings?>(StringComparer.OrdinalIgnoreCase);
+
+        return root =>
+        {
             if (!cache.TryGetValue(root, out RecycleBinVolumeSettings? settings))
             {
                 settings = read(root);
                 cache[root] = settings;
             }
 
-            return Evaluate(candidate.SizeBytes, settings);
+            return settings;
         };
     }
 
@@ -170,7 +249,8 @@ public static class RecycleBinPreflight
                 }
             }
 
-            return new RecycleBinVolumeSettings(root, HasRecycleBin: true, policyOff || nuke, max);
+            long? used = RecycleBinQuery.TryQuery(root, out long bytes, out _) ? bytes : null;
+            return new RecycleBinVolumeSettings(root, HasRecycleBin: true, policyOff || nuke, max, used);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
             or ArgumentException or System.Security.SecurityException)

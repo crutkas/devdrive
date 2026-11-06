@@ -12,8 +12,8 @@ namespace DevDriveReclaim.Tests;
 public sealed class RecycleBinPromiseTests
 {
     private static RecycleBinVolumeSettings Bin(
-        string root = @"C:\", bool has = true, bool disabled = false, long? max = null) =>
-        new(root, has, disabled, max);
+        string root = @"C:\", bool has = true, bool disabled = false, long? max = null, long? used = null) =>
+        new(root, has, disabled, max, used);
 
     private static ReclaimCandidate Candidate(string path, long size = 1024, bool recyclable = true) =>
         new("build-output", path, Path.GetFileName(path.TrimEnd('\\')), size, ReclaimRisk.Safe, "test", "test",
@@ -188,5 +188,119 @@ public sealed class RecycleBinPromiseTests
         Assert.IsFalse(Directory.Exists(folder));
         Assert.AreEqual(ReclaimItemStatus.Deleted, outcome.Items.Single().Status);
         Assert.AreEqual(4096, outcome.BytesFreed);
+    }
+
+    /// <summary>
+    /// An item within the bin's limit but bigger than what's left of it: the shell would recycle it and make room by deleting
+    /// the bin's oldest items for good, so it can't be promised to the bin either.
+    /// </summary>
+    [TestMethod]
+    public void AnItemBiggerThanTheRoomLeftWouldDeleteOthersPermanently()
+    {
+        RecycleBinCheck check = RecycleBinPreflight.Evaluate(300, Bin(max: 1000, used: 800));
+
+        Assert.IsTrue(check.WillDeletePermanently);
+        StringAssert.Contains(check.Reason, "no room left for it in the Recycle Bin on C:");
+        Assert.IsFalse(RecycleBinPreflight.Evaluate(200, Bin(max: 1000, used: 800)).WillDeletePermanently);
+        Assert.IsFalse(
+            RecycleBinPreflight.Evaluate(300, Bin(max: 1000)).WillDeletePermanently,
+            "what the bin holds unread: only the limit is checked");
+    }
+
+    [TestMethod]
+    public void ARunsItemsShareTheRoom()
+    {
+        ReclaimCandidate[] items = [Candidate(@"C:\a", 400), Candidate(@"C:\b", 400), Candidate(@"C:\c", 400), Candidate(@"D:\d", 400)];
+        Func<ReclaimCandidate, RecycleBinCheck> budget = RecycleBinPreflight.CreateBudget(items, root => Bin(root, max: 1000, used: 100));
+
+        bool[] permanent = [.. items.Select(i => budget(i).WillDeletePermanently)];
+
+        CollectionAssert.AreEqual(new[] { false, false, true, false }, permanent, "C: has room for two; D:'s bin is its own");
+    }
+
+    [TestMethod]
+    public void ARunNeverOutgrowsTheLimitEvenWhenTheBinsContentsCantBeRead()
+    {
+        ReclaimCandidate[] items = [Candidate(@"C:\a", 400), Candidate(@"C:\b", 400), Candidate(@"C:\c", 400)];
+        Func<ReclaimCandidate, RecycleBinCheck> budget = RecycleBinPreflight.CreateBudget(items, root => Bin(root, max: 1000));
+
+        bool[] permanent = [.. items.Select(i => budget(i).WillDeletePermanently)];
+
+        CollectionAssert.AreEqual(new[] { false, false, true }, permanent, "the bin holds at least what the run put there");
+    }
+
+    [TestMethod]
+    public void ABinTheRunEmptiesStartsEmpty()
+    {
+        ReclaimCandidate bin = new("recycle-bin", @"C:\", "Recycle Bin on C:", 900, ReclaimRisk.Check, "t", "t",
+            supportsRecycleBin: false);
+        ReclaimCandidate item = Candidate(@"C:\a", 500);
+
+        Assert.IsTrue(RecycleBinPreflight.CreateBudget([item], root => Bin(root, max: 1000, used: 900))(item).WillDeletePermanently);
+        Assert.IsFalse(RecycleBinPreflight.CreateBudget([bin, item], root => Bin(root, max: 1000, used: 900))(item).WillDeletePermanently);
+        Assert.IsFalse(
+            RecycleBinPreflight.CreateBudget([bin, item], root => Bin(root, max: 1000))(item).WillDeletePermanently,
+            "emptied, so its contents are known even when they couldn't be read");
+    }
+
+    /// <summary>
+    /// The room goes to what's hardest to get back: a Careful item before Safe ones, then the smallest first, so the most
+    /// items stay restorable. What doesn't fit is named as permanent, and only that is released for permanent deletion.
+    /// </summary>
+    [TestMethod]
+    public void ThePlanGivesTheRoomToCarefulItemsFirstAndNamesTheRest()
+    {
+        ReclaimCandidate bigSafe = Candidate(@"C:\src\a\node_modules", 600);
+        ReclaimCandidate careful = new("worktree", @"C:\src\wt", "wt", 600, ReclaimRisk.Careful, "t", "t");
+        ReclaimCandidate smallSafe = Candidate(@"C:\src\b\obj", 300);
+
+        ReclaimPlan plan = ReclaimPlan.Create([bigSafe, careful, smallSafe], root => Bin(root, max: 1000, used: 0));
+
+        Assert.AreEqual(900, plan.RecycledBytes);
+        PlannedRemoval overflow = plan.Permanent.Single();
+        Assert.AreEqual(bigSafe.Path, overflow.Candidate.Path);
+        StringAssert.Contains(overflow.PermanentLabel, "no room left");
+        CollectionAssert.AreEqual(
+            ReclaimOverlapResolver.Roots([bigSafe, careful, smallSafe]).Select(c => c.Path).ToArray(), plan.Items.Select(i => i.Candidate.Path).ToArray(),
+            "the plan keeps the overlap resolver's order");
+        Assert.IsFalse(plan.ConsentedSelection([bigSafe, careful, smallSafe]).Single(c => c.Path == bigSafe.Path).SupportsRecycleBin);
+    }
+
+    /// <summary>#310's run, in small: a bin with room for one item and two that ask for it. The second is kept, not recycled
+    /// on top of the first (which the shell would then delete for good). Nothing in this test reaches the shell.</summary>
+    [TestMethod]
+    public async Task TheExecutorKeepsAnItemTheBinHasNoRoomFor()
+    {
+        using var fixture = new ReclaimFixture();
+        string folder = fixture.Dir("no-room");
+        fixture.File(@"no-room\payload.bin", 4096);
+
+        ReclaimOutcome outcome = await new ReclaimExecutor(root => Bin(root, max: 1_000_000, used: 999_000))
+            .ExecuteAsync([Candidate(folder, 4096)], null, CancellationToken.None);
+
+        Assert.IsTrue(Directory.Exists(folder), "recycling it would delete the bin's oldest items for good");
+        Assert.AreEqual(ReclaimItemStatus.Failed, outcome.Items.Single().Status);
+        StringAssert.Contains(outcome.Items.Single().Message, "kept — no room left for it in the Recycle Bin");
+    }
+
+    [TestMethod]
+    public void ARunCountsWhatTheConfirmationCounted()
+    {
+        ReclaimCandidate worktree = Candidate(@"C:\src\wt", 900);
+        ReclaimCandidate inside = Candidate(@"C:\src\wt\bin", 100);
+        ReclaimCandidate kept = Candidate(@"C:\src\other", 50);
+        ReclaimCandidate keptInside = Candidate(@"C:\src\other\obj", 10);
+
+        var outcome = new ReclaimOutcome(
+        [
+            new(worktree, ReclaimItemStatus.Recycled, 900, "recycled"),
+            new(kept, ReclaimItemStatus.Failed, 0, "in use"),
+            new(inside, ReclaimItemStatus.Absorbed, 0, "removed with it"),
+            new(keptInside, ReclaimItemStatus.Failed, 0, "still here"),
+        ], Cancelled: false);
+
+        Assert.AreEqual(1, outcome.RemovedCount);
+        Assert.AreEqual(1, outcome.FailedCount);
+        Assert.AreEqual(2, outcome.Failures.Count(), "each row still says why it's there");
     }
 }
