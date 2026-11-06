@@ -259,9 +259,15 @@ public sealed class LocalModelTests
         var removal = new LocalModelRemoval(new FakeRuntime { FoundryLoadedIds = ["qwen3-0.6b-generic-cpu:4"] }, () => Locations(fixture));
         StringAssert.Contains(removal.WhyKept(model), "in use");
 
-        var runtime = new FakeRuntime { OnRun = (_, _) => Directory.Delete(model.Path, recursive: true) };
-        Assert.AreEqual(ReclaimItemStatus.Deleted, new LocalModelRemoval(runtime, () => Locations(fixture)).Remove(model, CancellationToken.None).Status);
+        var runtime = new FakeRuntime { OnRun = (_, _) => Directory.Delete(Path.Combine(model.Path, "v4"), recursive: true) };
+        ReclaimItemOutcome removed = new LocalModelRemoval(runtime, () => Locations(fixture)).Remove(model, CancellationToken.None);
+        Assert.AreEqual(ReclaimItemStatus.Deleted, removed.Status, "Foundry Local 0.13 empties the model's folder and leaves it");
         CollectionAssert.AreEqual(new[] { "cache", "remove", "qwen3-0.6b-generic-cpu:4", "--force" }, runtime.Commands.Single().ToArray());
+
+        fixture.File(@"foundry\Microsoft\qwen3-0.6b-generic-cpu-4\v4\model.onnx", 3 * MiB);
+        var refusing = new FakeRuntime();
+        Assert.AreEqual(ReclaimItemStatus.Failed, new LocalModelRemoval(refusing, () => Locations(fixture)).Remove(model, CancellationToken.None).Status,
+            "files still there means it wasn't removed, whatever it printed");
     }
 
     [TestMethod]

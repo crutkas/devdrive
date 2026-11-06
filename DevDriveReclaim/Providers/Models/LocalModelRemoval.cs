@@ -11,7 +11,7 @@ namespace DevDriveReclaim.Providers.Models;
 /// Windows refuses that while a program has a file in it open, so a model in use is never half-deleted. Removal is permanent;
 /// the managers have no undo.
 /// </remarks>
-public sealed class LocalModelRemoval : IReclaimOwnerRemoval
+public sealed partial class LocalModelRemoval : IReclaimOwnerRemoval
 {
     private static readonly TimeSpan CommandTimeout = TimeSpan.FromMinutes(5);
 
@@ -160,10 +160,15 @@ public sealed class LocalModelRemoval : IReclaimOwnerRemoval
     {
         string id = candidate.Owner!.Names[0];
         (int exit, string output) = _runtime.Run(_runtime.FindTool(LocalModelTools.FoundryLocal)!, ["cache", "remove", id, "--force"], CommandTimeout, cancellationToken);
-        return !Directory.Exists(candidate.Path)
+
+        // Foundry Local 0.13 removes the model's revisions and leaves its emptied folder, so what's left decides it.
+        return !HasFiles(candidate.Path)
             ? new ReclaimItemOutcome(candidate, ReclaimItemStatus.Deleted, candidate.SizeBytes, "removed with foundry cache remove")
             : new ReclaimItemOutcome(candidate, ReclaimItemStatus.Failed, 0, LastLine(output) ?? $"foundry cache remove exited with {exit}");
     }
+
+    private static bool HasFiles(string folder) =>
+        Directory.Exists(folder) && Directory.EnumerateFiles(folder, "*", new EnumerationOptions { RecurseSubdirectories = true, AttributesToSkip = 0 }).Any();
 
     // ---- Folders and files
 
@@ -267,7 +272,15 @@ public sealed class LocalModelRemoval : IReclaimOwnerRemoval
     }
 
     private static string? Held(IEnumerable<string> files) =>
-        ModelFiles.FirstHeld(files) is { } held ? $"in use: a program has {Path.GetFileName(held)} open" : null;
+        ModelFiles.FirstHeld(files) is { } held
+            ? Hash().IsMatch(Path.GetFileName(held))
+                ? "in use: a program has one of its files open"
+                : $"in use: a program has {Path.GetFileName(held)} open"
+            : null;
+
+    /// <summary>A content-addressed file's name (a Hugging Face stored file), which means nothing to the person reading it.</summary>
+    [System.Text.RegularExpressions.GeneratedRegex("^[0-9a-f]{40,64}$")]
+    private static partial System.Text.RegularExpressions.Regex Hash();
 
     private static ReclaimItemOutcome Kept(ReclaimCandidate candidate, string reason) =>
         new(candidate, ReclaimItemStatus.Failed, 0, $"kept — {reason}");
