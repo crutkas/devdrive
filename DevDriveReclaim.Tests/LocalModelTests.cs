@@ -170,7 +170,8 @@ public sealed class LocalModelTests
     {
         using var fixture = new ReclaimFixture();
         string hub = fixture.Dir("hub");
-        fixture.FileWithContent(@"hub\blobs\.huggingface-shared-blobs", "1\n"u8.ToArray());
+        // Python writes the marker in text mode, so on Windows it's "1\r\n" (huggingface_hub 2.4 on Windows 11, observed).
+        fixture.FileWithContent(@"hub\blobs\.huggingface-shared-blobs", "1\r\n"u8.ToArray());
         string own = Stored(fixture, 'a', 4 * MiB);
         string shared = Stored(fixture, 'b', 2 * MiB);
         if (!Link(fixture, "models--org--one", "e1", own) || !Link(fixture, "models--org--one", "e2", shared) || !Link(fixture, "models--org--two", "e3", shared))

@@ -14,8 +14,8 @@ namespace DevDriveReclaim.Providers.Models;
 /// <para>
 /// Every row is <see cref="ReclaimRisk.Check"/>. A model is usually a download, but it can be big and slow to fetch again, and
 /// one someone made or imported may not exist anywhere else. Its age or size says nothing about whether it's still wanted, so
-/// nothing is called idle and nothing is preselected. Not read: AI Toolkit for VS Code (its <c>my-models.yml</c> would go stale)
-/// and Windows' own AI models, which Windows manages.
+/// nothing is called idle and nothing is preselected. Not read yet: AI Toolkit for VS Code (deleting its files would leave its
+/// <c>my-models.yml</c> stale). Never read: Windows' own AI models, which Windows manages.
 /// </para>
 /// </remarks>
 public sealed class LocalModelReclaimProvider : IReclaimProvider

@@ -111,13 +111,17 @@ internal static partial class SharedBlobStore
 {
     private const string MarkerName = ".huggingface-shared-blobs";
 
-    /// <summary>The cache has a store huggingface_hub owns: <c>blobs\.huggingface-shared-blobs</c> holds layout 1.</summary>
+    /// <summary>
+    /// The cache has a store huggingface_hub owns: <c>blobs\.huggingface-shared-blobs</c> holds layout 1. Python writes it in text
+    /// mode, so on Windows it's <c>1\r\n</c>, and reads it back with universal newlines; this reads it the same way.
+    /// </summary>
     public static bool IsMarked(string hub)
     {
         string marker = Path.Combine(hub, "blobs", MarkerName);
         try
         {
-            return File.Exists(marker) && (File.GetAttributes(marker) & FileAttributes.ReparsePoint) == 0 && File.ReadAllText(marker) == "1\n";
+            return File.Exists(marker) && (File.GetAttributes(marker) & FileAttributes.ReparsePoint) == 0 &&
+                File.ReadAllText(marker).Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n') == "1\n";
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {

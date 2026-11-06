@@ -237,9 +237,9 @@ manager. Each manager's folder is found the way the manager finds it (`LocalMode
   read-only, for a dry run.
 - **Every row is Check and permanent.** A model downloads again, but it can be big, and one someone
   made or imported may exist nowhere else. Nothing is called idle and nothing is preselected.
-- **Not read:** AI Toolkit for VS Code (its `my-models.yml` would go stale), AI Dev Gallery (its
-  `cache.json`), Jan, PyTorch Hub and Whisper caches, and Windows' own AI models, which Windows
-  manages.
+- **Not read yet:** AI Toolkit for VS Code (deleting its files would leave its `my-models.yml` stale),
+  AI Dev Gallery, Jan, and PyTorch Hub and Whisper caches. Never: Windows' own AI models, which
+  Windows manages.
 
 ## Swapping a source
 
