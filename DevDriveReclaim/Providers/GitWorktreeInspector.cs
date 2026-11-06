@@ -73,7 +73,13 @@ public sealed class GitWorktreeInspector : IWorktreeInspector
 
     private readonly Func<string, string, CancellationToken, GitResult?> _git;
 
-    public GitWorktreeInspector() : this(Run)
+    public GitWorktreeInspector() : this("git")
+    {
+    }
+
+    /// <summary>Test seam: runs <paramref name="executable"/> in place of git.</summary>
+    internal GitWorktreeInspector(string executable)
+        : this((directory, arguments, cancellationToken) => Run(executable, directory, arguments, cancellationToken))
     {
     }
 
@@ -233,11 +239,12 @@ public sealed class GitWorktreeInspector : IWorktreeInspector
     /// so a single hang stalls the whole Reclaim scan indefinitely.
     /// </para>
     /// </remarks>
-    private static GitResult? Run(string workingDirectory, string arguments, CancellationToken cancellationToken)
+    private static GitResult? Run(
+        string executable, string workingDirectory, string arguments, CancellationToken cancellationToken)
     {
         try
         {
-            var psi = new ProcessStartInfo("git", arguments)
+            var psi = new ProcessStartInfo(executable, arguments)
             {
                 WorkingDirectory = workingDirectory,
                 RedirectStandardOutput = true,
