@@ -56,7 +56,7 @@ public sealed class PackageCacheReclaimProvider : IReclaimProvider
                     continue;
                 }
 
-                DirectoryMeasurement measurement = DirectoryMeasurer.Measure(path, cancellationToken);
+                DirectoryMeasurement measurement = context.Measure(path, cancellationToken);
                 if (measurement.AllocatedBytes <= 0)
                 {
                     continue;

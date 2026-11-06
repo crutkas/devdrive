@@ -202,8 +202,12 @@ public sealed class DuplicateFileReclaimProvider : IReclaimProvider
 
         foreach (string root in context.SourceRoots.Where(Directory.Exists))
         {
-            foreach ((string fullPath, FastDirEntry entry) in
-                FastDirectoryWalker.EnumerateFiles(root, cancellationToken))
+            // The Space walk's list of large files, when it read the whole root and listed files this small.
+            IEnumerable<(string FullPath, FastDirEntry Entry)> files =
+                context.Index is { } index && floor >= index.LargeFileBytes && index.TryFindLargeFiles(root, out var listed)
+                    ? listed
+                    : FastDirectoryWalker.EnumerateFiles(root, cancellationToken);
+            foreach ((string fullPath, FastDirEntry entry) in files)
             {
                 if (entry.ApparentBytes < floor)
                 {

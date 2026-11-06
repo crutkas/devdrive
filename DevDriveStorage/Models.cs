@@ -375,6 +375,15 @@ public sealed class StorageSnapshot
 
     private readonly Dictionary<Guid, StorageNode> _nodesById;
     private readonly Dictionary<Guid, StorageNode[]> _childrenByParent;
+    private IVolumeIndex? _index;
+
+    /// <summary>
+    /// What the walk read, when the source kept it (<see cref="LiveStorageSnapshotSource.KeepIndex"/>), for one taker: the
+    /// first call returns it and the snapshot lets go of it, so the walk's folder tree is freed once the taker is done.
+    /// </summary>
+    public IVolumeIndex? TakeIndex() => Interlocked.Exchange(ref _index, null);
+
+    internal void AttachIndex(IVolumeIndex index) => _index = index;
 
     public StorageSnapshot(
         int schemaVersion,

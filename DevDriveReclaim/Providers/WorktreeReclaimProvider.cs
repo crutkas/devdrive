@@ -61,7 +61,7 @@ public sealed class WorktreeReclaimProvider(IWorktreeInspector? inspector = null
 
                     WorktreeState state = _inspector.Inspect(worktree.Path, cancellationToken);
                     DirectoryMeasurement measurement =
-                        DirectoryMeasurer.Measure(worktree.Path, cancellationToken);
+                        context.Measure(worktree.Path, cancellationToken);
                     Interlocked.Increment(ref done);
 
                     if (measurement.AllocatedBytes <= 0)
@@ -113,7 +113,7 @@ public sealed class WorktreeReclaimProvider(IWorktreeInspector? inspector = null
         CancellationToken cancellationToken)
     {
         IReadOnlyList<OrphanedWorktree> orphans = RepositoryWalker.FindOrphanedWorktrees(
-            context.Repositories(cancellationToken), cancellationToken);
+            context.Repositories(cancellationToken), cancellationToken, context.Index);
 
         foreach (OrphanedWorktree orphan in orphans)
         {
@@ -122,7 +122,7 @@ public sealed class WorktreeReclaimProvider(IWorktreeInspector? inspector = null
                 ReclaimCategory.Id, $"Checking {orphan.Name}", candidates.Count));
 
             DirectoryMeasurement measurement =
-                DirectoryMeasurer.Measure(orphan.Path, cancellationToken);
+                context.Measure(orphan.Path, cancellationToken);
 
             if (measurement.AllocatedBytes < context.MinimumCandidateBytes)
             {

@@ -66,6 +66,47 @@ internal sealed class ScanFolder(ScanFolder? parent, string path, string name)
     private Guid? _stableId;
 
     public Guid StableId => _stableId ??= LiveStorageSnapshotSource.StableId(Path);
+
+    // ---- For the volume index (ScannedVolumeIndex), set while the folder is listed.
+
+    /// <summary>The folder's attributes as its parent's listing showed them (none for the root).</summary>
+    public FileAttributes Attributes { get; init; }
+
+    /// <summary>What the listing said about an entry named <c>.git</c>.</summary>
+    public GitEntry Git;
+
+    /// <summary>Part of the listing couldn't be read.</summary>
+    public bool Incomplete;
+
+    /// <summary>Bytes of every direct file as DirectoryMeasurer counts them: each hard link in full.</summary>
+    public long SelfAllocatedAll;
+
+    public long SelfLogicalAll;
+
+    public int SelfFiles;
+
+    /// <summary>Direct subfolders, junctions included.</summary>
+    public int SelfFolders;
+
+    /// <summary>The newest direct file's write time; 0 with none.</summary>
+    public long SelfNewestFileTicks;
+
+    /// <summary>Every direct file of at least the scanner's large-file size, when it keeps them.</summary>
+    public List<ScanLeaf>? LargeFiles;
+
+    // Rolled up by ParallelVolumeScanner.RollupIndex, without descending into reparse folders (as DirectoryMeasurer doesn't).
+    public long TreeAllocatedAll;
+
+    public long TreeLogicalAll;
+
+    public int TreeFiles;
+
+    public int TreeFolders;
+
+    public long TreeNewestFileTicks;
+
+    /// <summary>This folder and every folder beneath it (reparse folders aside) were listed in full.</summary>
+    public bool TreeComplete;
 }
 
 /// <summary>
@@ -241,6 +282,7 @@ internal sealed class ParallelVolumeScanner
     private static readonly Lazy<bool> BackupPrivilege = new(TryEnableBackupPrivilege);
 
     private readonly int _filesPerFolder;
+    private readonly long _largeFileBytes;
     private readonly bool _forceManaged;
     private readonly bool _dedupeHardLinks;
     private readonly int _workerCount;
@@ -264,12 +306,14 @@ internal sealed class ParallelVolumeScanner
         bool forceManaged,
         bool dedupeHardLinks,
         CancellationToken cancellationToken,
-        int? workerCount = null)
+        int? workerCount = null,
+        long largeFileBytes = 0)
     {
         _filesPerFolder = filesPerFolder;
         _forceManaged = forceManaged;
         _dedupeHardLinks = dedupeHardLinks;
         _cancellationToken = cancellationToken;
+        _largeFileBytes = largeFileBytes;
         _workerCount = Math.Max(1, workerCount ?? Environment.ProcessorCount);
         _fileIdShards = dedupeHardLinks
             ? [.. Enumerable.Range(0, 64).Select(_ => new HashSet<long>())]
@@ -385,6 +429,41 @@ internal sealed class ParallelVolumeScanner
     private static void ExceptionDispatchInfoThrow(Exception exception) =>
         System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(exception).Throw();
 
+    /// <summary>
+    /// Rolls the volume index's totals up to every ancestor, after the walk. A reparse folder is counted as a folder but not
+    /// entered, and a folder beneath one doesn't make its ancestors incomplete: that's how DirectoryMeasurer and
+    /// FastDirectoryWalker see the tree.
+    /// </summary>
+    public static void RollupIndex(IReadOnlyList<ScanFolder> folders)
+    {
+        foreach (ScanFolder folder in folders)
+        {
+            folder.TreeAllocatedAll = folder.SelfAllocatedAll;
+            folder.TreeLogicalAll = folder.SelfLogicalAll;
+            folder.TreeFiles = folder.SelfFiles;
+            folder.TreeFolders = folder.SelfFolders;
+            folder.TreeNewestFileTicks = folder.SelfNewestFileTicks;
+            folder.TreeComplete = folder.IsMeasured && !folder.Incomplete;
+        }
+
+        for (int i = folders.Count - 1; i >= 1; i--)
+        {
+            ScanFolder folder = folders[i];
+            if ((folder.Attributes & FileAttributes.ReparsePoint) != 0)
+            {
+                continue;
+            }
+
+            ScanFolder parent = folder.Parent!;
+            parent.TreeAllocatedAll += folder.TreeAllocatedAll;
+            parent.TreeLogicalAll += folder.TreeLogicalAll;
+            parent.TreeFiles += folder.TreeFiles;
+            parent.TreeFolders += folder.TreeFolders;
+            parent.TreeNewestFileTicks = Math.Max(parent.TreeNewestFileTicks, folder.TreeNewestFileTicks);
+            parent.TreeComplete &= folder.TreeComplete;
+        }
+    }
+
     private void Worker()
     {
         byte[] buffer = GC.AllocateUninitializedArray<byte>(BufferSize, pinned: true);
@@ -455,6 +534,7 @@ internal sealed class ParallelVolumeScanner
     private void ProcessFolder(ScanFolder folder, byte[] buffer, List<ScanFolder> discovered, ref LocalTotals local)
     {
         discovered.Clear();
+        DirectoryReadTrace.Record(folder.Path);
         bool listed = !_forceManaged && TryListNative(folder, buffer, discovered, ref local);
         if (!listed)
         {
@@ -556,6 +636,7 @@ internal sealed class ParallelVolumeScanner
                 // Part of the folder was read. Keep it, and say the folder was not fully readable.
                 Interlocked.Increment(ref _totals.IncompleteReads);
                 _deniedPaths.Add(folder.Path);
+                folder.Incomplete = true;
                 return true;
             }
 
@@ -603,6 +684,12 @@ internal sealed class ParallelVolumeScanner
                     uint tag = Read<uint>(record, OffsetEaSize);
                     bool surrogate = (attributes & AttributeReparsePoint) != 0 &&
                         (tag & ReparseTagNameSurrogate) != 0;
+                    folder.SelfFolders++;
+                    if (IsGit(name))
+                    {
+                        folder.Git = GitEntry.Folder;
+                    }
+
                     if (surrogate)
                     {
                         AddReparseLeaf(folder, name.ToString(), FileTimeToTicks(Read<long>(record, OffsetLastWriteTime)));
@@ -610,7 +697,7 @@ internal sealed class ParallelVolumeScanner
                     }
                     else
                     {
-                        discovered.Add(NewChild(folder, name.ToString()));
+                        discovered.Add(NewChild(folder, name.ToString(), (FileAttributes)attributes));
                     }
                 }
                 else
@@ -618,6 +705,7 @@ internal sealed class ParallelVolumeScanner
                     long allocated = Math.Max(0, Read<long>(record, OffsetAllocationSize));
                     long logical = Math.Max(0, Read<long>(record, OffsetEndOfFile));
                     long ticks = FileTimeToTicks(Read<long>(record, OffsetLastWriteTime));
+                    IndexFile(folder, name, allocated, logical, ticks);
 
                     if ((attributes & AttributeRecallOnDataAccess) != 0)
                     {
@@ -694,6 +782,12 @@ internal sealed class ParallelVolumeScanner
                 long ticks = SafeTicks(info);
                 if ((attributes & FileAttributes.Directory) != 0)
                 {
+                    folder.SelfFolders++;
+                    if (IsGit(info.Name))
+                    {
+                        folder.Git = GitEntry.Folder;
+                    }
+
                     if ((attributes & FileAttributes.ReparsePoint) != 0 && info.LinkTarget is not null)
                     {
                         AddReparseLeaf(folder, info.Name, ticks);
@@ -701,7 +795,7 @@ internal sealed class ParallelVolumeScanner
                     }
                     else
                     {
-                        discovered.Add(NewChild(folder, info.Name));
+                        discovered.Add(NewChild(folder, info.Name, attributes));
                     }
 
                     continue;
@@ -709,6 +803,7 @@ internal sealed class ParallelVolumeScanner
 
                 long logical = info is FileInfo file ? Math.Max(0, file.Length) : 0;
                 long allocated = NativeFileSize.GetAllocatedBytesOrApparent(info.FullName, logical);
+                IndexFile(folder, info.Name, allocated, logical, ticks);
                 if (((uint)attributes & AttributeRecallOnDataAccess) != 0)
                 {
                     local.CloudOnlyFiles++;
@@ -742,8 +837,32 @@ internal sealed class ParallelVolumeScanner
         }
     }
 
-    private static ScanFolder NewChild(ScanFolder parent, string name) =>
-        new(parent, System.IO.Path.Combine(parent.Path, name), name);
+    private static ScanFolder NewChild(ScanFolder parent, string name, FileAttributes attributes) =>
+        new(parent, System.IO.Path.Combine(parent.Path, name), name) { Attributes = attributes };
+
+    private static bool IsGit(ReadOnlySpan<char> name) => name.Equals(".git", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>A direct file, as the volume index counts it: every hard link in full, and the large ones by name.</summary>
+    private void IndexFile(ScanFolder folder, ReadOnlySpan<char> name, long allocated, long logical, long ticks)
+    {
+        folder.SelfFiles++;
+        folder.SelfAllocatedAll += allocated;
+        folder.SelfLogicalAll += logical;
+        if (ticks > folder.SelfNewestFileTicks)
+        {
+            folder.SelfNewestFileTicks = ticks;
+        }
+
+        if (IsGit(name))
+        {
+            folder.Git = GitEntry.File;
+        }
+
+        if (_largeFileBytes > 0 && logical >= _largeFileBytes)
+        {
+            (folder.LargeFiles ??= []).Add(new ScanLeaf(name.ToString(), allocated, logical, ticks, false));
+        }
+    }
 
     private bool FirstSighting(long fileId)
     {

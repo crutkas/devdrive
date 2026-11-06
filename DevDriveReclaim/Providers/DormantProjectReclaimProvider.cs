@@ -56,7 +56,7 @@ public sealed class DormantProjectReclaimProvider(IWorktreeInspector? inspector 
                     ReclaimCategory.Id, $"Checking {repository.Name}", candidates.Count));
 
                 DirectoryMeasurement measurement =
-                    DirectoryMeasurer.Measure(repository.Path, cancellationToken);
+                    context.Measure(repository.Path, cancellationToken);
 
                 if (measurement.NewestWriteUtc is not { } newest)
                 {

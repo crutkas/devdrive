@@ -50,6 +50,16 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
     /// <summary>Overrides the number of walker threads. Defaults to one per logical core.</summary>
     public int? WorkerCount { get; init; }
 
+    /// <summary>
+    /// Keep what the walk read as the final snapshot's <see cref="IVolumeIndex"/> (<see cref="StorageSnapshot.TakeIndex"/>), so
+    /// the Reclaim detectors can measure and list the same folders without reading them again. It holds the walk's folder tree
+    /// until it's taken and dropped.
+    /// </summary>
+    public bool KeepIndex { get; init; }
+
+    /// <summary>The smallest file the index lists by name (the duplicate finder's shortlist). 4 MB.</summary>
+    public long IndexLargeFileBytes { get; init; } = 4L * 1024 * 1024;
+
     public LiveStorageSnapshotSource(
         int maxChildrenPerFolder = DefaultMaxChildrenPerFolder,
         TimeSpan? progressInterval = null)
@@ -132,7 +142,8 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
             ForceManagedEnumeration,
             dedupeHardLinks: string.Equals(fileSystem, "NTFS", StringComparison.OrdinalIgnoreCase),
             cancellationToken,
-            WorkerCount)
+            WorkerCount,
+            KeepIndex ? IndexLargeFileBytes : 0)
         {
             FreezeGate = freezeGate,
             FolderCompleted = (walker, folder) =>
@@ -187,7 +198,7 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
         progress?.Report(new StorageScanProgress(1, "Scan complete", Math.Max(0, covered),
             Math.Max(covered, totalBytes)));
 
-        return new StorageSnapshot(
+        var snapshot = new StorageSnapshot(
             StorageSnapshot.CurrentSchemaVersion,
             request.ScenarioId,
             $"live-{Guid.NewGuid():N}",
@@ -205,6 +216,13 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
                 Statistics = statistics,
             },
             nodes);
+        if (KeepIndex)
+        {
+            ParallelVolumeScanner.RollupIndex(scanner.Folders);
+            snapshot.AttachIndex(new ScannedVolumeIndex(root, IndexLargeFileBytes));
+        }
+
+        return snapshot;
     }
 
     /// <summary>
