@@ -214,6 +214,16 @@ agree with what Space will measure afterwards. Three rules keep them honest
   nearest ancestor that can; one nothing resolves keeps its spelled root. Network paths are never
   opened.
 
+## Reclaim: build output is what git doesn't track
+
+Build outputs are found by folder name (`bin`, `obj`, `build`, `out`, `dist`, `target`,
+`node_modules`, …), and a name is a guess: plenty of repositories commit a `build` folder of
+pipeline files or a `bin` of tools. So each repository's candidate folders are put to git once
+(`IWorktreeInspector.TrackedFolders`, one bounded `git ls-files` per repository). A folder git tracks
+any file in isn't offered as generated output; when git can't answer (missing, timed out, a
+repository it refuses), the folder is offered as Check, not Safe. An ignored folder with nothing
+committed in it is still Safe, and a `.git` that isn't a repository to git keeps the name's answer.
+
 ## Reclaim: asked again before it goes
 
 A scan grades each row on what it found then, and a run can start hours later. A row whose grade

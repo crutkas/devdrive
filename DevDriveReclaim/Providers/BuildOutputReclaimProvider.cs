@@ -16,9 +16,20 @@ namespace DevDriveReclaim.Providers;
 /// Output folders are attributed to their owning repository rather than listed as bare paths,
 /// because <c>obj</c> means nothing on its own and "PowerToys · obj" is a decision a user can make.
 /// </para>
+/// <para>
+/// <b>A name is a guess; git knows.</b> Plenty of repositories commit a <c>build</c> folder of pipeline
+/// definitions and signing scripts, or a <c>bin</c> of tools, and a delete tool that calls those
+/// "nothing written by hand" by their name alone destroys them, uncommitted edits included. So each
+/// repository's candidate folders are put to git once (<see cref="IWorktreeInspector.TrackedFolders"/>):
+/// a folder git tracks any file in isn't generated output and isn't offered, and when git can't answer
+/// the folder is offered as Check, not Safe. A folder whose <c>.git</c> isn't a repository to git keeps
+/// the name's answer.
+/// </para>
 /// </remarks>
-public sealed class BuildOutputReclaimProvider : IReclaimProvider
+public sealed class BuildOutputReclaimProvider(IWorktreeInspector? inspector = null) : IReclaimProvider
 {
+    private readonly IWorktreeInspector _git = inspector ?? new GitWorktreeInspector();
+
     /// <summary>Folder name to the command that regenerates it. The map <em>is</em> the safety argument.</summary>
     private static readonly Dictionary<string, string> OutputFolders = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -63,6 +74,7 @@ public sealed class BuildOutputReclaimProvider : IReclaimProvider
                 progress?.Report(new ReclaimScanProgress(
                     ReclaimCategory.Id, $"Scanning {repository.Name}", candidates.Count));
 
+                List<(string Path, DirectoryMeasurement Measurement)> outputs = [];
                 foreach (string outputPath in FindOutputFolders(repository.Path, context.Index, cancellationToken))
                 {
                     cancellationToken.ThrowIfCancellationRequested();
@@ -74,22 +86,57 @@ public sealed class BuildOutputReclaimProvider : IReclaimProvider
                         continue;
                     }
 
+                    outputs.Add((outputPath, measurement));
+                }
+
+                if (outputs.Count == 0)
+                {
+                    continue;
+                }
+
+                // One question to git per repository, and only for folders big enough to be offered.
+                IReadOnlySet<string>? tracked =
+                    _git.TrackedFolders(repository.Path, [.. outputs.Select(o => o.Path)], cancellationToken);
+
+                foreach ((string outputPath, DirectoryMeasurement measurement) in outputs)
+                {
+                    // Someone committed files here, so it isn't generated output, whatever it's called.
+                    if (tracked?.Contains(outputPath) == true)
+                    {
+                        continue;
+                    }
+
                     string folderName = Path.GetFileName(outputPath);
                     string rebuild = OutputFolders.TryGetValue(folderName, out string? command)
                         ? command
                         : "the project's build command";
+                    string relative = Relative(repository.Path, outputPath);
 
-                    candidates.Add(new ReclaimCandidate(
-                        ReclaimCategory.Id,
-                        outputPath,
-                        $"{repository.Name} · {Relative(repository.Path, outputPath)}",
-                        measurement.AllocatedBytes,
-                        ReclaimRisk.Safe,
-                        $"Generated output. Nothing here was written by hand — {rebuild} recreates it.",
-                        $"Run {rebuild} in {repository.Name}.",
-                        lastUsedUtc: measurement.NewestWriteUtc,
-                        itemCount: measurement.FileCount,
-                        detail: $"{measurement.FileCount:N0} files in {repository.Name}"));
+                    candidates.Add(tracked is null
+                        ? new ReclaimCandidate(
+                            ReclaimCategory.Id,
+                            outputPath,
+                            $"{repository.Name} · {relative}",
+                            measurement.AllocatedBytes,
+                            ReclaimRisk.Check,
+                            $"Named like generated output, but git couldn't say whether it tracks anything in it, so it " +
+                                $"isn't called regenerable. If nothing here is committed, {rebuild} recreates it.",
+                            $"Run {rebuild} in {repository.Name}. Anything git tracks here comes back with git checkout -- " +
+                                $"{relative.Replace('\\', '/')}; anything else written by hand doesn't.",
+                            lastUsedUtc: measurement.NewestWriteUtc,
+                            itemCount: measurement.FileCount,
+                            detail: $"{measurement.FileCount:N0} files in {repository.Name} · git couldn't check it")
+                        : new ReclaimCandidate(
+                            ReclaimCategory.Id,
+                            outputPath,
+                            $"{repository.Name} · {relative}",
+                            measurement.AllocatedBytes,
+                            ReclaimRisk.Safe,
+                            $"Generated output. Nothing here was written by hand — {rebuild} recreates it.",
+                            $"Run {rebuild} in {repository.Name}.",
+                            lastUsedUtc: measurement.NewestWriteUtc,
+                            itemCount: measurement.FileCount,
+                            detail: $"{measurement.FileCount:N0} files in {repository.Name}"));
                 }
             }
 

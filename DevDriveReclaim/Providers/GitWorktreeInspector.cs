@@ -67,6 +67,18 @@ public interface IWorktreeInspector
     /// </para>
     /// </remarks>
     int StashCount(string repositoryPath, CancellationToken cancellationToken) => 0;
+
+    /// <summary>
+    /// Which of <paramref name="folders"/>, inside the working tree at <paramref name="repositoryPath"/>, hold a file git
+    /// tracks; null when git couldn't be asked.
+    /// </summary>
+    /// <remarks>
+    /// For the build-output provider, which finds folders by name: a <c>build</c> or <c>bin</c> folder someone committed
+    /// files to is not generated output, whatever it's called. Null by default, which that provider reads cautiously (it
+    /// doesn't grade the folders Safe), so an inspector that can't answer never makes a folder look regenerable.
+    /// </remarks>
+    IReadOnlySet<string>? TrackedFolders(
+        string repositoryPath, IReadOnlyCollection<string> folders, CancellationToken cancellationToken) => null;
 }
 
 /// <summary>
@@ -208,6 +220,130 @@ public sealed class GitWorktreeInspector : IWorktreeInspector
             : list.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Length;
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// <para>
+    /// One <c>git ls-files</c> for all of a repository's folders (a few calls if the list is long), each folder a literal,
+    /// case-insensitive pathspec, so a folder is tracked when any file git lists sits under it. It lists what's in the index,
+    /// ignored or not, so an ignored <c>bin</c> with nothing committed in it lists nothing.
+    /// </para>
+    /// <para>
+    /// A folder whose <c>.git</c> isn't a repository to git (no <c>HEAD</c>, or a <c>.git</c> file naming a gitdir that has
+    /// none) has nothing git tracks, and git isn't asked. A git that fails or times out is null: not an answer.
+    /// </para>
+    /// </remarks>
+    public IReadOnlySet<string>? TrackedFolders(
+        string repositoryPath, IReadOnlyCollection<string> folders, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(folders);
+
+        var tracked = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (folders.Count == 0 || string.IsNullOrWhiteSpace(repositoryPath) || !IsRepository(repositoryPath))
+        {
+            return tracked;
+        }
+
+        // As git prints paths: relative to the top of the working tree, with forward slashes.
+        List<(string Folder, string Relative)> pending =
+        [
+            .. folders.Select(f => (f, Path.GetRelativePath(repositoryPath, f).Replace('\\', '/').TrimEnd('/'))),
+        ];
+
+        foreach (List<(string Folder, string Relative)> batch in Batches(pending))
+        {
+            string pathspecs = string.Join(' ', batch.Select(p => $"\":(literal,icase){p.Relative}\""));
+            GitResult? listed = _git(repositoryPath, $"ls-files -z -- {pathspecs}", cancellationToken);
+            if (listed is not { ExitCode: 0 })
+            {
+                return null;
+            }
+
+            foreach (string file in listed.Output.Split('\0'))
+            {
+                string name = file.Trim('\n');
+                foreach ((string folder, string relative) in batch)
+                {
+                    if (name.StartsWith(relative + "/", StringComparison.OrdinalIgnoreCase))
+                    {
+                        tracked.Add(folder);
+                    }
+                }
+            }
+        }
+
+        return tracked;
+    }
+
+    /// <summary>Keeps each command line well inside Windows' limit when a repository has many output folders.</summary>
+    private static IEnumerable<List<(string Folder, string Relative)>> Batches(List<(string Folder, string Relative)> all)
+    {
+        const int MaxPathspecChars = 8_000;
+        List<(string Folder, string Relative)> batch = [];
+        int length = 0;
+        foreach ((string Folder, string Relative) item in all)
+        {
+            if (batch.Count > 0 && length + item.Relative.Length + 20 > MaxPathspecChars)
+            {
+                yield return batch;
+                batch = [];
+                length = 0;
+            }
+
+            batch.Add(item);
+            length += item.Relative.Length + 20;
+        }
+
+        if (batch.Count > 0)
+        {
+            yield return batch;
+        }
+    }
+
+    /// <summary>
+    /// Whether git sees a repository at <paramref name="path"/>: a <c>.git</c> folder with a <c>HEAD</c>, or a <c>.git</c> file
+    /// naming a gitdir that has one, which is what git itself checks. When that can't be read, it's assumed to be one, so git
+    /// is asked and a git that can't answer is read cautiously.
+    /// </summary>
+    internal static bool IsRepository(string path)
+    {
+        string dotGit = Path.Combine(path, ".git");
+        try
+        {
+            if (Directory.Exists(dotGit))
+            {
+                return HasHead(dotGit);
+            }
+
+            if (!File.Exists(dotGit))
+            {
+                return false;
+            }
+
+            const string Prefix = "gitdir:";
+            string line = File.ReadLines(dotGit).FirstOrDefault() ?? string.Empty;
+            return line.StartsWith(Prefix, StringComparison.Ordinal) &&
+                HasHead(Path.GetFullPath(Path.Combine(path, line[Prefix.Length..].Trim())));
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException
+            or NotSupportedException or System.Security.SecurityException)
+        {
+            return true;
+        }
+
+        static bool HasHead(string gitDir)
+        {
+            try
+            {
+                File.GetAttributes(Path.Combine(gitDir, "HEAD"));
+                return true;
+            }
+            catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+            {
+                return false;
+            }
+        }
+    }
+
     private bool IsMergedIntoDefault(
         string worktreePath, string branch, CancellationToken cancellationToken)
     {
@@ -272,6 +408,9 @@ public sealed class GitWorktreeInspector : IWorktreeInspector
                 RedirectStandardError = true,
                 UseShellExecute = false,
                 CreateNoWindow = true,
+
+                // git writes paths as UTF-8 (ls-files -z doesn't quote them), not in the console's code page.
+                StandardOutputEncoding = Encoding.UTF8,
             };
 
             // Never let git stop to ask a human something. A credential or passphrase prompt on a
