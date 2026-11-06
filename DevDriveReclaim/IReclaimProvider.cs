@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using DevDriveReclaim.Providers;
+using DevDriveStorage.Live;
 
 namespace DevDriveReclaim;
 
@@ -56,6 +57,19 @@ public sealed class ReclaimScanContext
     public int MaximumCandidatesPerCategory { get; }
 
     /// <summary>
+    /// What the Space walk read of a volume, when there's one (<see cref="DevDriveStorage.StorageSnapshot.TakeIndex"/>): the
+    /// detectors measure and list folders it read completely from it rather than reading them again, and read the disk for the
+    /// rest. One walk of the volume feeds both the map and Reclaim.
+    /// </summary>
+    public DevDriveStorage.IVolumeIndex? Index { get; init; }
+
+    /// <summary><paramref name="path"/>'s size and newest write, from <see cref="Index"/> when it read the folder, else from the disk.</summary>
+    public DirectoryMeasurement Measure(string path, CancellationToken cancellationToken = default) =>
+        Index is { } index && index.TryMeasure(path, out DirectoryMeasurement measurement)
+            ? measurement
+            : DirectoryMeasurer.Measure(path, cancellationToken);
+
+    /// <summary>
     /// Records a place a provider looked and couldn't read. The engine attaches it to that provider's category, so a folder
     /// that was denied reads as "couldn't read" rather than as nothing found.
     /// </summary>
@@ -107,7 +121,7 @@ public sealed class ReclaimScanContext
         {
             cancellationToken.ThrowIfCancellationRequested();
             return _repositories ??= new ReadOnlyCollection<DiscoveredRepository>(
-                [.. RepositoryWalker.Discover(SourceRoots, cancellationToken)]);
+                [.. RepositoryWalker.Discover(SourceRoots, cancellationToken, index: Index)]);
         }
     }
 }

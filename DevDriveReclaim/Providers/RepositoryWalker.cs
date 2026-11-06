@@ -23,6 +23,9 @@ public sealed record RepositoryWalkOptions
 
     /// <summary>How many folders are read at once.</summary>
     public int Parallelism { get; init; } = Math.Clamp(Environment.ProcessorCount, 2, 8);
+
+    /// <summary>A walk that already read these folders (the Space scan's): a folder it read is listed from it, not the disk.</summary>
+    public DevDriveStorage.IVolumeIndex? Index { get; init; }
 }
 
 /// <summary>
@@ -83,13 +86,14 @@ public static class RepositoryWalker
     public static IReadOnlyList<DiscoveredRepository> Discover(
         IEnumerable<string> sourceRoots,
         CancellationToken cancellationToken = default,
-        int maxDepth = 4)
+        int maxDepth = 4,
+        DevDriveStorage.IVolumeIndex? index = null)
     {
         ArgumentNullException.ThrowIfNull(sourceRoots);
 
         return Walk(
             [.. sourceRoots.Where(r => !string.IsNullOrWhiteSpace(r)).Select(r => new WalkRoot(r, maxDepth))],
-            options: null,
+            options: index is null ? null : new RepositoryWalkOptions { Index = index },
             cancellationToken);
     }
 
@@ -172,7 +176,7 @@ public static class RepositoryWalker
                 return;
             }
 
-            List<Entry>? entries = List(folder);
+            List<Entry>? entries = List(folder, options.Index);
             options.FolderRead?.Invoke();
             if (entries is null)
             {
@@ -245,9 +249,21 @@ public static class RepositoryWalker
         }
     }
 
-    /// <summary>A folder's entries in one read; null when it can't be read.</summary>
-    private static List<Entry>? List(string folder)
+    /// <summary>A folder's entries in one read (from <paramref name="index"/> when it read the folder); null when it can't be read.</summary>
+    private static List<Entry>? List(string folder, DevDriveStorage.IVolumeIndex? index)
     {
+        if (index is not null && index.TryList(folder, out DevDriveStorage.VolumeIndexListing listing))
+        {
+            List<Entry> fromIndex = [.. listing.Folders.Select(f => new Entry(f.Name, f.Attributes, IsDirectory: true))];
+            if (listing.Git == DevDriveStorage.GitEntry.File)
+            {
+                fromIndex.Add(new Entry(".git", FileAttributes.Normal, IsDirectory: false));
+            }
+
+            return fromIndex;
+        }
+
+        DevDriveStorage.Live.DirectoryReadTrace.Record(folder);
         try
         {
             return
@@ -297,7 +313,8 @@ public static class RepositoryWalker
     /// </remarks>
     public static IReadOnlyList<OrphanedWorktree> FindOrphanedWorktrees(
         IReadOnlyList<DiscoveredRepository> discovered,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        DevDriveStorage.IVolumeIndex? index = null)
     {
         ArgumentNullException.ThrowIfNull(discovered);
 
@@ -318,12 +335,11 @@ public static class RepositoryWalker
                 continue;
             }
 
-            foreach (string child in SafeSubdirectories(lot.Key))
+            foreach (string child in SafeSubdirectories(lot.Key, index))
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                string gitPath = Path.Combine(child, ".git");
-                if (Directory.Exists(gitPath) || File.Exists(gitPath))
+                if (HasGit(child, index))
                 {
                     continue;
                 }
@@ -375,10 +391,17 @@ public static class RepositoryWalker
 
     /// <summary>
     /// Enumerates subdirectories, returning empty rather than throwing when a folder cannot be read.
-    /// A denied folder is a fact to skip; it should never end a scan.
+    /// A denied folder is a fact to skip; it should never end a scan. A folder <paramref name="index"/>
+    /// read is listed from it.
     /// </summary>
-    public static IEnumerable<string> SafeSubdirectories(string path)
+    public static IEnumerable<string> SafeSubdirectories(string path, DevDriveStorage.IVolumeIndex? index = null)
     {
+        if (index is not null && index.TryList(path, out DevDriveStorage.VolumeIndexListing listing))
+        {
+            return [.. listing.Folders.Select(f => Path.Combine(path, f.Name))];
+        }
+
+        DevDriveStorage.Live.DirectoryReadTrace.Record(path);
         try
         {
             return Directory.EnumerateDirectories(path).ToList();
@@ -389,5 +412,17 @@ public static class RepositoryWalker
         {
             return [];
         }
+    }
+
+    /// <summary>Whether <paramref name="folder"/> has a <c>.git</c> folder or file.</summary>
+    private static bool HasGit(string folder, DevDriveStorage.IVolumeIndex? index)
+    {
+        if (index is not null && index.TryList(folder, out DevDriveStorage.VolumeIndexListing listing))
+        {
+            return listing.Git != DevDriveStorage.GitEntry.None;
+        }
+
+        string gitPath = Path.Combine(folder, ".git");
+        return Directory.Exists(gitPath) || File.Exists(gitPath);
     }
 }

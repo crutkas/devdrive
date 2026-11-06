@@ -87,6 +87,7 @@ internal static class NativeDirectoryEnumerator
     public static bool TryEnumerate(string directoryPath, out List<NativeDirEntry> entries)
     {
         entries = [];
+        DirectoryReadTrace.Record(directoryPath);
 
         SafeFileHandle handle = CreateFile(
             directoryPath,

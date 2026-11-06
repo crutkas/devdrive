@@ -63,12 +63,12 @@ public sealed class BuildOutputReclaimProvider : IReclaimProvider
                 progress?.Report(new ReclaimScanProgress(
                     ReclaimCategory.Id, $"Scanning {repository.Name}", candidates.Count));
 
-                foreach (string outputPath in FindOutputFolders(repository.Path, cancellationToken))
+                foreach (string outputPath in FindOutputFolders(repository.Path, context.Index, cancellationToken))
                 {
                     cancellationToken.ThrowIfCancellationRequested();
 
                     DirectoryMeasurement measurement =
-                        DirectoryMeasurer.Measure(outputPath, cancellationToken);
+                        context.Measure(outputPath, cancellationToken);
                     if (measurement.AllocatedBytes < context.MinimumCandidateBytes)
                     {
                         continue;
@@ -104,6 +104,7 @@ public sealed class BuildOutputReclaimProvider : IReclaimProvider
     /// </summary>
     private static IEnumerable<string> FindOutputFolders(
         string repositoryPath,
+        DevDriveStorage.IVolumeIndex? index,
         CancellationToken cancellationToken,
         int maxDepth = 6)
     {
@@ -116,7 +117,7 @@ public sealed class BuildOutputReclaimProvider : IReclaimProvider
             cancellationToken.ThrowIfCancellationRequested();
             (string current, int depth) = stack.Pop();
 
-            foreach (string child in RepositoryWalker.SafeSubdirectories(current))
+            foreach (string child in RepositoryWalker.SafeSubdirectories(current, index))
             {
                 string name = Path.GetFileName(child);
 
