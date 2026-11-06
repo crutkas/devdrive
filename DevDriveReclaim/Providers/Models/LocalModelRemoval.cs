@@ -113,6 +113,11 @@ public sealed partial class LocalModelRemoval : IReclaimOwnerRemoval
         }
 
         Uri host = _locations().OllamaHost;
+        if (!host.IsLoopback)
+        {
+            return "Ollama runs on another PC";
+        }
+
         switch (_runtime.OllamaListed(host))
         {
             case null:

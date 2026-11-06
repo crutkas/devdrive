@@ -83,16 +83,17 @@ internal static class ModelFiles
     }
 
     /// <summary>
-    /// Both paths name one file: the same volume and file id, whatever links, short names or case lead there. False when
-    /// either can't be opened.
+    /// Both paths name one file: the same volume and 128-bit file id (ReFS's 64-bit index isn't unique), whatever links, short
+    /// names or case lead there. False when either can't be opened.
     /// </summary>
     public static bool SameFile(string one, string other)
     {
         using SafeFileHandle a = CreateFileW(one, FileReadAttributes, ShareAll, IntPtr.Zero, OpenExisting, BackupSemantics, IntPtr.Zero);
         using SafeFileHandle b = CreateFileW(other, FileReadAttributes, ShareAll, IntPtr.Zero, OpenExisting, BackupSemantics, IntPtr.Zero);
         return !a.IsInvalid && !b.IsInvalid &&
-            GetFileInformationByHandle(a, out ByHandleFileInformation x) && GetFileInformationByHandle(b, out ByHandleFileInformation y) &&
-            x.VolumeSerialNumber == y.VolumeSerialNumber && x.FileIndexHigh == y.FileIndexHigh && x.FileIndexLow == y.FileIndexLow;
+            GetFileInformationByHandleEx(a, FileIdInformation, out FileIdInfo x, (uint)Marshal.SizeOf<FileIdInfo>()) &&
+            GetFileInformationByHandleEx(b, FileIdInformation, out FileIdInfo y, (uint)Marshal.SizeOf<FileIdInfo>()) &&
+            x.Equals(y);
     }
 
     /// <summary>
@@ -264,6 +265,7 @@ internal static class ModelFiles
     private const uint BackupSemantics = 0x02000000;
     private const uint OpenReparsePoint = 0x00200000;
     private const int FileDispositionInfo = 4;
+    private const int FileIdInformation = 18;
     private const int AccessDenied = 5;
     private const int SharingViolation = 32;
     private const int LockViolation = 33;
@@ -290,6 +292,13 @@ internal static class ModelFiles
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetFileInformationByHandle(SafeFileHandle file, out ByHandleFileInformation information);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private readonly record struct FileIdInfo(ulong VolumeSerialNumber, ulong FileIdLow, ulong FileIdHigh);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetFileInformationByHandleEx(SafeFileHandle file, int informationClass, out FileIdInfo information, uint size);
 
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]

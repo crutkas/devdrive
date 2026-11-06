@@ -157,6 +157,11 @@ public sealed class LocalModelTests
         StringAssert.Contains(new LocalModelRemoval(runtime, () => ollama.Locations(fixture)).WhyKept(candidate), "another models folder");
         Assert.AreEqual(ReclaimItemStatus.Failed, new LocalModelRemoval(runtime, () => ollama.Locations(fixture)).Remove(candidate, CancellationToken.None).Status);
         Assert.IsEmpty(runtime.Commands);
+
+        // Another PC's Ollama names its own files, which can have the same path as this one's.
+        LocalModelLocations remote = ollama.Locations(fixture) with { OllamaHost = new Uri("http://192.168.1.20:11434/") };
+        StringAssert.Contains(new LocalModelRemoval(new FakeRuntime { Serving = ollama.Store }, () => remote).WhyKept(candidate), "another PC");
+        Assert.IsNull(new LocalModelRemoval(new FakeRuntime { Serving = ollama.Store }, () => ollama.Locations(fixture)).WhyKept(candidate));
     }
 
     [TestMethod]
