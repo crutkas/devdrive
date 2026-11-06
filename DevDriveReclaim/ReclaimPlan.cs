@@ -16,6 +16,12 @@ public sealed record PlannedRemoval(ReclaimCandidate Candidate, ReclaimRoute Rou
 {
     public bool IsPermanent => Route == ReclaimRoute.Permanent;
 
+    /// <summary>
+    /// The Recycle Bin's answer that moved a recyclable item into the permanent group, with the reason as data (so a
+    /// confirmation can word it, and say a shared one once); null otherwise.
+    /// </summary>
+    public RecycleBinCheck? Why { get; init; }
+
     /// <summary>The name to show in the confirmation's list of things that cannot come back.</summary>
     public string PermanentLabel => Reason is null
         ? Candidate.DisplayName
@@ -118,7 +124,7 @@ public sealed class ReclaimPlan
 
             RecycleBinCheck check = preflight(root);
             items.Add(check.WillDeletePermanently
-                ? new PlannedRemoval(root, ReclaimRoute.Permanent, check.Reason)
+                ? new PlannedRemoval(root, ReclaimRoute.Permanent, check.Reason) { Why = check }
                 : new PlannedRemoval(root, ReclaimRoute.RecycleBin, null));
         }
 

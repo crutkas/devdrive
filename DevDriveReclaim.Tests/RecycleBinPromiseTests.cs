@@ -218,6 +218,23 @@ public sealed class RecycleBinPromiseTests
         CollectionAssert.AreEqual(new[] { false, false, true, false }, permanent, "C: has room for two; D:'s bin is its own");
     }
 
+    /// <summary>The reason is data too, so a confirmation can word it in its own language and say a shared one once.</summary>
+    [TestMethod]
+    public void AReasonIsAlsoData()
+    {
+        RecycleBinCheck tooLarge = RecycleBinPreflight.Evaluate(2000, Bin(max: 1000));
+        Assert.AreEqual(RecycleBinRefusal.TooLarge, tooLarge.Refusal);
+        Assert.AreEqual(@"C:\", tooLarge.VolumeRoot);
+        Assert.AreEqual(1000, tooLarge.CapacityBytes);
+
+        RecycleBinCheck noRoom = RecycleBinPreflight.Evaluate(300, Bin(max: 1000, used: 800));
+        Assert.AreEqual((RecycleBinRefusal.NoRoom, 1000L), (noRoom.Refusal, noRoom.CapacityBytes!.Value));
+        Assert.AreEqual(RecycleBinRefusal.TurnedOff, RecycleBinPreflight.Evaluate(1, Bin(disabled: true)).Refusal);
+        Assert.AreEqual(RecycleBinRefusal.NoRecycleBin, RecycleBinPreflight.Evaluate(1, Bin(@"E:\", has: false)).Refusal);
+        Assert.AreEqual(RecycleBinRefusal.Unknown, RecycleBinPreflight.Evaluate(1, null).Refusal);
+        Assert.AreEqual(RecycleBinRefusal.None, RecycleBinPreflight.Evaluate(1, Bin()).Refusal);
+    }
+
     [TestMethod]
     public void ARunNeverOutgrowsTheLimitEvenWhenTheBinsContentsCantBeRead()
     {
@@ -260,6 +277,7 @@ public sealed class RecycleBinPromiseTests
         PlannedRemoval overflow = plan.Permanent.Single();
         Assert.AreEqual(bigSafe.Path, overflow.Candidate.Path);
         StringAssert.Contains(overflow.PermanentLabel, "no room left");
+        Assert.AreEqual(RecycleBinRefusal.NoRoom, overflow.Why!.Refusal);
         CollectionAssert.AreEqual(
             ReclaimOverlapResolver.Roots([bigSafe, careful, smallSafe]).Select(c => c.Path).ToArray(), plan.Items.Select(i => i.Candidate.Path).ToArray(),
             "the plan keeps the overlap resolver's order");
