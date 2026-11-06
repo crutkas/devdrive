@@ -73,7 +73,7 @@ internal static class HubCacheReader
             {
                 long size = ModelFiles.Allocated(target, new FileInfo(target).Length);
                 IReadOnlyList<string>? users = SharedBlobStore.References(hub, target);
-                if (users is { Count: > 0 } && users.All(u => ReclaimOverlapResolver.Contains(repo, u)))
+                if (users is { Count: > 0 } && users.All(u => ReclaimOverlapResolver.Contains(repo, u)) && SharedBlobStore.Freed(target) > 0)
                 {
                     bytes += size;
                 }
@@ -217,66 +217,78 @@ internal static partial class SharedBlobStore
     }
 
     /// <summary>
-    /// Collects one stored file once its links are gone: deletes it and its list when no link uses it, or rewrites the list to
-    /// the links that still do. Returns the bytes freed. Anything unreadable keeps the file, as huggingface_hub does.
+    /// True when deleting <paramref name="repo"/> frees <paramref name="stored"/>: every link its list names is in the repo.
+    /// A list that can't be read keeps the file, as huggingface_hub does.
     /// </summary>
-    public static long Sweep(string hub, string stored)
+    public static bool OnlyFor(string hub, string stored, string repo) =>
+        References(hub, stored) is { } users && users.All(u => ReclaimOverlapResolver.Contains(repo, u));
+
+    /// <summary>Bytes deleting a stored file gives back: none when it has another hard link.</summary>
+    public static long Freed(string stored)
     {
-        try
-        {
-            using FileStream? held = Lock(stored + ".lock");
-            if (held is null)
-            {
-                return 0;
-            }
-
-            IReadOnlyList<string>? users = References(hub, stored);
-            if (users is null)
-            {
-                return 0;
-            }
-
-            string list = stored + ".refs";
-            if (users.Count > 0)
-            {
-                string root = Path.GetFullPath(hub);
-                string temporary = $"{list}.{Guid.NewGuid().ToString("N")[..8]}.tmp";
-                File.WriteAllText(temporary, string.Concat(users
-                    .Select(u => Path.GetRelativePath(root, u).Replace('\\', '/') + "\n")
-                    .Order(StringComparer.Ordinal)), new UTF8Encoding(false));
-                File.Move(temporary, list, overwrite: true);
-                return 0;
-            }
-
-            var file = new FileInfo(stored);
-            if (!file.Exists)
-            {
-                return 0;
-            }
-
-            long size = ModelFiles.Allocated(stored, file.Length);
-            if ((file.Attributes & FileAttributes.ReadOnly) != 0)
-            {
-                file.Attributes &= ~FileAttributes.ReadOnly;
-            }
-
-            file.Delete();
-            File.Delete(list);
-            return size;
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            return 0;
-        }
+        var file = new FileInfo(stored);
+        return !file.Exists || (file.Length >= ModelFiles.LargeFileBytes && ModelFiles.LinkCount(stored) > 1)
+            ? 0
+            : ModelFiles.Allocated(stored, file.Length);
     }
 
     /// <summary>
-    /// The lock huggingface_hub takes on Windows for a stored file (filelock's one-byte lock on <c>&lt;hash&gt;.lock</c>), held for
-    /// up to 10 seconds of waiting. Null when it can't be had.
+    /// Rewrites a stored file's list to the links that still use it, once a repo's links are gone; a list that can't be read
+    /// is left as it is. Call it under <see cref="LockAll"/>.
+    /// </summary>
+    public static void Prune(string hub, string stored)
+    {
+        if (References(hub, stored) is not { } users)
+        {
+            return;
+        }
+
+        string list = stored + ".refs";
+        string root = Path.GetFullPath(hub);
+        string temporary = $"{list}.{Guid.NewGuid().ToString("N")[..8]}.tmp";
+        File.WriteAllText(temporary, string.Concat(users
+            .Select(u => Path.GetRelativePath(root, u).Replace('\\', '/') + "\n")
+            .Order(StringComparer.Ordinal)), new UTF8Encoding(false));
+        File.Move(temporary, list, overwrite: true);
+    }
+
+    /// <summary>
+    /// Takes huggingface_hub's lock on each stored file (filelock's one-byte lock on <c>&lt;hash&gt;.lock</c>), in order, and
+    /// holds them until disposed. Null when one can't be had within 10 seconds.
+    /// </summary>
+    public static IDisposable? LockAll(IEnumerable<string> stored)
+    {
+        var held = new HeldLocks();
+        foreach (string file in stored.Order(StringComparer.OrdinalIgnoreCase))
+        {
+            if (Lock(file + ".lock") is not { } stream)
+            {
+                held.Dispose();
+                return null;
+            }
+
+            held.Add(file + ".lock", stream);
+        }
+
+        return held;
+    }
+
+    /// <summary>
+    /// One lock, waited for up to 10 seconds. It's opened without delete sharing: filelock deletes the file when it lets go,
+    /// and that delete failing is what keeps a second holder from locking a new file of the same name.
     /// </summary>
     private static FileStream? Lock(string path)
     {
-        var stream = new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.ReadWrite | FileShare.Delete);
+        FileStream stream;
+        try
+        {
+            stream = new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.ReadWrite);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+
         DateTime until = DateTime.UtcNow.AddSeconds(10);
         while (true)
         {
@@ -294,6 +306,41 @@ internal static partial class SharedBlobStore
                 stream.Dispose();
                 return null;
             }
+        }
+    }
+
+    /// <summary>Locks held together; letting go deletes each lock file, as filelock does, unless someone else has it open.</summary>
+    private sealed class HeldLocks : IDisposable
+    {
+        private readonly List<(string Path, FileStream Stream)> _locks = [];
+
+        public void Add(string path, FileStream stream) => _locks.Add((path, stream));
+
+        public void Dispose()
+        {
+            foreach ((string path, FileStream stream) in _locks)
+            {
+                try
+                {
+                    stream.Unlock(0, 1);
+                }
+                catch (IOException)
+                {
+                    // Closing lets go of it too.
+                }
+
+                stream.Dispose();
+                try
+                {
+                    File.Delete(path);
+                }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                {
+                    // Another holder has it open; it's theirs to delete.
+                }
+            }
+
+            _locks.Clear();
         }
     }
 

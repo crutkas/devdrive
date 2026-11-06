@@ -241,17 +241,17 @@ public sealed class ReclaimExecutor : IReclaimExecutor
                     "already gone — something else removed it since the scan");
         }
 
-        // Its tool removes it: deleting the path would leave the tool's records pointing at nothing, or take files another
-        // candidate still needs.
-        if (candidate.Owner is not null)
-        {
-            return owners.Remove(candidate, cancellationToken);
-        }
-
         string path = verdict.CanonicalPath!;
 
         try
         {
+            // Its tool removes it: deleting the path would leave the tool's records pointing at nothing, or take files another
+            // candidate still needs.
+            if (candidate.Owner is not null)
+            {
+                return owners.Remove(candidate, cancellationToken);
+            }
+
             if (verdict.Kind == ReclaimTargetKind.RecycleBin)
             {
                 return EmptyRecycleBin(candidate, path);

@@ -78,7 +78,8 @@ internal static class OllamaStore
                     continue;
                 }
 
-                if (users[digest] == 1)
+                // A blob with another hard link (into LM Studio's folder, say) isn't freed by ollama rm either.
+                if (users[digest] == 1 && !(size >= ModelFiles.LargeFileBytes && ModelFiles.LinkCount(BlobPath(store, digest)) > 1))
                 {
                     bytes += size;
                 }
@@ -108,13 +109,24 @@ internal static class OllamaStore
     /// The names that share their weights with <paramref name="name"/> now, the way <see cref="Read"/> groups them, or null when
     /// Ollama no longer has <paramref name="name"/>.
     /// </summary>
-    public static IReadOnlyList<string>? NamesWith(string store, string name)
+    public static IReadOnlyList<string>? NamesWith(string store, string name) =>
+        GroupWith(store, name) is { } group ? [.. group.Select(e => e.Name)] : null;
+
+    /// <summary>The manifests of the names that share their weights with <paramref name="name"/> now, or null.</summary>
+    internal static IReadOnlyList<Entry>? GroupWith(string store, string name)
     {
         List<Entry> entries = ReadManifests(store, _ => { }, CancellationToken.None);
         List<List<Entry>> groups = Group(entries, BlobSizes(store, entries));
         return groups.FirstOrDefault(g => g.Any(e => string.Equals(e.Name, name, StringComparison.OrdinalIgnoreCase))) is { } group
-            ? [.. Ordered(group).Select(e => e.Name)]
+            ? Ordered(group)
             : null;
+    }
+
+    /// <summary>The digest Ollama gives a name (<c>/api/tags</c>): the SHA-256 of the manifest file, in lowercase hex.</summary>
+    public static string ManifestDigest(string manifest)
+    {
+        using FileStream stream = File.OpenRead(manifest);
+        return Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(stream));
     }
 
     /// <summary>

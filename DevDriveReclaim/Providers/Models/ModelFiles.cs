@@ -83,8 +83,8 @@ internal static class ModelFiles
     }
 
     /// <summary>
-    /// False when another program has the file open or mapped (an exclusive open is refused with a sharing violation), so
-    /// deleting it would fail or pull it from under that program. Opens and closes at once; reads nothing.
+    /// False when another program has the file open (an exclusive open is refused with a sharing violation). A program that
+    /// only maps it, as llama.cpp does, isn't seen here; <see cref="DeleteTogether"/> sees it. Opens and closes at once.
     /// </summary>
     public static bool IsFree(string path)
     {
@@ -119,66 +119,139 @@ internal static class ModelFiles
         return null;
     }
 
-    /// <summary>Deletes a folder tree, clearing read-only attributes and removing links rather than what they point to.</summary>
-    public static void DeleteTree(string folder)
+    /// <summary>
+    /// Deletes a folder tree and <paramref name="also"/> together or not at all (<see cref="DeleteTogether"/>), removing links
+    /// rather than what they point to. Returns null when they're gone, or the file a program is using when nothing was deleted.
+    /// </summary>
+    /// <exception cref="IOException">A file couldn't be deleted for another reason, and nothing was; or an emptied folder couldn't be.</exception>
+    public static string? DeleteFolder(string folder, IEnumerable<string>? also = null)
     {
-        var info = new DirectoryInfo(folder);
-        if (!info.Exists)
+        List<string> entries = [], folders = [];
+        Collect(Path.TrimEndingDirectorySeparator(folder), entries, folders);
+        if (DeleteTogether([.. entries, .. also ?? []]) is { } held)
         {
-            return;
+            return held;
         }
 
+        foreach (string directory in folders)
+        {
+            var info = new DirectoryInfo(directory);
+            if ((info.Attributes & FileAttributes.ReadOnly) != 0)
+            {
+                info.Attributes &= ~FileAttributes.ReadOnly;
+            }
+
+            info.Delete();
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Deletes files and links (never what a link points to) together or not at all. Returns null when they're gone, or the
+    /// one a program is using, and then deletes none. Each is opened exclusively and marked with the classic delete
+    /// disposition, which Windows refuses while a program has the file mapped: llama.cpp maps a loaded model and closes its
+    /// handle, and then an exclusive open, a rename and File.Delete's POSIX delete all succeed.
+    /// </summary>
+    /// <exception cref="IOException">One couldn't be opened for another reason (access denied, say); none was deleted.</exception>
+    public static string? DeleteTogether(IEnumerable<string> paths)
+    {
+        var marked = new List<SafeFileHandle>();
+        try
+        {
+            foreach (string path in paths)
+            {
+                FileAttributes attributes = File.GetAttributes(path);
+                if ((attributes & FileAttributes.ReadOnly) != 0)
+                {
+                    File.SetAttributes(path, attributes & ~FileAttributes.ReadOnly);
+                }
+
+                SafeFileHandle handle = CreateFileW(path, Delete, 0, IntPtr.Zero, OpenExisting, BackupSemantics | OpenReparsePoint, IntPtr.Zero);
+                if (handle.IsInvalid)
+                {
+                    int error = Marshal.GetLastWin32Error();
+                    handle.Dispose();
+                    if (error is SharingViolation or LockViolation)
+                    {
+                        return path;
+                    }
+
+                    string message = $"{Path.GetFileName(path)}: {new System.ComponentModel.Win32Exception(error).Message}";
+                    throw error == AccessDenied ? new UnauthorizedAccessException(message) : new IOException(message, unchecked((int)0x80070000) | error);
+                }
+
+                marked.Add(handle);
+                if (!SetDisposition(handle, true))
+                {
+                    marked.Remove(handle);
+                    handle.Dispose();
+                    return path;
+                }
+            }
+
+            // Every one is marked: closing the handles deletes them.
+            foreach (SafeFileHandle handle in marked)
+            {
+                handle.Dispose();
+            }
+
+            marked.Clear();
+            return null;
+        }
+        finally
+        {
+            foreach (SafeFileHandle handle in marked)
+            {
+                SetDisposition(handle, false);
+                handle.Dispose();
+            }
+        }
+    }
+
+    /// <summary>Files and links under <paramref name="folder"/>, and its folders deepest first; a linked folder is a link.</summary>
+    private static void Collect(string folder, List<string> entries, List<string> folders)
+    {
+        var info = new DirectoryInfo(folder);
         if ((info.Attributes & FileAttributes.ReparsePoint) != 0)
         {
-            info.Delete();
+            entries.Add(info.FullName);
             return;
         }
 
         foreach (FileSystemInfo entry in info.EnumerateFileSystemInfos("*", new EnumerationOptions { AttributesToSkip = 0, IgnoreInaccessible = false }))
         {
-            if (entry is DirectoryInfo directory)
+            if (entry is DirectoryInfo directory && (directory.Attributes & FileAttributes.ReparsePoint) == 0)
             {
-                DeleteTree(directory.FullName);
-                continue;
+                Collect(directory.FullName, entries, folders);
             }
-
-            if ((entry.Attributes & FileAttributes.ReadOnly) != 0)
+            else
             {
-                entry.Attributes &= ~FileAttributes.ReadOnly;
+                entries.Add(entry.FullName);
             }
-
-            entry.Delete();
         }
 
-        if ((info.Attributes & FileAttributes.ReadOnly) != 0)
-        {
-            info.Attributes &= ~FileAttributes.ReadOnly;
-        }
-
-        info.Delete();
+        folders.Add(info.FullName);
     }
 
-    /// <summary>
-    /// Renames <paramref name="folder"/> to a hidden sibling and returns the new path. Windows refuses to rename a folder while
-    /// a program has a file in it open or mapped, so this is the gate that keeps a model in use from being half-deleted.
-    /// </summary>
-    public static string StageForDeletion(string folder)
+    private static bool SetDisposition(SafeFileHandle handle, bool delete)
     {
-        string trimmed = Path.TrimEndingDirectorySeparator(folder);
-        string staged = Path.Combine(Path.GetDirectoryName(trimmed)!, $".{Path.GetFileName(trimmed)}.{Guid.NewGuid():N}.removing");
-        Directory.Move(trimmed, staged);
-        return staged;
+        byte value = delete ? (byte)1 : (byte)0;
+        return SetFileInformationByHandle(handle, FileDispositionInfo, ref value, 1);
     }
 
     private static SafeFileHandle OpenForAttributes(string path) =>
         CreateFileW(path, FileReadAttributes, ShareAll, IntPtr.Zero, OpenExisting, BackupSemantics | OpenReparsePoint, IntPtr.Zero);
 
     private const uint GenericRead = 0x80000000;
+    private const uint Delete = 0x00010000;
     private const uint FileReadAttributes = 0x80;
     private const uint ShareAll = 0x1 | 0x2 | 0x4;
     private const uint OpenExisting = 3;
     private const uint BackupSemantics = 0x02000000;
     private const uint OpenReparsePoint = 0x00200000;
+    private const int FileDispositionInfo = 4;
+    private const int AccessDenied = 5;
     private const int SharingViolation = 32;
     private const int LockViolation = 33;
 
@@ -204,6 +277,10 @@ internal static class ModelFiles
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetFileInformationByHandle(SafeFileHandle file, out ByHandleFileInformation information);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetFileInformationByHandle(SafeFileHandle file, int informationClass, ref byte information, uint size);
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern uint GetCompressedFileSizeW(string fileName, out uint fileSizeHigh);

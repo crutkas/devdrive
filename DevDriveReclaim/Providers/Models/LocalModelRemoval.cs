@@ -7,9 +7,9 @@ namespace DevDriveReclaim.Providers.Models;
 /// </summary>
 /// <remarks>
 /// In use means: Ollama has it loaded (<c>/api/ps</c>; Ollama's runner doesn't hold the files, so they can't tell), Foundry Local
-/// has it loaded, or another program has one of its large files open or mapped. A folder is renamed before it's deleted:
-/// Windows refuses that while a program has a file in it open, so a model in use is never half-deleted. Removal is permanent;
-/// the managers have no undo.
+/// has it loaded, or another program has one of its files open or mapped. A model's files are deleted together or not at all
+/// (<see cref="ModelFiles.DeleteTogether"/>), so a model in use is never half-deleted. Removal is permanent; the managers
+/// have no undo.
 /// </remarks>
 public sealed partial class LocalModelRemoval : IReclaimOwnerRemoval
 {
@@ -39,14 +39,21 @@ public sealed partial class LocalModelRemoval : IReclaimOwnerRemoval
             return null;
         }
 
-        return owner.Tool switch
+        try
         {
-            LocalModelTools.Ollama => OllamaWhyKept(owner),
-            LocalModelTools.FoundryLocal => FoundryWhyKept(candidate, owner),
-            LocalModelTools.HuggingFace => Held(HubFiles(owner.Store, candidate.Path)),
-            LocalModelTools.LmStudio or LocalModelTools.ModelFiles => Held(FilesOf(candidate.Path)),
-            _ => $"{owner.Title} isn't a model manager this can remove from",
-        };
+            return owner.Tool switch
+            {
+                LocalModelTools.Ollama => OllamaWhyKept(owner),
+                LocalModelTools.FoundryLocal => FoundryWhyKept(candidate, owner),
+                LocalModelTools.HuggingFace => Held(HubFiles(owner.Store, candidate.Path)),
+                LocalModelTools.LmStudio or LocalModelTools.ModelFiles => Held(FilesOf(candidate.Path)),
+                _ => $"{owner.Title} isn't a model manager this can remove from",
+            };
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return FileSystemRemovalError.Explain(exception);
+        }
     }
 
     public string? Describe(ReclaimCandidate candidate)
@@ -63,13 +70,13 @@ public sealed partial class LocalModelRemoval : IReclaimOwnerRemoval
     public ReclaimItemOutcome Remove(ReclaimCandidate candidate, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(candidate);
-        if (WhyKept(candidate) is { } reason)
-        {
-            return Kept(candidate, reason);
-        }
-
         try
         {
+            if (WhyKept(candidate) is { } reason)
+            {
+                return Kept(candidate, reason);
+            }
+
             return candidate.Owner!.Tool switch
             {
                 LocalModelTools.Ollama => RemoveFromOllama(candidate, cancellationToken),
@@ -94,18 +101,29 @@ public sealed partial class LocalModelRemoval : IReclaimOwnerRemoval
             return "Ollama isn't installed, so it can't remove it";
         }
 
-        IReadOnlyList<string>? now = OllamaStore.NamesWith(owner.Store, owner.Names[0]);
+        IReadOnlyList<OllamaStore.Entry>? now = OllamaStore.GroupWith(owner.Store, owner.Names[0]);
         if (now is null)
         {
             return "Ollama doesn't have it any more";
         }
 
-        if (!now.ToHashSet(StringComparer.OrdinalIgnoreCase).SetEquals(owner.Names))
+        if (!now.Select(e => e.Name).ToHashSet(StringComparer.OrdinalIgnoreCase).SetEquals(owner.Names))
         {
             return "it changed since the scan; scan again";
         }
 
-        IReadOnlyList<string>? loaded = _runtime.OllamaLoaded(_locations().OllamaHost);
+        Uri host = _locations().OllamaHost;
+        switch (_runtime.OllamaListed(host))
+        {
+            case null:
+                return "Ollama didn't answer";
+            case { Running: false }:
+                return "Ollama isn't running";
+            case { } served when now.Any(e => !Serves(served, e)):
+                return "Ollama is using another models folder";
+        }
+
+        IReadOnlyList<string>? loaded = _runtime.OllamaLoaded(host);
         if (loaded is null)
         {
             return "Ollama didn't say whether it's in use";
@@ -116,10 +134,19 @@ public sealed partial class LocalModelRemoval : IReclaimOwnerRemoval
             : null;
     }
 
+    /// <summary>
+    /// The running Ollama serves this name from the manifest scanned here. <c>ollama rm</c> deletes from that Ollama's own
+    /// models folder, which needn't be this one (another <c>OLLAMA_MODELS</c>, WSL, another PC).
+    /// </summary>
+    private static bool Serves(OllamaServed served, OllamaStore.Entry entry) =>
+        served.Digests.TryGetValue(entry.Name, out string? digest) &&
+        string.Equals(digest, OllamaStore.ManifestDigest(entry.Manifest), StringComparison.OrdinalIgnoreCase);
+
     private ReclaimItemOutcome RemoveFromOllama(ReclaimCandidate candidate, CancellationToken cancellationToken)
     {
         ReclaimOwner owner = candidate.Owner!;
-        (int exit, string output) = _runtime.Run(_runtime.FindTool(LocalModelTools.Ollama)!, ["rm", .. owner.Names], CommandTimeout, cancellationToken);
+        var environment = new Dictionary<string, string> { ["OLLAMA_HOST"] = _locations().OllamaHost.GetLeftPart(UriPartial.Authority) };
+        (int exit, string output) = _runtime.Run(_runtime.FindTool(LocalModelTools.Ollama)!, ["rm", .. owner.Names], CommandTimeout, cancellationToken, environment);
 
         // What's left decides it, not the exit code alone: ollama rm stops at the first name it can't remove.
         List<string> left = [.. OllamaStore.ReadManifests(owner.Store, _ => { }, CancellationToken.None)
@@ -173,33 +200,54 @@ public sealed partial class LocalModelRemoval : IReclaimOwnerRemoval
     // ---- Folders and files
 
     /// <summary>
-    /// A Hugging Face repo, as <c>hf cache rm</c> removes one whose every revision goes: its folder, then each stored file only it
-    /// used (<see cref="SharedBlobStore.Sweep"/>).
+    /// A Hugging Face repo, as <c>hf cache rm</c> removes one whose every revision goes: its folder and each stored file only it
+    /// used, together, under huggingface_hub's locks on those files; the other stored files' lists then drop its links.
     /// </summary>
     private static ReclaimItemOutcome RemoveFromHub(ReclaimCandidate candidate)
     {
         ReclaimOwner owner = candidate.Owner!;
         ModelFootprint own = ModelFiles.Measure(candidate.Path, CancellationToken.None);
-        IReadOnlyList<string> stored = SharedBlobStore.IsMarked(owner.Store) ? HubCacheReader.StoredTargets(owner.Store, candidate.Path, own.Links) : [];
-
-        if (Stage(candidate) is not { } staged)
+        if (!SharedBlobStore.IsMarked(owner.Store))
         {
-            return Kept(candidate, InUseFolder);
+            return ModelFiles.DeleteFolder(candidate.Path) is { } held
+                ? Kept(candidate, InUse(held))
+                : new ReclaimItemOutcome(candidate, ReclaimItemStatus.Deleted, own.Bytes, $"deleted from the {owner.Title} cache");
         }
 
-        ModelFiles.DeleteTree(staged);
-        long freed = own.Bytes + stored.Sum(file => SharedBlobStore.Sweep(owner.Store, file));
+        IReadOnlyList<string> stored = HubCacheReader.StoredTargets(owner.Store, candidate.Path, own.Links);
+        using IDisposable? locks = SharedBlobStore.LockAll(stored);
+        if (locks is null)
+        {
+            return Kept(candidate, $"in use: {owner.Title} has its files locked");
+        }
+
+        List<string> only = [.. stored.Where(s => SharedBlobStore.OnlyFor(owner.Store, s, candidate.Path))];
+        long freed = own.Bytes + only.Sum(SharedBlobStore.Freed);
+        if (ModelFiles.DeleteFolder(candidate.Path, only) is { } busy)
+        {
+            return Kept(candidate, InUse(busy));
+        }
+
+        foreach (string file in only)
+        {
+            File.Delete(file + ".refs");
+        }
+
+        foreach (string file in stored.Except(only, StringComparer.OrdinalIgnoreCase))
+        {
+            SharedBlobStore.Prune(owner.Store, file);
+        }
+
         return new ReclaimItemOutcome(candidate, ReclaimItemStatus.Deleted, freed, $"deleted from the {owner.Title} cache");
     }
 
     private static ReclaimItemOutcome RemoveFolder(ReclaimCandidate candidate, bool removeEmptyParent)
     {
-        if (Stage(candidate) is not { } staged)
+        if (ModelFiles.DeleteFolder(candidate.Path) is { } held)
         {
-            return Kept(candidate, InUseFolder);
+            return Kept(candidate, InUse(held));
         }
 
-        ModelFiles.DeleteTree(staged);
         string? parent = Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(candidate.Path));
         if (removeEmptyParent && parent is not null && Directory.Exists(parent) && !Directory.EnumerateFileSystemEntries(parent).Any())
         {
@@ -209,32 +257,10 @@ public sealed partial class LocalModelRemoval : IReclaimOwnerRemoval
         return new ReclaimItemOutcome(candidate, ReclaimItemStatus.Deleted, candidate.SizeBytes, "deleted permanently");
     }
 
-    private static ReclaimItemOutcome RemoveFile(ReclaimCandidate candidate)
-    {
-        var file = new FileInfo(candidate.Path);
-        if ((file.Attributes & FileAttributes.ReadOnly) != 0)
-        {
-            file.Attributes &= ~FileAttributes.ReadOnly;
-        }
-
-        file.Delete();
-        return new ReclaimItemOutcome(candidate, ReclaimItemStatus.Deleted, candidate.SizeBytes, "deleted permanently");
-    }
-
-    private const string InUseFolder = "in use: a program has one of its files open";
-
-    /// <summary>The folder renamed aside for deletion, or null when Windows refused because something in it is open.</summary>
-    private static string? Stage(ReclaimCandidate candidate)
-    {
-        try
-        {
-            return ModelFiles.StageForDeletion(candidate.Path);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            return null;
-        }
-    }
+    private static ReclaimItemOutcome RemoveFile(ReclaimCandidate candidate) =>
+        ModelFiles.DeleteTogether([candidate.Path]) is { } held
+            ? Kept(candidate, InUse(held))
+            : new ReclaimItemOutcome(candidate, ReclaimItemStatus.Deleted, candidate.SizeBytes, "deleted permanently");
 
     // ---- In use
 
@@ -271,12 +297,12 @@ public sealed partial class LocalModelRemoval : IReclaimOwnerRemoval
         }
     }
 
-    private static string? Held(IEnumerable<string> files) =>
-        ModelFiles.FirstHeld(files) is { } held
-            ? Hash().IsMatch(Path.GetFileName(held))
-                ? "in use: a program has one of its files open"
-                : $"in use: a program has {Path.GetFileName(held)} open"
-            : null;
+    private static string? Held(IEnumerable<string> files) => ModelFiles.FirstHeld(files) is { } held ? InUse(held) : null;
+
+    private static string InUse(string file) =>
+        Hash().IsMatch(Path.GetFileName(file))
+            ? "in use: a program has one of its files open"
+            : $"in use: a program has {Path.GetFileName(file)} open";
 
     /// <summary>A content-addressed file's name (a Hugging Face stored file), which means nothing to the person reading it.</summary>
     [System.Text.RegularExpressions.GeneratedRegex("^[0-9a-f]{40,64}$")]

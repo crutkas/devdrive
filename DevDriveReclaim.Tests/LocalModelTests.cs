@@ -97,12 +97,13 @@ public sealed class LocalModelTests
         ollama.Manifest("manifests-v2", "ollama.com", "library", "qwen3", "0.6b", ollama.Blob(400), [weights]);
         ollama.Manifest("manifests-v2", "ollama.com", "library", "qwen3-alias", "latest", ollama.Blob(400), [weights], later: 1);
         ReclaimCandidate candidate = Candidate(LocalModelTools.Ollama, ollama.Store, ollama.ManifestPath("qwen3", "0.6b"), "qwen3:0.6b", "qwen3-alias:latest");
-        var runtime = new FakeRuntime { OnRun = (_, args) => ollama.Remove(args.Skip(1)) };
+        var runtime = new FakeRuntime { Serving = ollama.Store, OnRun = (_, args) => ollama.Remove(args.Skip(1)) };
 
         ReclaimItemOutcome outcome = new LocalModelRemoval(runtime, () => ollama.Locations(fixture)).Remove(candidate, CancellationToken.None);
 
         Assert.AreEqual(ReclaimItemStatus.Deleted, outcome.Status, outcome.Message);
         CollectionAssert.AreEqual(new[] { "rm", "qwen3:0.6b", "qwen3-alias:latest" }, runtime.Commands.Single().ToArray());
+        Assert.AreEqual("http://127.0.0.1:11434", runtime.Environments.Single()!["OLLAMA_HOST"], "the Ollama that was asked is the one that removes");
     }
 
     [TestMethod]
@@ -116,18 +117,53 @@ public sealed class LocalModelTests
 
         string? Why(FakeRuntime runtime) => new LocalModelRemoval(runtime, () => ollama.Locations(fixture)).WhyKept(candidate);
 
-        StringAssert.Contains(Why(new FakeRuntime { Loaded = ["qwen3:0.6b"] }), "in use");
-        StringAssert.Contains(Why(new FakeRuntime { Loaded = null }), "didn't say");
+        StringAssert.Contains(Why(new FakeRuntime { Serving = ollama.Store, Loaded = ["qwen3:0.6b"] }), "in use");
+        StringAssert.Contains(Why(new FakeRuntime { Serving = ollama.Store, Loaded = null }), "didn't say");
         StringAssert.Contains(Why(new FakeRuntime { Tools = [] }), "isn't installed");
-        Assert.IsNull(Why(new FakeRuntime()));
+        StringAssert.Contains(Why(new FakeRuntime { OllamaRunning = false }), "isn't running");
+        StringAssert.Contains(Why(new FakeRuntime { OllamaAnswers = false }), "didn't answer");
+        StringAssert.Contains(Why(new FakeRuntime { Listed = ["qwen3:0.6b"] }), "another models folder");
+        StringAssert.Contains(Why(new FakeRuntime()), "another models folder");
+        Assert.IsNull(Why(new FakeRuntime { Serving = ollama.Store }));
 
         ollama.Manifest("manifests-v2", "ollama.com", "library", "copied", "latest", weights, [weights], later: 2);
-        StringAssert.Contains(Why(new FakeRuntime()), "changed since the scan");
+        StringAssert.Contains(Why(new FakeRuntime { Serving = ollama.Store }), "changed since the scan");
 
-        var runtime = new FakeRuntime { Loaded = ["copied:latest"] };
+        var runtime = new FakeRuntime { Serving = ollama.Store, Loaded = ["copied:latest"] };
         ReclaimItemOutcome kept = new LocalModelRemoval(runtime, () => ollama.Locations(fixture)).Remove(candidate, CancellationToken.None);
         Assert.AreEqual(ReclaimItemStatus.Failed, kept.Status);
         Assert.IsEmpty(runtime.Commands, "nothing runs when it's kept");
+    }
+
+    [TestMethod]
+    public async Task AnOllamaFolderThatCantBeReadKeepsTheModelWithoutStoppingTheRun()
+    {
+        using var fixture = new ReclaimFixture();
+        var ollama = new OllamaFixture(fixture);
+        string weights = ollama.Blob(2 * MiB);
+        ollama.Manifest("manifests-v2", "ollama.com", "library", "qwen3", "0.6b", weights, [weights]);
+        ReclaimCandidate candidate = Candidate(LocalModelTools.Ollama, ollama.Store, ollama.ManifestPath("qwen3", "0.6b"), "qwen3:0.6b");
+        var removal = new LocalModelRemoval(new FakeRuntime { Serving = ollama.Store }, () => ollama.Locations(fixture));
+        string library = Path.Combine(ollama.Store, "manifests-v2", "ollama.com", "library");
+
+        using (Deny(library))
+        {
+            StringAssert.Contains(removal.WhyKept(candidate), "access was denied");
+            ReclaimOutcome outcome = await new ReclaimExecutor(_ => null, removal).ExecuteAsync([candidate], null, CancellationToken.None);
+            Assert.AreEqual(ReclaimItemStatus.Failed, outcome.Items.Single().Status);
+        }
+    }
+
+    [TestMethod]
+    public async Task AnOllamaBlobWithAnotherHardLinkIsSharedNotFreed()
+    {
+        using var fixture = new ReclaimFixture();
+        var ollama = new OllamaFixture(fixture);
+        string weights = ollama.Blob(3 * MiB);
+        ollama.Manifest("manifests-v2", "ollama.com", "library", "linked", "latest", ollama.Blob(400), [weights]);
+        Assert.IsTrue(CreateHardLink(Path.Combine(fixture.Dir("lms"), "linked.gguf"), OllamaStore.BlobPath(ollama.Store, weights), IntPtr.Zero));
+
+        Assert.AreEqual(400, (await Scan(ollama.Locations(fixture))).Single().SizeBytes, "ollama rm doesn't free a blob LM Studio's folder still has");
     }
 
     [TestMethod]
@@ -196,6 +232,7 @@ public sealed class LocalModelTests
         Assert.IsFalse(File.Exists(own + ".refs"));
         Assert.IsTrue(File.Exists(shared), "the file org/two still uses stays");
         Assert.AreEqual("models--org--two/blobs/e3\n", File.ReadAllText(shared + ".refs"), "and its list names only org/two now");
+        Assert.IsFalse(File.Exists(own + ".lock") || File.Exists(shared + ".lock"), "its locks are let go of and deleted, as filelock does");
     }
 
     [TestMethod]
@@ -271,6 +308,43 @@ public sealed class LocalModelTests
     }
 
     [TestMethod]
+    public void AModelALoaderHasMappedIsKeptWhole()
+    {
+        using var fixture = new ReclaimFixture();
+        string weights = fixture.File(@"lms\pub\Model-GGUF\model.gguf", 3 * MiB);
+        string projector = fixture.File(@"lms\pub\Model-GGUF\mmproj.gguf", 2 * MiB);
+        string models = Path.Combine(fixture.Root, "lms");
+        string folder = Path.GetDirectoryName(weights)!;
+        ReclaimCandidate candidate = Candidate(LocalModelTools.LmStudio, models, folder, "pub/Model-GGUF");
+        var removal = new LocalModelRemoval(new FakeRuntime(), () => Locations(fixture, lmStudio: models));
+
+        // llama.cpp maps the weights and closes its handles, so only the view is left.
+        using (Mapped(weights))
+        {
+            ReclaimItemOutcome kept = removal.Remove(candidate, CancellationToken.None);
+            Assert.AreEqual(ReclaimItemStatus.Failed, kept.Status);
+            StringAssert.Contains(kept.Message, "model.gguf");
+            Assert.IsTrue(File.Exists(weights) && File.Exists(projector), "none of its files was deleted");
+        }
+
+        Assert.AreEqual(ReclaimItemStatus.Deleted, removal.Remove(candidate, CancellationToken.None).Status);
+        Assert.IsFalse(Directory.Exists(folder));
+    }
+
+    [TestMethod]
+    public void ACommandWhoseChildKeepsItsOutputOpenStillReturns()
+    {
+        // ollama rm starts Ollama's app when the server is down, and the app inherits the command's output.
+        var timer = System.Diagnostics.Stopwatch.StartNew();
+        (int exit, string output) = LocalModelRuntime.Instance.Run(
+            Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe", ["/c", "echo started & start /b ping -n 20 127.0.0.1"], TimeSpan.FromMinutes(1), CancellationToken.None);
+
+        Assert.IsTrue(timer.Elapsed < TimeSpan.FromSeconds(10), $"returned after {timer.Elapsed}");
+        Assert.AreEqual(0, exit);
+        StringAssert.Contains(output, "started");
+    }
+
+    [TestMethod]
     public async Task AHardLinkedModelFileIsSharedNotFreed()
     {
         using var fixture = new ReclaimFixture();
@@ -293,12 +367,7 @@ public sealed class LocalModelTests
         using var fixture = new ReclaimFixture();
         string models = fixture.Dir("lms");
         fixture.File(@"lms\pub\model\m.gguf", 2 * MiB);
-        var deny = new FileSystemAccessRule(WindowsIdentity.GetCurrent().User!, FileSystemRights.ListDirectory, AccessControlType.Deny);
-        var info = new DirectoryInfo(models);
-        DirectorySecurity security = info.GetAccessControl();
-        security.AddAccessRule(deny);
-        info.SetAccessControl(security);
-        try
+        using (Deny(models))
         {
             var context = new ReclaimScanContext([], []);
             IReadOnlyList<ReclaimCandidate> found = await new LocalModelReclaimProvider(() => Locations(fixture, lmStudio: models), new FakeRuntime())
@@ -308,11 +377,6 @@ public sealed class LocalModelTests
             ReclaimGap gap = context.Gaps.Single();
             Assert.AreEqual(models, gap.Location);
             Assert.AreEqual("access denied", gap.Reason);
-        }
-        finally
-        {
-            security.RemoveAccessRule(deny);
-            info.SetAccessControl(security);
         }
     }
 
@@ -388,6 +452,33 @@ public sealed class LocalModelTests
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool CreateHardLink(string fileName, string existingFileName, IntPtr securityAttributes);
 
+    /// <summary>Denies listing <paramref name="folder"/> to this user until disposed.</summary>
+    private static IDisposable Deny(string folder)
+    {
+        var deny = new FileSystemAccessRule(WindowsIdentity.GetCurrent().User!, FileSystemRights.ListDirectory, AccessControlType.Deny);
+        var info = new DirectoryInfo(folder);
+        DirectorySecurity security = info.GetAccessControl();
+        security.AddAccessRule(deny);
+        info.SetAccessControl(security);
+        return new Undo(() =>
+        {
+            security.RemoveAccessRule(deny);
+            info.SetAccessControl(security);
+        });
+    }
+
+    /// <summary>A read-only view of <paramref name="path"/> with its file and mapping handles closed, as llama.cpp leaves a loaded model.</summary>
+    private static IDisposable Mapped(string path)
+    {
+        using var file = System.IO.MemoryMappedFiles.MemoryMappedFile.CreateFromFile(path, FileMode.Open, null, 0, System.IO.MemoryMappedFiles.MemoryMappedFileAccess.Read);
+        return file.CreateViewAccessor(0, 0, System.IO.MemoryMappedFiles.MemoryMappedFileAccess.Read);
+    }
+
+    private sealed class Undo(Action undo) : IDisposable
+    {
+        public void Dispose() => undo();
+    }
+
     /// <summary>An Ollama models folder laid out as Ollama 0.40 lays it out.</summary>
     private sealed class OllamaFixture(ReclaimFixture fixture)
     {
@@ -435,7 +526,15 @@ public sealed class LocalModelTests
     {
         public IReadOnlyList<string>? Loaded { get; init; } = [];
 
+        /// <summary>The models folder the running Ollama serves: its names with their manifests' digests.</summary>
+        public string? Serving { get; init; }
+
+        /// <summary>More names the running Ollama lists, from a folder that isn't scanned.</summary>
         public IReadOnlyList<string>? Listed { get; init; }
+
+        public bool OllamaRunning { get; init; } = true;
+
+        public bool OllamaAnswers { get; init; } = true;
 
         public IReadOnlyList<string>? FoundryLoadedIds { get; init; } = [];
 
@@ -445,9 +544,35 @@ public sealed class LocalModelTests
 
         public List<IReadOnlyList<string>> Commands { get; } = [];
 
+        public List<IReadOnlyDictionary<string, string>?> Environments { get; } = [];
+
         public IReadOnlyList<string>? OllamaLoaded(Uri host) => Loaded;
 
-        public IReadOnlyList<string>? OllamaListed(Uri host) => Listed;
+        public OllamaServed? OllamaListed(Uri host)
+        {
+            if (!OllamaAnswers)
+            {
+                return null;
+            }
+
+            if (!OllamaRunning)
+            {
+                return OllamaServed.NotRunning;
+            }
+
+            var digests = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (OllamaStore.Entry entry in Serving is null ? [] : OllamaStore.ReadManifests(Serving, _ => { }, CancellationToken.None))
+            {
+                digests[entry.Name] = OllamaStore.ManifestDigest(entry.Manifest);
+            }
+
+            foreach (string name in Listed ?? [])
+            {
+                digests.TryAdd(name, new string('0', 64));
+            }
+
+            return new OllamaServed(true, digests);
+        }
 
         public IReadOnlyList<string>? FoundryLoaded() => FoundryLoadedIds;
 
@@ -455,9 +580,15 @@ public sealed class LocalModelTests
 
         public string? FindTool(string tool) => Tools.Contains(tool) ? $@"C:\fake\{tool}.exe" : null;
 
-        public (int ExitCode, string Output) Run(string executable, IReadOnlyList<string> arguments, TimeSpan timeout, CancellationToken cancellationToken)
+        public (int ExitCode, string Output) Run(
+            string executable,
+            IReadOnlyList<string> arguments,
+            TimeSpan timeout,
+            CancellationToken cancellationToken,
+            IReadOnlyDictionary<string, string>? environment = null)
         {
             Commands.Add(arguments);
+            Environments.Add(environment);
             OnRun?.Invoke(executable, arguments);
             return (0, "done");
         }

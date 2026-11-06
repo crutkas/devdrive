@@ -99,10 +99,10 @@ public sealed class LocalModelReclaimProvider : IReclaimProvider
             });
 
             // A running Ollama that lists models this folder doesn't have keeps them somewhere else (its own OLLAMA_MODELS).
-            if (_runtime.OllamaListed(where.OllamaHost) is { Count: > 0 } listed)
+            if (_runtime.OllamaListed(where.OllamaHost) is { Running: true, Digests.Count: > 0 } served)
             {
                 var here = new HashSet<string>(found.Where(m => m.Tool == LocalModelTools.Ollama).SelectMany(m => m.Names), StringComparer.OrdinalIgnoreCase);
-                int elsewhere = listed.Count(n => !here.Contains(n));
+                int elsewhere = served.Digests.Keys.Count(n => !here.Contains(n));
                 if (elsewhere > 0)
                 {
                     Gap(where.OllamaModels, elsewhere == 1 ? "Ollama lists a model that isn't in this folder" : $"Ollama lists {elsewhere} models that aren't in this folder");
