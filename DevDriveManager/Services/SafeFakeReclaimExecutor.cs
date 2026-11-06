@@ -36,7 +36,7 @@ public sealed class SafeFakeReclaimExecutor(Func<string, RecycleBinVolumeSetting
         IReadOnlyList<ReclaimCandidate> roots = ReclaimOverlapResolver.Roots(selection);
         IReadOnlyDictionary<string, string> containers = ReclaimOverlapResolver.ContainerByPath(selection);
         var rootPaths = new HashSet<string>(roots.Select(r => r.Path), StringComparer.OrdinalIgnoreCase);
-        Func<ReclaimCandidate, RecycleBinCheck> preflight = RecycleBinPreflight.CreateChecker(readBinSettings);
+        Func<ReclaimCandidate, RecycleBinCheck> preflight = RecycleBinPreflight.CreateBudget(roots, readBinSettings);
 
         var outcomes = new List<ReclaimItemOutcome>(selection.Count);
         long freed = 0;

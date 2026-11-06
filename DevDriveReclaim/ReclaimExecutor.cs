@@ -17,7 +17,9 @@ namespace DevDriveReclaim;
 /// <para>
 /// <b>The Recycle Bin is preferred, and a promise of it is kept.</b> <c>FOF_ALLOWUNDO</c> silently
 /// degrades to a permanent delete when an item is too large for the bin or the volume has recycling
-/// disabled. So every item that asks for the bin is checked against the volume's bin settings first
+/// disabled, and an item bigger than the room the bin has left makes the shell delete the bin's oldest
+/// items for good. So every item that asks for the bin is checked against the volume's bin settings and
+/// what the bin holds, just before it goes
 /// (<see cref="RecycleBinPreflight"/>), and one the shell would not recycle is <em>left in place</em>
 /// and reported, never nuked: the confirmation told the user it could be restored, and only
 /// <see cref="ReclaimPlan.ConsentedSelection"/> — which marks items the confirmation named as permanent —
@@ -90,9 +92,12 @@ public sealed class ReclaimExecutor : IReclaimExecutor
         var completion = new TaskCompletionSource<ReclaimOutcome>(
             TaskCreationOptions.RunContinuationsAsynchronously);
 
-        // Fresh per run: the settings are read again rather than trusted from the confirmation, in
-        // case the bin was resized or switched off while the dialog was open.
-        Func<ReclaimCandidate, RecycleBinCheck> preflight = RecycleBinPreflight.CreateChecker(_readBinSettings);
+        // Read again for each item rather than trusted from the confirmation: the bin can be resized or switched off while
+        // the dialog is open, and what it holds changes as this run empties it and fills it. An item that no longer fits is
+        // kept, so the shell never makes room by deleting, for good, what this run recycled first.
+        Func<string, RecycleBinVolumeSettings?> read = _readBinSettings;
+        Func<ReclaimCandidate, RecycleBinCheck> preflight =
+            candidate => RecycleBinPreflight.Evaluate(candidate.SizeBytes, read(candidate.VolumeRoot));
 
         var thread = new Thread(() =>
         {

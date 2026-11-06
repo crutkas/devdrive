@@ -173,7 +173,7 @@ public sealed partial class ReclaimViewModel : ObservableObject
     private readonly IReclaimExecutor _executor;
     private readonly Func<string, RecycleBinVolumeSettings?> _readBinSettings;
     private IReadOnlyList<StorageVolume>? _cachedVolumes;
-    private Func<ReclaimCandidate, RecycleBinCheck>? _cachedBinCheck;
+    private Func<string, RecycleBinVolumeSettings?>? _cachedBinSettings;
     private CancellationTokenSource? _scanCts;
     private CancellationTokenSource? _reclaimCts;
 
@@ -506,7 +506,7 @@ public sealed partial class ReclaimViewModel : ObservableObject
         // The plan is built from fresh Recycle Bin settings and is the one thing both the dialog and
         // the run read from. Anything the bin would refuse is named as permanent before the user
         // agrees, and only those items are released for permanent deletion afterwards.
-        ReclaimPlan plan = ReclaimPlan.Create(selection, RecycleBinPreflight.CreateChecker(_readBinSettings));
+        ReclaimPlan plan = ReclaimPlan.Create(selection, _readBinSettings);
 
         if (!await confirm(ReclaimConfirmationRequest.FromPlan(plan, VolumeSplitText)))
         {
@@ -788,7 +788,7 @@ public sealed partial class ReclaimViewModel : ObservableObject
 
         // The after-picture uses the same plan the confirmation will: only what is deleted outright
         // (or emptied from a bin) moves the free-space needle. Recycled bytes stay on the volume.
-        RefreshVolumeImpacts(candidates.Count == 0 ? ReclaimPlan.Empty : ReclaimPlan.Create(candidates, BinCheck()));
+        RefreshVolumeImpacts(candidates.Count == 0 ? ReclaimPlan.Empty : ReclaimPlan.Create(candidates, BinSettings()));
     }
 
     /// <summary>
@@ -796,8 +796,8 @@ public sealed partial class ReclaimViewModel : ObservableObject
     /// and dropped by <see cref="InvalidateVolumes"/>, because this runs once per checkbox tick and
     /// the settings only change outside the app.
     /// </summary>
-    private Func<ReclaimCandidate, RecycleBinCheck> BinCheck() =>
-        _cachedBinCheck ??= RecycleBinPreflight.CreateChecker(_readBinSettings);
+    private Func<string, RecycleBinVolumeSettings?> BinSettings() =>
+        _cachedBinSettings ??= RecycleBinPreflight.Cached(_readBinSettings);
 
     /// <summary>
     /// Rebuilds the per-volume impact rows from a cached enumeration.
@@ -845,7 +845,7 @@ public sealed partial class ReclaimViewModel : ObservableObject
     private void InvalidateVolumes()
     {
         _cachedVolumes = null;
-        _cachedBinCheck = null;
+        _cachedBinSettings = null;
     }
 
     /// <summary>

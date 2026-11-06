@@ -30,8 +30,8 @@ public sealed record PlannedRemoval(ReclaimCandidate Candidate, ReclaimRoute Rou
 /// <remarks>
 /// <para>
 /// One plan feeds the confirmation, the per-volume after-picture and the run, so the three cannot
-/// disagree. A root the shell would not recycle — too large for the bin, a bin that is switched off —
-/// is moved into the permanent group <em>here</em>, so the confirmation names it as permanent before
+/// disagree. A root the shell would not recycle — too large for the bin, more than the room the bin has left, a bin that is
+/// switched off — is moved into the permanent group <em>here</em>, so the confirmation names it as permanent before
 /// the user agrees, and <see cref="ConsentedSelection"/> is what tells the executor that agreement was
 /// given. Anything the plan still calls recyclable is refused rather than nuked if the shell turns out
 /// to disagree at run time.
@@ -69,7 +69,7 @@ public sealed class ReclaimPlan
 
     /// <summary>
     /// Builds the plan for <paramref name="selection"/>. <paramref name="preflight"/> is consulted only
-    /// for roots that ask for the Recycle Bin; see <see cref="RecycleBinPreflight.CreateChecker"/>.
+    /// for roots that ask for the Recycle Bin, in the overlap resolver's order; see <see cref="RecycleBinPreflight.CreateBudget"/>.
     /// </summary>
     public static ReclaimPlan Create(
         IEnumerable<ReclaimCandidate> selection,
@@ -78,8 +78,37 @@ public sealed class ReclaimPlan
         ArgumentNullException.ThrowIfNull(selection);
         ArgumentNullException.ThrowIfNull(preflight);
 
+        return Build(ReclaimOverlapResolver.Roots(selection), preflight);
+    }
+
+    /// <summary>
+    /// Builds the plan for <paramref name="selection"/> from each volume's Recycle Bin settings, sharing a bin's room across
+    /// the roots that ask for it. The room goes to what's hardest to get back first (Careful, then Check, then Safe), and
+    /// smaller items first within a tier, so the most items stay restorable; what doesn't fit is in the permanent group.
+    /// </summary>
+    public static ReclaimPlan Create(
+        IEnumerable<ReclaimCandidate> selection,
+        Func<string, RecycleBinVolumeSettings?> readSettings)
+    {
+        ArgumentNullException.ThrowIfNull(selection);
+        ArgumentNullException.ThrowIfNull(readSettings);
+
+        IReadOnlyList<ReclaimCandidate> roots = ReclaimOverlapResolver.Roots(selection);
+        Func<ReclaimCandidate, RecycleBinCheck> budget = RecycleBinPreflight.CreateBudget(roots, readSettings);
+        var checks = new Dictionary<string, RecycleBinCheck>(StringComparer.OrdinalIgnoreCase);
+        foreach (ReclaimCandidate root in roots.Where(r => r.SupportsRecycleBin)
+            .OrderByDescending(r => r.Risk).ThenBy(r => r.SizeBytes).ThenBy(r => r.Path, StringComparer.OrdinalIgnoreCase))
+        {
+            checks[root.Path] = budget(root);
+        }
+
+        return Build(roots, root => checks[root.Path]);
+    }
+
+    private static ReclaimPlan Build(IReadOnlyList<ReclaimCandidate> roots, Func<ReclaimCandidate, RecycleBinCheck> preflight)
+    {
         List<PlannedRemoval> items = [];
-        foreach (ReclaimCandidate root in ReclaimOverlapResolver.Roots(selection))
+        foreach (ReclaimCandidate root in roots)
         {
             if (!root.SupportsRecycleBin)
             {
