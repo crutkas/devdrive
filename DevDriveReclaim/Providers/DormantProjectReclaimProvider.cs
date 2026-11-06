@@ -30,7 +30,7 @@ public sealed class DormantProjectReclaimProvider(IWorktreeInspector? inspector 
         "Dormant projects",
         "Repositories nothing has touched in months. Only you know whether they are finished — nothing here is preselected.",
         "\uE8F1",
-        order: 4);
+        order: 5);
 
     public ReclaimCategory Category => ReclaimCategory;
 

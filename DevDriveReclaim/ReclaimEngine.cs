@@ -9,9 +9,13 @@ public sealed record ReclaimCategoryResult(
     ImmutableArray<ReclaimCandidate> Candidates,
     string? FailureReason = null,
     TimeSpan Elapsed = default,
-    bool Cancelled = false)
+    bool Cancelled = false,
+    IReadOnlyList<ReclaimGap>? Gaps = null)
 {
     public bool Succeeded => FailureReason is null;
+
+    /// <summary>Places this category couldn't read: what it found is a floor, not everything there is.</summary>
+    public IReadOnlyList<ReclaimGap> Unread => Gaps ?? [];
 
     /// <summary>Reclaimable bytes in this category, with nesting inside the category resolved.</summary>
     public long TotalBytes => ReclaimOverlapResolver.ReclaimableBytes(Candidates);
@@ -68,6 +72,10 @@ public sealed class ReclaimResult
 
     /// <summary>True when the scan ran to completion with every category checked.</summary>
     public bool Complete => Categories.All(c => c.Succeeded);
+
+    /// <summary>Categories that finished but couldn't read every place they looked, so what they found is a floor.</summary>
+    public ImmutableArray<ReclaimCategoryResult> PartlyReadCategories =>
+        [.. Categories.Where(c => c.Succeeded && c.Unread.Count > 0)];
 
     /// <summary>Reclaimable bytes in a risk tier, nesting resolved within that tier.</summary>
     public long BytesFor(ReclaimRisk risk) =>
@@ -160,7 +168,8 @@ public sealed class ReclaimEngine(IEnumerable<IReclaimProvider> providers)
                 provider.Category.Id, $"{provider.Category.Title} complete", capped.Length));
 
             return new ReclaimCategoryResult(
-                provider.Category, capped, Elapsed: Stopwatch.GetElapsedTime(startedAt));
+                provider.Category, capped, Elapsed: Stopwatch.GetElapsedTime(startedAt),
+                Gaps: [.. context.Gaps.Where(g => string.Equals(g.CategoryId, provider.Category.Id, StringComparison.Ordinal))]);
         }
         catch (OperationCanceledException)
         {

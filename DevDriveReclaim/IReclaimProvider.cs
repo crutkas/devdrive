@@ -16,6 +16,7 @@ namespace DevDriveReclaim;
 public sealed class ReclaimScanContext
 {
     private readonly object _repositoryGate = new();
+    private readonly System.Collections.Concurrent.ConcurrentQueue<ReclaimGap> _gaps = new();
     private IReadOnlyList<DiscoveredRepository>? _repositories;
 
     public ReclaimScanContext(
@@ -53,6 +54,19 @@ public sealed class ReclaimScanContext
 
     /// <summary>Hard cap per category, so one pathological tree cannot produce an unusable table.</summary>
     public int MaximumCandidatesPerCategory { get; }
+
+    /// <summary>
+    /// Records a place a provider looked and couldn't read. The engine attaches it to that provider's category, so a folder
+    /// that was denied reads as "couldn't read" rather than as nothing found.
+    /// </summary>
+    public void ReportGap(ReclaimGap gap)
+    {
+        ArgumentNullException.ThrowIfNull(gap);
+        _gaps.Enqueue(gap);
+    }
+
+    /// <summary>The places providers couldn't read in this scan, so far.</summary>
+    public IReadOnlyList<ReclaimGap> Gaps => [.. _gaps];
 
     /// <summary>
     /// Every git repository and worktree beneath <see cref="SourceRoots"/>, walked at most once per

@@ -52,7 +52,7 @@ public sealed class DuplicateFileReclaimProvider : IReclaimProvider
         "Duplicate files",
         "Large files that exist byte-for-byte in more than one place. One copy is kept; the rest are listed.",
         "\uE8C8",
-        order: 5);
+        order: 6);
 
     public ReclaimCategory Category => ReclaimCategory;
 

@@ -7,7 +7,7 @@ namespace DevDriveReclaim;
 /// is not, and empties a volume's bin when the candidate is a bin.
 /// </summary>
 /// <remarks>
-/// Three decisions shape this class.
+/// Four decisions shape this class.
 /// <para>
 /// <b>Nesting is resolved before anything is removed.</b> The selection is reduced to containment
 /// roots, exactly as the totals are. Without that, deleting a worktree and then the <c>obj</c> folder
@@ -37,10 +37,16 @@ namespace DevDriveReclaim;
 /// which is the worst property a delete call can have — it means the failure mode is rare, timing
 /// dependent, and discovered on someone else's machine.
 /// </para>
+/// <para>
+/// <b>What a tool owns, the tool removes.</b> A candidate with an <see cref="ReclaimCandidate.Owner"/> (an AI
+/// model) is handed to <see cref="IReclaimOwnerRemoval"/> after the guard, never deleted as a path: its manager's
+/// records have to stay right, and its files can be shared with models that stay.
+/// </para>
 /// </remarks>
 public sealed class ReclaimExecutor : IReclaimExecutor
 {
     private readonly Func<string, RecycleBinVolumeSettings?> _readBinSettings;
+    private readonly IReclaimOwnerRemoval _owners;
 
     public ReclaimExecutor()
         : this(RecycleBinPreflight.ReadSettings)
@@ -52,9 +58,21 @@ public sealed class ReclaimExecutor : IReclaimExecutor
     /// refuse an item without changing the developer's real settings.
     /// </param>
     public ReclaimExecutor(Func<string, RecycleBinVolumeSettings?> readBinSettings)
+        : this(readBinSettings, Providers.Models.LocalModelRemoval.Default)
+    {
+    }
+
+    /// <param name="readBinSettings">Where the Recycle Bin settings come from.</param>
+    /// <param name="owners">
+    /// What removes a candidate that has an <see cref="ReclaimCandidate.Owner"/>. Injectable so tests never reach a real model
+    /// manager.
+    /// </param>
+    public ReclaimExecutor(Func<string, RecycleBinVolumeSettings?> readBinSettings, IReclaimOwnerRemoval owners)
     {
         ArgumentNullException.ThrowIfNull(readBinSettings);
+        ArgumentNullException.ThrowIfNull(owners);
         _readBinSettings = readBinSettings;
+        _owners = owners;
     }
 
     public Task<ReclaimOutcome> ExecuteAsync(
@@ -80,7 +98,7 @@ public sealed class ReclaimExecutor : IReclaimExecutor
         {
             try
             {
-                completion.SetResult(Run(selection, preflight, progress, cancellationToken));
+                completion.SetResult(Run(selection, preflight, _owners, progress, cancellationToken));
             }
             catch (Exception exception)
             {
@@ -101,6 +119,7 @@ public sealed class ReclaimExecutor : IReclaimExecutor
     private static ReclaimOutcome Run(
         IReadOnlyList<ReclaimCandidate> selection,
         Func<ReclaimCandidate, RecycleBinCheck> preflight,
+        IReclaimOwnerRemoval owners,
         IProgress<ReclaimExecutionProgress>? progress,
         CancellationToken cancellationToken)
     {
@@ -144,7 +163,7 @@ public sealed class ReclaimExecutor : IReclaimExecutor
                 continue;
             }
 
-            ReclaimItemOutcome outcome = Remove(candidate, preflight);
+            ReclaimItemOutcome outcome = Remove(candidate, preflight, owners, cancellationToken);
             outcomes.Add(outcome);
             rootOutcomes[candidate.Path] = outcome;
 
@@ -201,7 +220,10 @@ public sealed class ReclaimExecutor : IReclaimExecutor
         string.Equals(candidate.CategoryId, "recycle-bin", StringComparison.OrdinalIgnoreCase);
 
     private static ReclaimItemOutcome Remove(
-        ReclaimCandidate candidate, Func<ReclaimCandidate, RecycleBinCheck> preflight)
+        ReclaimCandidate candidate,
+        Func<ReclaimCandidate, RecycleBinCheck> preflight,
+        IReclaimOwnerRemoval owners,
+        CancellationToken cancellationToken)
     {
         ReclaimGuardVerdict verdict = ReclaimPathGuard.Inspect(candidate);
 
@@ -223,6 +245,13 @@ public sealed class ReclaimExecutor : IReclaimExecutor
 
         try
         {
+            // Its tool removes it: deleting the path would leave the tool's records pointing at nothing, or take files another
+            // candidate still needs.
+            if (candidate.Owner is not null)
+            {
+                return owners.Remove(candidate, cancellationToken);
+            }
+
             if (verdict.Kind == ReclaimTargetKind.RecycleBin)
             {
                 return EmptyRecycleBin(candidate, path);

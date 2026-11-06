@@ -132,6 +132,13 @@ public sealed class SafeFakeReclaimExecutor(Func<string, RecycleBinVolumeSetting
                 $"emptied the Recycle Bin on {candidate.VolumeRoot.TrimEnd('\\')}");
         }
 
+        // An owned candidate (a model) goes through its manager, which keeps it while it's in use. Asking is read-only.
+        if (candidate.Owner is not null &&
+            DevDriveReclaim.Providers.Models.LocalModelRemoval.Default.WhyKept(candidate) is { } why)
+        {
+            return new ReclaimItemOutcome(candidate, ReclaimItemStatus.Failed, 0, $"kept — {why}");
+        }
+
         if (!candidate.SupportsRecycleBin)
         {
             return new ReclaimItemOutcome(

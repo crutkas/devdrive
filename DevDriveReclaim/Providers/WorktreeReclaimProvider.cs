@@ -22,7 +22,7 @@ public sealed class WorktreeReclaimProvider(IWorktreeInspector? inspector = null
         "Worktrees",
         "Extra working copies created by git worktree add. Clean ones cost nothing to remove; dirty ones hold the only copy of that work.",
         "\uE8B7",
-        order: 3);
+        order: 4);
 
     public ReclaimCategory Category => ReclaimCategory;
 
