@@ -20,6 +20,7 @@ public static class ReclaimRegistry
         new RecycleBinReclaimProvider(),
         new BuildOutputReclaimProvider(),
         new PackageCacheReclaimProvider(),
+        new Providers.Models.LocalModelReclaimProvider(),
         new WorktreeReclaimProvider(),
         new DormantProjectReclaimProvider(),
         new DuplicateFileReclaimProvider(),

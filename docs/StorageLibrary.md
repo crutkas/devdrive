@@ -207,6 +207,40 @@ agree with what Space will measure afterwards. Two rules keep them honest
   item it promised to recycle that the bin now refuses, and asks the shell
   (`FOF_WANTNUKEWARNING`) to warn before any permanent delete nothing predicted.
 
+## Reclaim: AI models
+
+The **AI models** category (`DevDriveReclaim/Providers/Models`) lists models that local model
+managers downloaded, one row per model as its manager names it, and removes them through that
+manager. Each manager's folder is found the way the manager finds it (`LocalModelLocations`):
+
+| Manager | Where | A row is | Removed with |
+|---|---|---|---|
+| Ollama | `OLLAMA_MODELS`, else `%USERPROFILE%\.ollama\models` | the names whose manifests (`manifests-v2` and `manifests`) share large blobs | `ollama rm <every name>` |
+| Hugging Face | `HF_HUB_CACHE`, `HUGGINGFACE_HUB_CACHE`, `HF_HOME\hub`, else `%USERPROFILE%\.cache\huggingface\hub`; llama.cpp's `LLAMA_CACHE` too | a `models--org--name` folder, every revision | its folder, then each shared stored file only it used (as `hf cache rm` does) |
+| LM Studio | `~\.lmstudio-home-pointer`'s folder, `~\.cache\lm-studio` or `~\.lmstudio`, then `models` (or `settings.json`'s `downloadsFolder`) | a `publisher\model` folder with `.gguf` files | its folder (as My Models › Delete does) |
+| Foundry Local | `foundry cache location`, else `%USERPROFILE%\.foundry\cache\models` | a `publisher\model` folder with an `inference_model.json` | `foundry cache remove <id> --force` |
+| Model files | GPT4All's folder, and folders the host adds | a `.gguf` file | the file |
+
+- **Sizes count a file once.** An Ollama blob two rows use, a Hugging Face stored file
+  (`blobs\<xx>\<hash>`, listed in its `.refs`) another repo links to, or a file with another hard
+  link is freed by neither row alone, so it's in neither's size (the row says how much it shares).
+  Symbolic links cost nothing.
+- **A place that can't be read is a gap, not zero.** Providers report it with
+  `ReclaimScanContext.ReportGap`; it reaches `ReclaimCategoryResult.Unread`, and
+  `ReclaimResult.PartlyReadCategories` says the total is a floor. A running Ollama that lists models
+  this folder doesn't have is a gap too.
+- **Nothing in use is removed.** `ReclaimCandidate.Owner` sends a model to `IReclaimOwnerRemoval`
+  (`LocalModelRemoval`) instead of a path delete. It keeps a model Ollama or Foundry Local has loaded,
+  one whose large files another program has open or mapped, one whose manager isn't installed, and
+  an Ollama model whose names changed since the scan. A folder is renamed aside before it's deleted;
+  Windows refuses that while a file in it is open, so a model is never half-deleted. `WhyKept` is
+  read-only, for a dry run.
+- **Every row is Check and permanent.** A model downloads again, but it can be big, and one someone
+  made or imported may exist nowhere else. Nothing is called idle and nothing is preselected.
+- **Not read:** AI Toolkit for VS Code (its `my-models.yml` would go stale), AI Dev Gallery (its
+  `cache.json`), Jan, PyTorch Hub and Whisper caches, and Windows' own AI models, which Windows
+  manages.
+
 ## Swapping a source
 
 Only one seam changes: implement `IStorageSnapshotSource` and inject it where

@@ -131,7 +131,7 @@ public sealed class ReclaimEngineTests
         CollectionAssert.AreEqual(
             new[]
             {
-                "recycle-bin", "build-outputs", "package-caches",
+                "recycle-bin", "build-outputs", "package-caches", "ai-models",
                 "worktrees", "dormant-projects", "duplicates",
             },
             ids);

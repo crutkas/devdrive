@@ -84,7 +84,8 @@ public sealed record ReclaimCandidate
         DateTimeOffset? lastUsedUtc = null,
         int itemCount = 0,
         string? detail = null,
-        bool supportsRecycleBin = true)
+        bool supportsRecycleBin = true,
+        ReclaimOwner? owner = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(categoryId);
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
@@ -104,7 +105,8 @@ public sealed record ReclaimCandidate
         LastUsedUtc = lastUsedUtc;
         ItemCount = itemCount;
         Detail = detail;
-        SupportsRecycleBin = supportsRecycleBin;
+        SupportsRecycleBin = supportsRecycleBin && owner is null;
+        Owner = owner;
     }
 
     public string CategoryId { get; }
@@ -144,6 +146,13 @@ public sealed record ReclaimCandidate
     public bool SupportsRecycleBin { get; }
 
     /// <summary>
+    /// The tool that removes this candidate, when deleting <see cref="Path"/> isn't how it goes: a model manager whose files
+    /// other models share, or whose own records must stay right. Null for everything removed as a path. A candidate with an
+    /// owner never goes to the Recycle Bin, because its tool deletes it.
+    /// </summary>
+    public ReclaimOwner? Owner { get; }
+
+    /// <summary>
     /// The same candidate, marked for permanent deletion. Only <see cref="ReclaimPlan.ConsentedSelection"/>
     /// should call this: it is the record that the confirmation named the item as permanent.
     /// </summary>
@@ -151,7 +160,7 @@ public sealed record ReclaimCandidate
         SupportsRecycleBin
             ? new ReclaimCandidate(
                 CategoryId, Path, DisplayName, SizeBytes, Risk, Reason, RecoveryHint,
-                LastUsedUtc, ItemCount, Detail, supportsRecycleBin: false)
+                LastUsedUtc, ItemCount, Detail, supportsRecycleBin: false, Owner)
             : this;
 
     /// <summary>The volume root this path lives on, e.g. <c>C:\</c>. Drives the per-volume projection.</summary>
@@ -163,3 +172,25 @@ public sealed record ReclaimCandidate
         ? Math.Max(0, (int)(DateTimeOffset.UtcNow - used).TotalDays)
         : null;
 }
+
+/// <summary>
+/// Who removes a candidate that isn't removed by deleting its path, and what that tool calls it.
+/// </summary>
+/// <param name="Tool">The tool's id, e.g. <c>ollama</c> or <c>huggingface</c>; see <see cref="Providers.Models.LocalModelTools"/>.</param>
+/// <param name="Title">The tool's name as people know it, e.g. "Ollama" or "GPT4All".</param>
+/// <param name="Store">The folder the tool keeps these in, as the scan found it.</param>
+/// <param name="Names">
+/// Every name the tool knows this candidate by. Removing the candidate removes all of them: a model saved under two names is one
+/// set of files, and removing one name frees nothing.
+/// </param>
+public sealed record ReclaimOwner(string Tool, string Title, string Store, IReadOnlyList<string> Names)
+{
+    /// <summary>The names as one line, e.g. <c>qwen3:8b, qwen3:latest</c>.</summary>
+    public string NamesText => string.Join(", ", Names);
+}
+
+/// <summary>A place a provider looked and couldn't read, so its category is a floor rather than a count.</summary>
+/// <param name="CategoryId">The category the place belongs to.</param>
+/// <param name="Location">The folder or tool that couldn't be read.</param>
+/// <param name="Reason">Why, in a few words.</param>
+public sealed record ReclaimGap(string CategoryId, string Location, string Reason);
