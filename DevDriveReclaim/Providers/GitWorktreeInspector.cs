@@ -31,6 +31,9 @@ public sealed record WorktreeState(
     public static WorktreeState Unknown => new(null, true, 0, true, 0, false, HasUpstream: false);
 }
 
+/// <summary>How a git command ended: its exit code and what it printed.</summary>
+internal sealed record GitResult(int ExitCode, string Output);
+
 /// <summary>Abstracted so the risk-grading logic can be tested without a real git repository.</summary>
 public interface IWorktreeInspector
 {
@@ -68,6 +71,15 @@ public sealed class GitWorktreeInspector : IWorktreeInspector
 {
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
 
+    private readonly Func<string, string, CancellationToken, GitResult?> _git;
+
+    public GitWorktreeInspector() : this(Run)
+    {
+    }
+
+    /// <summary>Test seam: answers in place of the git executable.</summary>
+    internal GitWorktreeInspector(Func<string, string, CancellationToken, GitResult?> git) => _git = git;
+
     public WorktreeState Inspect(string worktreePath, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(worktreePath) || !Directory.Exists(worktreePath))
@@ -77,7 +89,15 @@ public sealed class GitWorktreeInspector : IWorktreeInspector
 
         try
         {
-            string? branch = Run(worktreePath, "rev-parse --abbrev-ref HEAD", cancellationToken)?.Trim();
+            // A rev-parse that failed or timed out says nothing about HEAD. Read as "not detached",
+            // it would grade a detached worktree's commits on no branch as merely unpushed — Check
+            // instead of Careful, and differently from one scan to the next — so it is Unknown.
+            GitResult? head = _git(worktreePath, "rev-parse --abbrev-ref HEAD", cancellationToken);
+            string? branch = head is { ExitCode: 0 } ? head.Output.Trim() : null;
+            if (string.IsNullOrEmpty(branch))
+            {
+                return WorktreeState.Unknown;
+            }
 
             // git reports a detached HEAD as the literal string "HEAD". That is not a branch name,
             // and the difference decides whether deleting the folder loses anything: a worktree on a
@@ -94,13 +114,13 @@ public sealed class GitWorktreeInspector : IWorktreeInspector
             // the traditional (collapsing) form, so a fully-ignored directory costs one line rather
             // than one line per file — measured at ~180ms per worktree against plain status, which
             // is affordable against a worktree pass already measured in tens of seconds.
-            string? status = Run(worktreePath, "status --porcelain --ignored", cancellationToken);
-            if (status is null)
+            GitResult? status = _git(worktreePath, "status --porcelain --ignored", cancellationToken);
+            if (status is not { ExitCode: 0 })
             {
                 return WorktreeState.Unknown;
             }
 
-            string[] lines = status
+            string[] lines = status.Output
                 .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
             string[] changed = lines.Where(static line => !line.StartsWith("!!", StringComparison.Ordinal)).ToArray();
@@ -111,11 +131,17 @@ public sealed class GitWorktreeInspector : IWorktreeInspector
                 .Where(LocalOnlyContent.IsIrreplaceable)
                 .ToArray();
 
-            // "@{u}" resolves the upstream branch. A non-null result with content means commits
-            // exist locally that the remote has never seen.
-            string? ahead = Run(worktreePath, "log --oneline @{u}..HEAD", cancellationToken);
-            bool hasUpstream = ahead is not null;
-            string[] unpushed = (ahead ?? string.Empty)
+            // "@{u}" resolves the upstream branch. git exits with an error when there is none; a
+            // git that could not run or timed out is not that answer, and is Unknown like the rest.
+            // Output means commits exist locally that the remote has never seen.
+            GitResult? ahead = _git(worktreePath, "log --oneline @{u}..HEAD", cancellationToken);
+            if (ahead is null)
+            {
+                return WorktreeState.Unknown;
+            }
+
+            bool hasUpstream = ahead.ExitCode == 0;
+            string[] unpushed = (hasUpstream ? ahead.Output : string.Empty)
                 .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
             bool merged = branch is not null && IsMergedIntoDefault(worktreePath, branch, cancellationToken);
@@ -148,21 +174,21 @@ public sealed class GitWorktreeInspector : IWorktreeInspector
             return 0;
         }
 
-        string? list = Run(repositoryPath, "stash list", cancellationToken);
+        GitResult? list = _git(repositoryPath, "stash list", cancellationToken);
 
-        return list is null
+        return list is not { ExitCode: 0 }
             ? 0
-            : list.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Length;
+            : list.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Length;
     }
 
-    private static bool IsMergedIntoDefault(
+    private bool IsMergedIntoDefault(
         string worktreePath, string branch, CancellationToken cancellationToken)
     {
         foreach (string candidate in (string[])["origin/main", "origin/master", "main", "master"])
         {
-            string? merged = Run(
+            GitResult? merged = _git(
                 worktreePath, $"branch --merged {candidate} --list {branch}", cancellationToken);
-            if (!string.IsNullOrWhiteSpace(merged))
+            if (merged is { ExitCode: 0 } && !string.IsNullOrWhiteSpace(merged.Output))
             {
                 return true;
             }
@@ -183,7 +209,10 @@ public sealed class GitWorktreeInspector : IWorktreeInspector
     private static string Unquote(string value) =>
         value.Length >= 2 && value[0] == '"' && value[^1] == '"' ? value[1..^1] : value;
 
-    /// <summary>Runs git and returns stdout, or null when git failed, was missing, or timed out.</summary>
+    /// <summary>
+    /// Runs git and returns its exit code and stdout, or null when git was missing, failed to start,
+    /// or timed out — which is not an answer, unlike an exit code.
+    /// </summary>
     /// <remarks>
     /// <para>
     /// The reads are asynchronous and the wait is bounded, and both of those are load-bearing.
@@ -204,7 +233,7 @@ public sealed class GitWorktreeInspector : IWorktreeInspector
     /// so a single hang stalls the whole Reclaim scan indefinitely.
     /// </para>
     /// </remarks>
-    private static string? Run(string workingDirectory, string arguments, CancellationToken cancellationToken)
+    private static GitResult? Run(string workingDirectory, string arguments, CancellationToken cancellationToken)
     {
         try
         {
@@ -269,7 +298,7 @@ public sealed class GitWorktreeInspector : IWorktreeInspector
 
             lock (output)
             {
-                return process.ExitCode == 0 ? output.ToString() : null;
+                return new GitResult(process.ExitCode, output.ToString());
             }
         }
         catch (OperationCanceledException)

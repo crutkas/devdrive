@@ -458,4 +458,68 @@ public sealed class GitWorktreeInspectorTests
         Assert.AreEqual(1, inspector.StashCount(parent, CancellationToken.None),
             "deleting the worktree folder must not lose the stash it created");
     }
+    /// <summary>
+    /// What a fake git answers for a worktree on <paramref name="head"/> with nothing changed and no
+    /// upstream, except for the command <paramref name="failing"/>, which answers <paramref name="failure"/>.
+    /// </summary>
+    private static GitWorktreeInspector FakeGit(string head, string failing, GitResult? failure) =>
+        new((_, arguments, _) => arguments.StartsWith(failing, StringComparison.Ordinal) ? failure
+            : arguments.StartsWith("rev-parse", StringComparison.Ordinal) ? new GitResult(0, head + "\n")
+            : arguments.StartsWith("log", StringComparison.Ordinal) ? new GitResult(128, string.Empty)
+            : new GitResult(0, string.Empty));
+
+    /// <summary>
+    /// A detached worktree whose HEAD could not be read was taken for one on a branch: its commits on
+    /// no branch graded Check (no upstream) on one scan and Careful on the next. A rev-parse that
+    /// timed out or failed now says nothing, which is Unknown, and Unknown grades Careful.
+    /// </summary>
+    [TestMethod]
+    [DataRow(null, DisplayName = "timed out or didn't start")]
+    [DataRow(128, DisplayName = "failed")]
+    public void AHeadThatCannotBeReadIsUnknownAndGradedCareful(int? exitCode)
+    {
+        using var fixture = new ReclaimFixture();
+        string folder = fixture.Dir("bisect");
+        GitResult? failure = exitCode is { } code ? new GitResult(code, string.Empty) : null;
+
+        WorktreeState state = FakeGit("HEAD", "rev-parse", failure).Inspect(folder, CancellationToken.None);
+
+        Assert.IsTrue(state.HasUncommittedChanges, "Unknown is the Careful-grading sentinel");
+        Assert.IsNull(state.Branch);
+        Assert.AreEqual(ReclaimRisk.Careful, WorktreeReclaimProvider.GradeForTest(state, "bisect").Risk);
+    }
+
+    [TestMethod]
+    public void TheSameDetachedWorktreeAnsweredIsGradedCarefulForItsCommits()
+    {
+        using var fixture = new ReclaimFixture();
+        string folder = fixture.Dir("bisect");
+
+        WorktreeState state = FakeGit("HEAD", "none", null).Inspect(folder, CancellationToken.None);
+
+        Assert.IsTrue(state.IsDetached);
+        Assert.IsFalse(state.HasUncommittedChanges);
+        var grade = WorktreeReclaimProvider.GradeForTest(state, "bisect");
+        Assert.AreEqual(ReclaimRisk.Careful, grade.Risk);
+        Assert.AreEqual("detached HEAD · commits on no branch", grade.Detail);
+    }
+
+    /// <summary>
+    /// git exits with an error when a branch has no upstream, which is an answer (Check). A git that
+    /// timed out reading the upstream is not, and must not read as "no upstream".
+    /// </summary>
+    [TestMethod]
+    public void AnUpstreamThatCannotBeReadIsUnknownRatherThanNoUpstream()
+    {
+        using var fixture = new ReclaimFixture();
+        string folder = fixture.Dir("feature");
+
+        WorktreeState answered = FakeGit("feature", "none", null).Inspect(folder, CancellationToken.None);
+        Assert.IsFalse(answered.HasUpstream);
+        Assert.IsFalse(answered.HasUncommittedChanges);
+
+        WorktreeState timedOut = FakeGit("feature", "log", null).Inspect(folder, CancellationToken.None);
+        Assert.IsTrue(timedOut.HasUncommittedChanges, "Unknown is the Careful-grading sentinel");
+        Assert.AreEqual(ReclaimRisk.Careful, WorktreeReclaimProvider.GradeForTest(timedOut, "feature").Risk);
+    }
 }
