@@ -233,8 +233,10 @@ manager. Each manager's folder is found the way the manager finds it (`LocalMode
   (`LocalModelRemoval`) instead of a path delete. It keeps a model Ollama or Foundry Local has loaded,
   one whose manager isn't installed, and an Ollama model whose names changed since the scan. `ollama rm`
   runs only against a running Ollama that serves each name from the manifest scanned (`/api/tags`'
-  digest is the manifest file's SHA-256), with that Ollama's `OLLAMA_HOST`, so it never removes from
-  another models folder and never has to start the app. A model's files, and the Hugging Face stored
+  digest is the manifest file's SHA-256) and loads its weights from this folder (`/api/show`'s `FROM`
+  path is the same file as this folder's blob; a pulled manifest is the same bytes in every folder),
+  with that Ollama's `OLLAMA_HOST`, so it never removes from another models folder and never has to
+  start the app. A model's files, and the Hugging Face stored
   files only it uses (under huggingface_hub's locks), are deleted together or not at all
   (`ModelFiles.DeleteTogether`): each is opened exclusively and given the classic delete disposition,
   which Windows refuses while a program has the file open or mapped, as llama.cpp maps a loaded model.

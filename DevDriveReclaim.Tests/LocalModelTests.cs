@@ -136,6 +136,30 @@ public sealed class LocalModelTests
     }
 
     [TestMethod]
+    public void AnOllamaServingTheSameModelFromAnotherFolderIsntAskedToRemoveIt()
+    {
+        using var fixture = new ReclaimFixture();
+        var ollama = new OllamaFixture(fixture);
+        string weights = ollama.Blob(2 * MiB);
+        ollama.Manifest("manifests-v2", "ollama.com", "library", "qwen3", "0.6b", weights, [weights]);
+        ReclaimCandidate candidate = Candidate(LocalModelTools.Ollama, ollama.Store, ollama.ManifestPath("qwen3", "0.6b"), "qwen3:0.6b");
+
+        // A pulled manifest is the same bytes in every folder that pulled it, so the old folder's digests match.
+        string old = fixture.Dir("old-ollama");
+        foreach (string file in Directory.EnumerateFiles(ollama.Store, "*", SearchOption.AllDirectories))
+        {
+            string copy = Path.Combine(old, Path.GetRelativePath(ollama.Store, file));
+            Directory.CreateDirectory(Path.GetDirectoryName(copy)!);
+            File.Copy(file, copy);
+        }
+
+        var runtime = new FakeRuntime { Serving = old };
+        StringAssert.Contains(new LocalModelRemoval(runtime, () => ollama.Locations(fixture)).WhyKept(candidate), "another models folder");
+        Assert.AreEqual(ReclaimItemStatus.Failed, new LocalModelRemoval(runtime, () => ollama.Locations(fixture)).Remove(candidate, CancellationToken.None).Status);
+        Assert.IsEmpty(runtime.Commands);
+    }
+
+    [TestMethod]
     public async Task AnOllamaFolderThatCantBeReadKeepsTheModelWithoutStoppingTheRun()
     {
         using var fixture = new ReclaimFixture();
@@ -572,6 +596,18 @@ public sealed class LocalModelTests
             }
 
             return new OllamaServed(true, digests);
+        }
+
+        public string? OllamaWeightsPath(Uri host, string name)
+        {
+            if (Serving is null)
+            {
+                return null;
+            }
+
+            OllamaStore.Entry? entry = OllamaStore.ReadManifests(Serving, _ => { }, CancellationToken.None)
+                .FirstOrDefault(e => string.Equals(e.Name, name, StringComparison.OrdinalIgnoreCase));
+            return entry?.Digests.Select(d => OllamaStore.BlobPath(Serving, d)).FirstOrDefault(File.Exists);
         }
 
         public IReadOnlyList<string>? FoundryLoaded() => FoundryLoadedIds;

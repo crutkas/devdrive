@@ -83,6 +83,19 @@ internal static class ModelFiles
     }
 
     /// <summary>
+    /// Both paths name one file: the same volume and file id, whatever links, short names or case lead there. False when
+    /// either can't be opened.
+    /// </summary>
+    public static bool SameFile(string one, string other)
+    {
+        using SafeFileHandle a = CreateFileW(one, FileReadAttributes, ShareAll, IntPtr.Zero, OpenExisting, BackupSemantics, IntPtr.Zero);
+        using SafeFileHandle b = CreateFileW(other, FileReadAttributes, ShareAll, IntPtr.Zero, OpenExisting, BackupSemantics, IntPtr.Zero);
+        return !a.IsInvalid && !b.IsInvalid &&
+            GetFileInformationByHandle(a, out ByHandleFileInformation x) && GetFileInformationByHandle(b, out ByHandleFileInformation y) &&
+            x.VolumeSerialNumber == y.VolumeSerialNumber && x.FileIndexHigh == y.FileIndexHigh && x.FileIndexLow == y.FileIndexLow;
+    }
+
+    /// <summary>
     /// False when another program has the file open (an exclusive open is refused with a sharing violation). A program that
     /// only maps it, as llama.cpp does, isn't seen here; <see cref="DeleteTogether"/> sees it. Opens and closes at once.
     /// </summary>

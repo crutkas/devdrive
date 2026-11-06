@@ -119,7 +119,7 @@ public sealed partial class LocalModelRemoval : IReclaimOwnerRemoval
                 return "Ollama didn't answer";
             case { Running: false }:
                 return "Ollama isn't running";
-            case { } served when now.Any(e => !Serves(served, e)):
+            case { } served when now.Any(e => !Serves(served, e)) || !LoadsFrom(host, owner):
                 return "Ollama is using another models folder";
         }
 
@@ -135,12 +135,20 @@ public sealed partial class LocalModelRemoval : IReclaimOwnerRemoval
     }
 
     /// <summary>
-    /// The running Ollama serves this name from the manifest scanned here. <c>ollama rm</c> deletes from that Ollama's own
-    /// models folder, which needn't be this one (another <c>OLLAMA_MODELS</c>, WSL, another PC).
+    /// The running Ollama serves this name from the manifest scanned here (it changed since the scan otherwise).
     /// </summary>
     private static bool Serves(OllamaServed served, OllamaStore.Entry entry) =>
         served.Digests.TryGetValue(entry.Name, out string? digest) &&
         string.Equals(digest, OllamaStore.ManifestDigest(entry.Manifest), StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The running Ollama keeps its models in the scanned folder: the file it loads the model's weights from is that folder's
+    /// blob. <c>ollama rm</c> deletes from that Ollama's own folder, and a pulled manifest is the same bytes in every folder
+    /// that pulled it (another <c>OLLAMA_MODELS</c>, WSL, another PC), so the digests alone can't tell.
+    /// </summary>
+    private bool LoadsFrom(Uri host, ReclaimOwner owner) =>
+        _runtime.OllamaWeightsPath(host, owner.Names[0]) is { Length: > 0 } weights &&
+        ModelFiles.SameFile(weights, Path.Combine(owner.Store, "blobs", Path.GetFileName(weights)));
 
     private ReclaimItemOutcome RemoveFromOllama(ReclaimCandidate candidate, CancellationToken cancellationToken)
     {

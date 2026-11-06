@@ -21,6 +21,12 @@ public interface ILocalModelRuntime
     OllamaServed? OllamaListed(Uri host);
 
     /// <summary>
+    /// The file Ollama loads a model's weights from: the <c>FROM</c> line of <c>POST /api/show</c>'s modelfile, a path on the
+    /// machine Ollama runs on. Null when it didn't say.
+    /// </summary>
+    string? OllamaWeightsPath(Uri host, string name);
+
+    /// <summary>
     /// The model ids Foundry Local has loaded: empty when its service isn't running, null when it's running and didn't answer.
     /// Never starts the service.
     /// </summary>
@@ -155,6 +161,33 @@ public sealed class LocalModelRuntime : ILocalModelRuntime
         catch (HttpRequestException exception) when (exception.InnerException is SocketException { SocketErrorCode: SocketError.ConnectionRefused })
         {
             return OllamaServed.NotRunning;
+        }
+        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    public string? OllamaWeightsPath(Uri host, string name)
+    {
+        try
+        {
+            using var body = new StringContent($"{{\"model\":\"{JsonEncodedText.Encode(name)}\"}}", Encoding.UTF8, "application/json");
+            using HttpResponseMessage response = Http.PostAsync(new Uri(host, "api/show"), body).GetAwaiter().GetResult();
+            if (!response.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            using JsonDocument json = JsonDocument.Parse(response.Content.ReadAsStringAsync().GetAwaiter().GetResult());
+            if (!json.RootElement.TryGetProperty("modelfile", out JsonElement modelfile) || modelfile.ValueKind != JsonValueKind.String)
+            {
+                return null;
+            }
+
+            return (modelfile.GetString() ?? string.Empty)
+                .Split('\n', StringSplitOptions.TrimEntries)
+                .FirstOrDefault(line => line.StartsWith("FROM ", StringComparison.Ordinal))?["FROM ".Length..].Trim();
         }
         catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException)
         {
