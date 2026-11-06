@@ -173,14 +173,32 @@ public sealed record ReclaimCandidate
             }
             : this;
 
-    /// <summary>The volume root this path lives on, e.g. <c>C:\</c>. Drives the per-volume projection.</summary>
-    public string VolumeRoot =>
-        System.IO.Path.GetPathRoot(Path) ?? string.Empty;
+    /// <summary>
+    /// The root of the volume this path's bytes are on, e.g. <c>C:\</c>: where the path really leads through any junction or
+    /// symbolic link on the way (<see cref="ReclaimVolume"/>), not the volume it's spelled on. Drives which Recycle Bin the plan
+    /// and the run check an item against and the per-volume projection. Worked out once, on first use.
+    /// </summary>
+    public string VolumeRoot => _volume.Value ??= ReclaimVolume.RootOf(Path);
+
+    private readonly VolumeMemo _volume = new();
 
     /// <summary>Days since last activity, or null when the provider could not tell.</summary>
     public int? DaysSinceLastUse => LastUsedUtc is { } used
         ? Math.Max(0, (int)(DateTimeOffset.UtcNow - used).TotalDays)
         : null;
+
+    /// <summary>
+    /// Holds <see cref="VolumeRoot"/> once it's worked out. Every memo equals every other, so it never makes two candidates
+    /// with the same values unequal.
+    /// </summary>
+    private sealed class VolumeMemo
+    {
+        public string? Value;
+
+        public override bool Equals(object? obj) => obj is VolumeMemo;
+
+        public override int GetHashCode() => 0;
+    }
 }
 
 /// <summary>

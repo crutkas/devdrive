@@ -258,9 +258,10 @@ public static class ReclaimPathGuard
     /// Asks the filesystem what a path really is, via <c>GetFinalPathNameByHandle</c>. Returns null
     /// when the path cannot be opened, in which case the caller falls back to
     /// <see cref="Path.GetFullPath(string)"/> — a weaker answer, but the protected-directory rules
-    /// still run against it.
+    /// still run against it. <see cref="ReclaimVolume"/> asks the same question to find the volume a
+    /// path's bytes are on.
     /// </summary>
-    private static string? TryResolveFinalPath(string path, bool isDirectory)
+    internal static string? TryResolveFinalPath(string path, bool isDirectory)
     {
         const uint FileShareAll = 0x00000001 | 0x00000002 | 0x00000004;
         const uint OpenExisting = 3;

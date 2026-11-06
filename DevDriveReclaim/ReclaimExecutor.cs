@@ -117,10 +117,12 @@ public sealed class ReclaimExecutor : IReclaimExecutor
 
         // Read again for each item rather than trusted from the confirmation: the bin can be resized or switched off while
         // the dialog is open, and what it holds changes as this run empties it and fills it. An item that no longer fits is
-        // kept, so the shell never makes room by deleting, for good, what this run recycled first.
+        // kept, so the shell never makes room by deleting, for good, what this run recycled first. The bin is the one on the
+        // volume the item really is on (the run passes the volume of the path it's about to recycle), not the one it's
+        // spelled on, which a junction can make another volume.
         Func<string, RecycleBinVolumeSettings?> read = _readBinSettings;
-        Func<ReclaimCandidate, RecycleBinCheck> preflight =
-            candidate => RecycleBinPreflight.Evaluate(candidate.SizeBytes, read(candidate.VolumeRoot));
+        Func<ReclaimCandidate, string, RecycleBinCheck> preflight =
+            (candidate, volume) => RecycleBinPreflight.Evaluate(candidate.SizeBytes, read(volume));
 
         var thread = new Thread(() =>
         {
@@ -146,7 +148,7 @@ public sealed class ReclaimExecutor : IReclaimExecutor
 
     private static ReclaimOutcome Run(
         IReadOnlyList<ReclaimCandidate> selection,
-        Func<ReclaimCandidate, RecycleBinCheck> preflight,
+        Func<ReclaimCandidate, string, RecycleBinCheck> preflight,
         IReclaimOwnerRemoval owners,
         ReclaimRecheck recheck,
         IProgress<ReclaimExecutionProgress>? progress,
@@ -251,7 +253,7 @@ public sealed class ReclaimExecutor : IReclaimExecutor
 
     private static ReclaimItemOutcome Remove(
         ReclaimCandidate candidate,
-        Func<ReclaimCandidate, RecycleBinCheck> preflight,
+        Func<ReclaimCandidate, string, RecycleBinCheck> preflight,
         IReclaimOwnerRemoval owners,
         ReclaimRecheck recheck,
         CancellationToken cancellationToken)
@@ -311,8 +313,8 @@ public sealed class ReclaimExecutor : IReclaimExecutor
 
             // The confirmation promised this one could be restored. If the bin would not take it,
             // keeping it is the only answer that honours that promise; deleting it is not ours to
-            // decide after the fact.
-            RecycleBinCheck check = preflight(candidate);
+            // decide after the fact. The bin asked is the one the resolved path recycles into.
+            RecycleBinCheck check = preflight(candidate, ReclaimVolume.RootOf(path));
             if (check.WillDeletePermanently)
             {
                 return new ReclaimItemOutcome(

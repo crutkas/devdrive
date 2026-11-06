@@ -191,8 +191,8 @@ still exposes them.
 ## Reclaim: removed is not freed
 
 The Reclaim room sits beside Space and reads the same volumes, so its numbers have to
-agree with what Space will measure afterwards. Two rules keep them honest
-(`DevDriveReclaim/ReclaimPlan.cs`, `RecycleBinPreflight.cs`, `ReclaimExecution.cs`):
+agree with what Space will measure afterwards. Three rules keep them honest
+(`DevDriveReclaim/ReclaimPlan.cs`, `RecycleBinPreflight.cs`, `ReclaimExecution.cs`, `ReclaimVolume.cs`):
 
 - **Recycling frees nothing yet.** `$Recycle.Bin` lives on the same volume, so an item
   moved there still occupies it. Outcomes split `BytesFreed` (deleted outright, or a bin
@@ -206,6 +206,13 @@ agree with what Space will measure afterwards. Two rules keep them honest
   At run time the executor re-reads the settings and **keeps** — rather than deletes — any
   item it promised to recycle that the bin now refuses, and asks the shell
   (`FOF_WANTNUKEWARNING`) to warn before any permanent delete nothing predicted.
+- **The volume is the one the bytes are on.** A source root can be a junction or symbolic link to
+  another volume, and the scan reaches everything under it by the link's path. A row's `VolumeRoot`
+  follows the path through every link to where it leads (`ReclaimVolume`, the resolution
+  `ReclaimPathGuard` acts on), so the bin the plan and the run check an item against, and the volume
+  whose bar moves, are the ones the item really leaves. A path that can't be opened is placed by its
+  nearest ancestor that can; one nothing resolves keeps its spelled root. Network paths are never
+  opened.
 
 ## Reclaim: asked again before it goes
 

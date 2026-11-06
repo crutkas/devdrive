@@ -164,6 +164,13 @@ public sealed class ReclaimEngine(IEnumerable<IReclaimProvider> providers)
                     .Take(context.MaximumCandidatesPerCategory)
             ];
 
+            // Where each row's bytes really are takes a handle per row (it follows junctions), so it's worked out here, on the
+            // scan's thread, rather than the first time the room draws a volume's bar.
+            foreach (ReclaimCandidate candidate in capped)
+            {
+                _ = candidate.VolumeRoot;
+            }
+
             progress?.Report(new ReclaimScanProgress(
                 provider.Category.Id, $"{provider.Category.Title} complete", capped.Length));
 
