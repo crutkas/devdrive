@@ -314,38 +314,29 @@ public sealed class GitWorktreeInspectorTests
     /// </summary>
     /// <remarks>
     /// <para>
-    /// A slow <c>core.fsmonitor</c> hook is a genuine, reproducible way to make <c>git status</c>
-    /// hang — git runs the hook and waits for it. That matters because the bug being guarded here
-    /// is only observable against a git that does not return: with <c>ReadToEnd()</c> called before
-    /// <c>WaitForExit(timeout)</c>, the read blocks until git closes stdout, so the timeout below it
-    /// can never run and this test sits for the hook's full duration instead of ~10 seconds.
+    /// The bug being guarded is only observable against a git that does not return: with
+    /// <c>ReadToEnd()</c> called before <c>WaitForExit(timeout)</c>, the read blocks until git
+    /// closes stdout, so the timeout below it can never run and this test sits for the hang's full
+    /// duration instead of ~10 seconds.
     /// </para>
     /// <para>
-    /// Verified by reverting the fix and watching this go red, which is the only thing that
-    /// distinguishes a regression test from a test that merely passes. Reverted, it takes 91
-    /// seconds and fails; fixed, it takes about 10 and passes. No <c>[Timeout]</c> is needed
-    /// because the hook's own <c>ping</c> count bounds the worst case.
+    /// The hang is a fake git — a script that prints a line and then holds stdout open for 90
+    /// seconds — rather than anything real git does, because real git's hangs depend on its
+    /// version: a slow <c>core.fsmonitor</c> hook used to do it and stopped running with git 2.56.
+    /// No <c>[Timeout]</c> is needed because the script's own <c>ping</c> count bounds the worst case.
     /// </para>
     /// </remarks>
     [TestMethod]
     public void AGitThatNeverFinishesIsAbandonedRatherThanWaitedOnForever()
     {
-        if (!GitIsAvailable)
-        {
-            Assert.Inconclusive("git is not on PATH");
-        }
-
         using var fixture = new ReclaimFixture();
-        string repo = MakeRepo(fixture, "hung");
+        string worktree = fixture.Dir("hung");
 
-        string hook = Path.Combine(repo, "slow-hook.sh");
-        System.IO.File.WriteAllText(hook, "#!/bin/sh\nping -n 90 127.0.0.1 > /dev/null\n");
-
-        // git's bundled sh has no `sleep`, and needs forward slashes in a config path.
-        Git(repo, $"config core.fsmonitor \"{hook.Replace('\\', '/')}\"");
+        string hungGit = Path.Combine(fixture.Dir("bin"), "git.cmd");
+        System.IO.File.WriteAllText(hungGit, "@echo main\r\n@ping -n 90 127.0.0.1 > nul\r\n");
 
         var clock = Stopwatch.StartNew();
-        WorktreeState state = new GitWorktreeInspector().Inspect(repo, CancellationToken.None);
+        WorktreeState state = new GitWorktreeInspector(hungGit).Inspect(worktree, CancellationToken.None);
         clock.Stop();
 
         Assert.IsLessThan(
