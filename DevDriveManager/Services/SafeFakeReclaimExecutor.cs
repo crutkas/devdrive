@@ -17,12 +17,18 @@ namespace DevDriveManager.Services;
 /// <see cref="ReclaimItemStatus.Recycled"/> otherwise — rather than inventing a "simulated" status,
 /// because the room's job under test is to render outcomes correctly, including the difference
 /// between space freed and space moved into the bin. It also runs the same read-only Recycle Bin
-/// preflight, so an item the bin would not take is kept here exactly as it would be for real.
+/// preflight, so an item the bin would not take is kept here exactly as it would be for real, and asks
+/// git again about rows graded from git (<see cref="ReclaimRecheck"/>, read-only), so a worktree that
+/// changed since the scan is kept here as it would be for real.
 /// </para>
 /// </remarks>
-public sealed class SafeFakeReclaimExecutor(Func<string, RecycleBinVolumeSettings?>? readBinSettings = null)
+public sealed class SafeFakeReclaimExecutor(
+    Func<string, RecycleBinVolumeSettings?>? readBinSettings = null,
+    ReclaimRecheck? recheck = null)
     : IReclaimExecutor
 {
+    private readonly ReclaimRecheck _recheck = recheck ?? ReclaimRecheck.Default;
+
     /// <summary>Every candidate this fake was asked to remove, in the order it was asked.</summary>
     public List<string> Removed { get; } = [];
 
@@ -76,7 +82,7 @@ public sealed class SafeFakeReclaimExecutor(Func<string, RecycleBinVolumeSetting
                         candidate, ReclaimItemStatus.AlreadyGone, 0,
                         "already gone — something else removed it since the scan"),
 
-                _ => Simulate(candidate, verdict, preflight),
+                _ => Simulate(candidate, verdict, preflight, _recheck, cancellationToken),
             };
 
             if (outcome.Removed)
@@ -84,6 +90,7 @@ public sealed class SafeFakeReclaimExecutor(Func<string, RecycleBinVolumeSetting
                 Removed.Add(candidate.Path);
             }
 
+            cancelled |= outcome.Status == ReclaimItemStatus.Cancelled;
             freed += outcome.BytesFreed;
             recycled += outcome.BytesRecycled;
 
@@ -123,8 +130,26 @@ public sealed class SafeFakeReclaimExecutor(Func<string, RecycleBinVolumeSetting
     private static ReclaimItemOutcome Simulate(
         ReclaimCandidate candidate,
         ReclaimGuardVerdict verdict,
-        Func<ReclaimCandidate, RecycleBinCheck> preflight)
+        Func<ReclaimCandidate, RecycleBinCheck> preflight,
+        ReclaimRecheck recheck,
+        CancellationToken cancellationToken)
     {
+        // A row that changed since the scan is kept, as the real run keeps it. Asking git is read-only.
+        ReclaimChanged? changed;
+        try
+        {
+            changed = recheck.WhatChanged(candidate, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            return new ReclaimItemOutcome(candidate, ReclaimItemStatus.Cancelled, 0, "not reached — the run was stopped");
+        }
+
+        if (changed is not null)
+        {
+            return ReclaimRecheck.Kept(candidate, changed);
+        }
+
         if (verdict.Kind == ReclaimTargetKind.RecycleBin)
         {
             return new ReclaimItemOutcome(

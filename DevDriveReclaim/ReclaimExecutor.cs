@@ -7,7 +7,7 @@ namespace DevDriveReclaim;
 /// is not, and empties a volume's bin when the candidate is a bin.
 /// </summary>
 /// <remarks>
-/// Four decisions shape this class.
+/// Six decisions shape this class.
 /// <para>
 /// <b>Nesting is resolved before anything is removed.</b> The selection is reduced to containment
 /// roots, exactly as the totals are. Without that, deleting a worktree and then the <c>obj</c> folder
@@ -44,11 +44,18 @@ namespace DevDriveReclaim;
 /// model) is handed to <see cref="IReclaimOwnerRemoval"/> after the guard, never deleted as a path: its manager's
 /// records have to stay right, and its files can be shared with models that stay.
 /// </para>
+/// <para>
+/// <b>A grade read from git is read again.</b> A worktree or dormant clone graded from git at the scan
+/// (<see cref="ReclaimCandidate.GitEvidence"/>) is asked about again just before it goes, and kept, with what changed, when
+/// git's answer is riskier now (<see cref="ReclaimRecheck"/>). The scan can be hours old, and a Safe worktree someone has
+/// since edited holds the only copy of that edit.
+/// </para>
 /// </remarks>
 public sealed class ReclaimExecutor : IReclaimExecutor
 {
     private readonly Func<string, RecycleBinVolumeSettings?> _readBinSettings;
     private readonly IReclaimOwnerRemoval _owners;
+    private readonly ReclaimRecheck _recheck;
 
     public ReclaimExecutor()
         : this(RecycleBinPreflight.ReadSettings)
@@ -70,11 +77,27 @@ public sealed class ReclaimExecutor : IReclaimExecutor
     /// manager.
     /// </param>
     public ReclaimExecutor(Func<string, RecycleBinVolumeSettings?> readBinSettings, IReclaimOwnerRemoval owners)
+        : this(readBinSettings, owners, new Providers.GitWorktreeInspector())
+    {
+    }
+
+    /// <param name="readBinSettings">Where the Recycle Bin settings come from.</param>
+    /// <param name="owners">What removes a candidate that has an <see cref="ReclaimCandidate.Owner"/>.</param>
+    /// <param name="git">
+    /// What asks git again about a row graded from git (<see cref="ReclaimRecheck"/>). Injectable so tests can describe a
+    /// worktree that changed since the scan without building git history.
+    /// </param>
+    public ReclaimExecutor(
+        Func<string, RecycleBinVolumeSettings?> readBinSettings,
+        IReclaimOwnerRemoval owners,
+        Providers.IWorktreeInspector git)
     {
         ArgumentNullException.ThrowIfNull(readBinSettings);
         ArgumentNullException.ThrowIfNull(owners);
+        ArgumentNullException.ThrowIfNull(git);
         _readBinSettings = readBinSettings;
         _owners = owners;
+        _recheck = new ReclaimRecheck(git);
     }
 
     public Task<ReclaimOutcome> ExecuteAsync(
@@ -103,7 +126,7 @@ public sealed class ReclaimExecutor : IReclaimExecutor
         {
             try
             {
-                completion.SetResult(Run(selection, preflight, _owners, progress, cancellationToken));
+                completion.SetResult(Run(selection, preflight, _owners, _recheck, progress, cancellationToken));
             }
             catch (Exception exception)
             {
@@ -125,6 +148,7 @@ public sealed class ReclaimExecutor : IReclaimExecutor
         IReadOnlyList<ReclaimCandidate> selection,
         Func<ReclaimCandidate, RecycleBinCheck> preflight,
         IReclaimOwnerRemoval owners,
+        ReclaimRecheck recheck,
         IProgress<ReclaimExecutionProgress>? progress,
         CancellationToken cancellationToken)
     {
@@ -168,9 +192,10 @@ public sealed class ReclaimExecutor : IReclaimExecutor
                 continue;
             }
 
-            ReclaimItemOutcome outcome = Remove(candidate, preflight, owners, cancellationToken);
+            ReclaimItemOutcome outcome = Remove(candidate, preflight, owners, recheck, cancellationToken);
             outcomes.Add(outcome);
             rootOutcomes[candidate.Path] = outcome;
+            cancelled |= outcome.Status == ReclaimItemStatus.Cancelled;
 
             freed += outcome.BytesFreed;
             recycled += outcome.BytesRecycled;
@@ -228,6 +253,7 @@ public sealed class ReclaimExecutor : IReclaimExecutor
         ReclaimCandidate candidate,
         Func<ReclaimCandidate, RecycleBinCheck> preflight,
         IReclaimOwnerRemoval owners,
+        ReclaimRecheck recheck,
         CancellationToken cancellationToken)
     {
         ReclaimGuardVerdict verdict = ReclaimPathGuard.Inspect(candidate);
@@ -247,6 +273,22 @@ public sealed class ReclaimExecutor : IReclaimExecutor
         }
 
         string path = verdict.CanonicalPath!;
+
+        // The grade is the scan's; what goes is what's here now. A row that is riskier than the grade the user agreed to stays.
+        ReclaimChanged? changed;
+        try
+        {
+            changed = recheck.WhatChanged(candidate, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            return new ReclaimItemOutcome(candidate, ReclaimItemStatus.Cancelled, 0, "not reached — the run was stopped");
+        }
+
+        if (changed is not null)
+        {
+            return ReclaimRecheck.Kept(candidate, changed);
+        }
 
         try
         {

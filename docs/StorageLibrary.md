@@ -207,6 +207,21 @@ agree with what Space will measure afterwards. Two rules keep them honest
   item it promised to recycle that the bin now refuses, and asks the shell
   (`FOF_WANTNUKEWARNING`) to warn before any permanent delete nothing predicted.
 
+## Reclaim: asked again before it goes
+
+A scan grades each row on what it found then, and a run can start hours later. A row whose grade
+rests on something that can change is asked about again just before it goes
+(`DevDriveReclaim/ReclaimRecheck.cs`), and **kept** when the answer is riskier now: the outcome is
+`Failed`, "kept — changed since the scan: …", nothing is freed, and `ReclaimItemOutcome.Change` says
+what changed as data. The dry run (`SafeFakeReclaimExecutor`) asks the same questions; they only read.
+
+- **Worktrees and dormant clones** carry what git said at the scan (`ReclaimCandidate.GitEvidence`).
+  The run asks the same `IWorktreeInspector` again and keeps the row when it has uncommitted changes
+  (or more of them), commits no remote has, no upstream, another branch or commit or a detached HEAD,
+  a branch no longer merged, a new local-only ignored file (a `.env`), more stashes (a dormant
+  clone), or when git can't answer. A row graded without git (an orphaned worktree folder) has
+  nothing to ask about.
+
 ## Reclaim: AI models
 
 The **AI models** category (`DevDriveReclaim/Providers/Models`) lists models that local model

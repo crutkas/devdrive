@@ -100,7 +100,26 @@ internal sealed class ReclaimFixture : IDisposable
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            // A locked handle on a temp tree must never fail a test run.
+            // git writes its objects read-only, which a recursive delete won't remove. Clear that (never through a junction,
+            // whose target may not be the fixture's) and try once more.
+            try
+            {
+                foreach (string file in Directory.EnumerateFiles(Root, "*", new EnumerationOptions
+                {
+                    RecurseSubdirectories = true,
+                    AttributesToSkip = FileAttributes.ReparsePoint,
+                    IgnoreInaccessible = true,
+                }))
+                {
+                    System.IO.File.SetAttributes(file, FileAttributes.Normal);
+                }
+
+                Directory.Delete(Root, recursive: true);
+            }
+            catch (Exception again) when (again is IOException or UnauthorizedAccessException)
+            {
+                // A locked handle on a temp tree must never fail a test run.
+            }
         }
     }
 }

@@ -56,6 +56,12 @@ public sealed record ReclaimItemOutcome(
     /// <summary>True when the user asked for something and did not get it.</summary>
     public bool NeedsAttention => Status is ReclaimItemStatus.Refused or ReclaimItemStatus.Failed;
 
+    /// <summary>
+    /// What changed since the scan, when that is why the run kept it (<see cref="ReclaimRecheck"/>); <see cref="ReclaimChange.None"/>
+    /// otherwise. The <see cref="Message"/> says it in words.
+    /// </summary>
+    public ReclaimChange Change { get; init; }
+
     /// <summary>Bytes the volume got back now: deleted outright, or emptied from a bin.</summary>
     public long BytesFreed => Status is ReclaimItemStatus.Deleted or ReclaimItemStatus.Emptied ? Bytes : 0;
 

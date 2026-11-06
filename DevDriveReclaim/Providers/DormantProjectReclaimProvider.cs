@@ -75,7 +75,8 @@ public sealed class DormantProjectReclaimProvider(IWorktreeInspector? inspector 
                 // work is already Careful, so the one case a stash decides is the otherwise-clean
                 // repository -- and that is exactly the one whose recovery hint would otherwise
                 // promise a fresh clone brings everything back.
-                int stashes = state is { HasUncommittedChanges: false, HasUnpushedCommits: false }
+                bool askStashes = state is { HasUncommittedChanges: false, HasUnpushedCommits: false };
+                int stashes = askStashes
                     ? _inspector.StashCount(repository.Path, cancellationToken)
                     : 0;
 
@@ -92,7 +93,12 @@ public sealed class DormantProjectReclaimProvider(IWorktreeInspector? inspector 
                     recovery,
                     lastUsedUtc: newest,
                     itemCount: measurement.FileCount,
-                    detail: detail));
+                    detail: detail)
+                {
+                    // The run asks git again before removing it (and the stashes, if they decided this grade), and keeps it if
+                    // this answer got riskier.
+                    GitEvidence = new GitEvidence(state, askStashes ? stashes : null),
+                });
             }
 
             return candidates;

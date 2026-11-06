@@ -13,7 +13,8 @@ public sealed record WorktreeState(
     bool IsMerged,
     bool HasUpstream = true,
     IReadOnlyList<string>? LocalOnlyIgnoredFiles = null,
-    bool IsDetached = false)
+    bool IsDetached = false,
+    string? Head = null)
 {
     /// <summary>
     /// Gitignored paths that cannot be regenerated — a <c>.env</c>, a signing certificate, a
@@ -29,7 +30,21 @@ public sealed record WorktreeState(
     /// if we cannot prove a worktree is safe to delete, it is not safe to delete.
     /// </summary>
     public static WorktreeState Unknown => new(null, true, 0, true, 0, false, HasUpstream: false);
+
+    /// <summary>True for <see cref="Unknown"/>: git couldn't be asked, so nothing here was read from the tree.</summary>
+    public bool IsUnknown => Equals(Unknown);
 }
+
+/// <summary>
+/// What git said about a working tree when the scan graded it, kept with the row so a run can ask git again and tell whether the
+/// answer got riskier in between (<see cref="ReclaimRecheck"/>).
+/// </summary>
+/// <param name="State">The inspection the grade was made from.</param>
+/// <param name="StashCount">
+/// The repository's stashes, when the scan asked (a dormant clone otherwise clean and pushed, where a stash decides the grade);
+/// null when it didn't. Deleting a whole clone takes its stashes with it; deleting a worktree doesn't.
+/// </param>
+public sealed record GitEvidence(WorktreeState State, int? StashCount = null);
 
 /// <summary>How a git command ended: its exit code and what it printed.</summary>
 internal sealed record GitResult(int ExitCode, string Output);
@@ -116,6 +131,11 @@ public sealed class GitWorktreeInspector : IWorktreeInspector
                 branch = null;
             }
 
+            // The commit, so a run can tell that the tree moved since the scan even when every other answer reads the same.
+            // Not a reason for Unknown on its own: the branch above already proved git answers here.
+            GitResult? commit = _git(worktreePath, "rev-parse --verify --quiet HEAD", cancellationToken);
+            string? commitId = commit is { ExitCode: 0 } && commit.Output.Trim() is { Length: > 0 } id ? id : null;
+
             // --ignored is the only way to see content git is deliberately silent about. It uses
             // the traditional (collapsing) form, so a fully-ignored directory costs one line rather
             // than one line per file — measured at ~180ms per worktree against plain status, which
@@ -164,7 +184,8 @@ public sealed class GitWorktreeInspector : IWorktreeInspector
                 IsMerged: merged,
                 HasUpstream: hasUpstream,
                 LocalOnlyIgnoredFiles: localOnly,
-                IsDetached: detached);
+                IsDetached: detached,
+                Head: commitId);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {

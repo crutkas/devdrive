@@ -360,6 +360,43 @@ public sealed class SafeFakeReclaimExecutorTests
         }
     }
 
+    /// <summary>
+    /// The fake asks git again about a row graded from git, as the real run does (Dev Config #341), so the UI suite sees the
+    /// "kept — changed since the scan" row a user would. Asking reads only.
+    /// </summary>
+    [TestMethod]
+    public async Task AWorktreeThatChangedSinceTheScanIsKept()
+    {
+        string path = Path.Combine(Path.GetTempPath(), "ddm-safe-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(path);
+        try
+        {
+            var clean = new DevDriveReclaim.Providers.WorktreeState("feature", false, 0, false, 0, IsMerged: true);
+            var git = new AnsweringInspector(clean with { HasUncommittedChanges = true, ChangedFileCount = 1 });
+            SafeFakeReclaimExecutor executor = new(TestBins.Recycles, new ReclaimRecheck(git));
+            ReclaimCandidate row = new("worktrees", path, "wt", 1_000_000, ReclaimRisk.Safe, "clean and merged", "git worktree add")
+            {
+                GitEvidence = new DevDriveReclaim.Providers.GitEvidence(clean),
+            };
+
+            ReclaimOutcome outcome = await executor.ExecuteAsync([row], null, default);
+
+            Assert.AreEqual(ReclaimItemStatus.Failed, outcome.Items.Single().Status);
+            Assert.AreEqual(ReclaimChange.UncommittedChanges, outcome.Items.Single().Change);
+            StringAssert.Contains(outcome.Items.Single().Message, "changed since the scan");
+            Assert.IsEmpty(executor.Removed);
+        }
+        finally
+        {
+            Directory.Delete(path, recursive: true);
+        }
+    }
+
+    private sealed class AnsweringInspector(DevDriveReclaim.Providers.WorktreeState state) : DevDriveReclaim.Providers.IWorktreeInspector
+    {
+        public DevDriveReclaim.Providers.WorktreeState Inspect(string worktreePath, CancellationToken cancellationToken) => state;
+    }
+
     /// <summary>Something the confirmation named as permanent is reported as freed, not recycled.</summary>
     [TestMethod]
     public async Task AConsentedPermanentItemCountsAsFreed()

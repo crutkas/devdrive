@@ -153,6 +153,13 @@ public sealed record ReclaimCandidate
     public ReclaimOwner? Owner { get; }
 
     /// <summary>
+    /// What git said about this working tree when the scan graded it, for a row graded from git (a worktree, a dormant clone);
+    /// null otherwise. A grade read from git is only true until someone edits a file, so the run asks git again before it
+    /// removes the row and keeps it when the answer is riskier now (<see cref="ReclaimRecheck"/>).
+    /// </summary>
+    public Providers.GitEvidence? GitEvidence { get; init; }
+
+    /// <summary>
     /// The same candidate, marked for permanent deletion. Only <see cref="ReclaimPlan.ConsentedSelection"/>
     /// should call this: it is the record that the confirmation named the item as permanent.
     /// </summary>
@@ -161,6 +168,9 @@ public sealed record ReclaimCandidate
             ? new ReclaimCandidate(
                 CategoryId, Path, DisplayName, SizeBytes, Risk, Reason, RecoveryHint,
                 LastUsedUtc, ItemCount, Detail, supportsRecycleBin: false, Owner)
+            {
+                GitEvidence = GitEvidence,
+            }
             : this;
 
     /// <summary>The volume root this path lives on, e.g. <c>C:\</c>. Drives the per-volume projection.</summary>
