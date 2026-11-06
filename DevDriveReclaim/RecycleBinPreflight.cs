@@ -16,6 +16,28 @@ public enum RecycleBinVerdict
     Unknown,
 }
 
+/// <summary>Why the shell won't recycle an item, as data, so a caller can word it (and say a shared reason once).</summary>
+public enum RecycleBinRefusal
+{
+    /// <summary>It will be recycled.</summary>
+    None,
+
+    /// <summary>The settings could not be read.</summary>
+    Unknown,
+
+    /// <summary>The volume has no Recycle Bin (removable, network and similar).</summary>
+    NoRecycleBin,
+
+    /// <summary>The bin is set to delete immediately, by the user or by policy.</summary>
+    TurnedOff,
+
+    /// <summary>The item is bigger than the bin's limit.</summary>
+    TooLarge,
+
+    /// <summary>The item is bigger than the room left in the bin.</summary>
+    NoRoom,
+}
+
 /// <summary>The answer for one item, with the reason worded for the confirmation and the row.</summary>
 public sealed record RecycleBinCheck(RecycleBinVerdict Verdict, string Reason)
 {
@@ -23,6 +45,15 @@ public sealed record RecycleBinCheck(RecycleBinVerdict Verdict, string Reason)
 
     /// <summary>True when recycling this item would in fact delete it permanently.</summary>
     public bool WillDeletePermanently => Verdict == RecycleBinVerdict.WillNotRecycle;
+
+    /// <summary><see cref="Reason"/> as data.</summary>
+    public RecycleBinRefusal Refusal { get; init; }
+
+    /// <summary>The volume the reason is about, e.g. <c>C:\</c>; empty when the settings could not be read.</summary>
+    public string VolumeRoot { get; init; } = string.Empty;
+
+    /// <summary>The bin's limit, for <see cref="RecycleBinRefusal.TooLarge"/> and <see cref="RecycleBinRefusal.NoRoom"/>.</summary>
+    public long? CapacityBytes { get; init; }
 }
 
 /// <summary>
@@ -86,20 +117,26 @@ public static class RecycleBinPreflight
         if (settings is null)
         {
             return new RecycleBinCheck(
-                RecycleBinVerdict.Unknown, "the Recycle Bin settings could not be read");
+                RecycleBinVerdict.Unknown, "the Recycle Bin settings could not be read") { Refusal = RecycleBinRefusal.Unknown };
         }
 
         string volume = settings.VolumeRoot.TrimEnd('\\');
 
         if (!settings.HasRecycleBin)
         {
-            return new RecycleBinCheck(RecycleBinVerdict.WillNotRecycle, $"{volume} has no Recycle Bin");
+            return new RecycleBinCheck(RecycleBinVerdict.WillNotRecycle, $"{volume} has no Recycle Bin")
+            {
+                Refusal = RecycleBinRefusal.NoRecycleBin, VolumeRoot = settings.VolumeRoot,
+            };
         }
 
         if (settings.RecyclingDisabled)
         {
             return new RecycleBinCheck(
-                RecycleBinVerdict.WillNotRecycle, $"the Recycle Bin is turned off on {volume}");
+                RecycleBinVerdict.WillNotRecycle, $"the Recycle Bin is turned off on {volume}")
+            {
+                Refusal = RecycleBinRefusal.TurnedOff, VolumeRoot = settings.VolumeRoot,
+            };
         }
 
         if (settings.MaxCapacityBytes is long max && sizeBytes > max)
@@ -107,7 +144,10 @@ public static class RecycleBinPreflight
             return new RecycleBinCheck(
                 RecycleBinVerdict.WillNotRecycle,
                 $"too large for the Recycle Bin on {volume}, which holds up to " +
-                DevDriveCore.ByteSizeFormatter.Format((ulong)Math.Max(0, max)));
+                DevDriveCore.ByteSizeFormatter.Format((ulong)Math.Max(0, max)))
+            {
+                Refusal = RecycleBinRefusal.TooLarge, VolumeRoot = settings.VolumeRoot, CapacityBytes = max,
+            };
         }
 
         if (settings.RoomBytes is long room && sizeBytes > room)
@@ -115,7 +155,10 @@ public static class RecycleBinPreflight
             return new RecycleBinCheck(
                 RecycleBinVerdict.WillNotRecycle,
                 $"no room left for it in the Recycle Bin on {volume}, which holds up to " +
-                DevDriveCore.ByteSizeFormatter.Format((ulong)Math.Max(0, settings.MaxCapacityBytes!.Value)));
+                DevDriveCore.ByteSizeFormatter.Format((ulong)Math.Max(0, settings.MaxCapacityBytes!.Value)))
+            {
+                Refusal = RecycleBinRefusal.NoRoom, VolumeRoot = settings.VolumeRoot, CapacityBytes = settings.MaxCapacityBytes,
+            };
         }
 
         return RecycleBinCheck.Recycles;
