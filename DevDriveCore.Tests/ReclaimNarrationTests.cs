@@ -167,6 +167,27 @@ public sealed class ReclaimNarrationTests
         StringAssert.Contains(line, $"{expected} could not be removed");
     }
 
+    /// <summary>
+    /// A permanent delete that stopped part-way freed what went and is still listed (Dev Config #344): it wasn't "not removed",
+    /// and a run where only it freed anything didn't free that "across 0 items".
+    /// </summary>
+    [TestMethod]
+    public void APartlyRemovedItemIsNamedAsThatWithWhatItFreed()
+    {
+        var outcome = new ReclaimOutcome(
+            [
+                new ReclaimItemOutcome(
+                    Candidate("dormant-projects", @"C:\old", 10_000_000), ReclaimItemStatus.PartlyRemoved, 4_000_000, "partly removed"),
+            ],
+            Cancelled: false);
+
+        string line = ReclaimNarration.SummarizeRun(outcome);
+
+        StringAssert.StartsWith(line, $"Freed {ReclaimFormat.Bytes(4_000_000)}. ");
+        StringAssert.Contains(line, "1 item was only partly removed and is still listed");
+        Assert.DoesNotContain("across 0 items", line, StringComparison.Ordinal);
+    }
+
     private static ReclaimOutcome Recycled(long bytes, long deletedBytes = 0, bool cancelled = false)
     {
         List<ReclaimItemOutcome> items =

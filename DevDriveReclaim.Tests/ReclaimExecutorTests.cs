@@ -135,7 +135,8 @@ public sealed class ReclaimExecutorTests
     /// <para>
     /// Run against both paths because they fail through completely different mechanisms &mdash; the
     /// shell returns a code, .NET throws &mdash; and a fix to one says nothing about the other.
-    /// Neither run puts anything in the developer's Recycle Bin, because neither delete succeeds.
+    /// Neither run puts anything in the developer's Recycle Bin: the shell's move fails, and the
+    /// permanent path deletes for good what it can and stops at the folder.
     /// </para>
     /// </remarks>
     [TestMethod]
@@ -166,7 +167,13 @@ public sealed class ReclaimExecutorTests
 
             Assert.IsTrue(Directory.Exists(occupied), "the occupied folder was removed anyway");
             Assert.AreEqual(1, outcome.FailedCount);
-            Assert.AreEqual(0, outcome.BytesFreed);
+
+            // The shell moves the folder as one or not at all. The permanent path deletes what it can, the readme, and only
+            // the folder itself, the working directory, stays: partly removed, with the readme's bytes freed.
+            ReclaimItemOutcome item = outcome.Items.Single();
+            Assert.AreEqual(supportsRecycleBin ? ReclaimItemStatus.Failed : ReclaimItemStatus.PartlyRemoved, item.Status);
+            Assert.AreEqual(supportsRecycleBin ? 0 : item.Bytes, outcome.BytesFreed);
+            Assert.AreEqual(supportsRecycleBin, File.Exists(Path.Combine(occupied, "readme.txt")));
 
             string message = outcome.Failures.Single().Message;
             StringAssert.Contains(

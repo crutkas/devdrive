@@ -235,6 +235,13 @@ public sealed class ReclaimExecutor : IReclaimExecutor
                     candidate, ReclaimItemStatus.Absorbed, 0, $"removed with {parent}"),
                 { Status: ReclaimItemStatus.Cancelled } => new ReclaimItemOutcome(
                     candidate, ReclaimItemStatus.Cancelled, 0, "not reached — the run was stopped"),
+
+                // Part of the container went, so whether this did is a question for the disk, not the container's status.
+                { Status: ReclaimItemStatus.PartlyRemoved } => Path.Exists(candidate.Path)
+                    ? new ReclaimItemOutcome(
+                        candidate, ReclaimItemStatus.Failed, 0, $"still here — {parent} was only partly removed")
+                    : new ReclaimItemOutcome(
+                        candidate, ReclaimItemStatus.Absorbed, 0, $"removed with {parent}, which was only partly removed"),
                 not null => new ReclaimItemOutcome(
                     candidate, ReclaimItemStatus.Failed, 0,
                     $"still here — {parent} could not be removed"),
@@ -457,17 +464,40 @@ public sealed class ReclaimExecutor : IReclaimExecutor
     private static ReclaimItemOutcome DeletePermanently(
         ReclaimCandidate candidate, string path, ReclaimTargetKind kind)
     {
-        if (kind == ReclaimTargetKind.Directory)
+        if (kind != ReclaimTargetKind.Directory)
         {
-            Directory.Delete(path, recursive: true);
-        }
-        else
-        {
+            FileAttributes attributes = File.GetAttributes(path);
+            if ((attributes & FileAttributes.ReadOnly) != 0)
+            {
+                File.SetAttributes(path, attributes & ~FileAttributes.ReadOnly);
+            }
+
             File.Delete(path);
+            return new ReclaimItemOutcome(
+                candidate, ReclaimItemStatus.Deleted, candidate.SizeBytes, "deleted permanently");
         }
 
+        PermanentDeleteResult result = PermanentDelete.Folder(path);
+        if (result.Whole)
+        {
+            return new ReclaimItemOutcome(
+                candidate, ReclaimItemStatus.Deleted, candidate.SizeBytes, "deleted permanently");
+        }
+
+        string why = FileSystemRemovalError.Explain(result.FirstFailure!);
+        if (result.EntriesRemoved == 0)
+        {
+            return new ReclaimItemOutcome(candidate, ReclaimItemStatus.Failed, 0, why);
+        }
+
+        // Some of it is gone for good and some isn't: neither "deleted" nor "kept" is true, and the bytes that went are freed.
+        string left = result.EntriesLeft == 1 ? "1 file or folder in it" : $"{result.EntriesLeft:N0} files or folders in it";
         return new ReclaimItemOutcome(
-            candidate, ReclaimItemStatus.Deleted, candidate.SizeBytes, "deleted permanently");
+            candidate,
+            ReclaimItemStatus.PartlyRemoved,
+            result.BytesFreed,
+            $"partly removed — {DevDriveCore.ByteSizeFormatter.Format((ulong)result.BytesFreed)} freed, but {left} couldn't be " +
+                $"deleted: {why}");
     }
 
     /// <summary>
