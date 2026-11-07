@@ -52,19 +52,104 @@ public interface IVolumeIndex
     bool TryFindLargeFiles(string path, out IReadOnlyList<(string FullPath, FastDirEntry Entry)> files);
 }
 
-/// <summary>The index over <see cref="ParallelVolumeScanner"/>'s finished walk (after <see cref="ParallelVolumeScanner.RollupIndex"/>).</summary>
-internal sealed class ScannedVolumeIndex(ScanFolder root, long largeFileBytes) : IVolumeIndex
+/// <summary>
+/// The index over <see cref="ParallelVolumeScanner"/>'s finished walk (after <see cref="ParallelVolumeScanner.RollupIndex"/>),
+/// copied into flat arrays so the walk's folders can go once the snapshot is built: a folder's answers take about fifty bytes
+/// here, a <see cref="ScanFolder"/> about three hundred, and the index lives while the Reclaim scan reads it.
+/// </summary>
+/// <remarks>
+/// Folders are numbered depth first, so a folder's subtree is the run of <see cref="_subtree"/> folders that starts at it:
+/// its first child is the next folder, and each next child follows the previous child's subtree.
+/// </remarks>
+internal sealed class ScannedVolumeIndex : IVolumeIndex
 {
     private const FileAttributes JunctionAttributes = FileAttributes.Directory | FileAttributes.ReparsePoint;
 
-    public string Root => root.Path;
+    private const byte Measured = 1, Incomplete = 2, TreeComplete = 4, GitFolder = 8, GitFile = 16;
 
-    public long LargeFileBytes => largeFileBytes;
+    private readonly string _root;
+    private readonly string[] _names;
+    private readonly int[] _subtree;
+    private readonly FileAttributes[] _attributes;
+    private readonly byte[] _flags;
+    private readonly long[] _allocated;
+    private readonly long[] _logical;
+    private readonly long[] _newest;
+    private readonly int[] _files;
+    private readonly int[] _folders;
+    private readonly Dictionary<int, string[]> _reparseLeaves = [];
+    private readonly Dictionary<int, ScanLeaf[]> _largeFiles = [];
+
+    public ScannedVolumeIndex(ScanFolder root, long largeFileBytes)
+    {
+        _root = root.Path;
+        LargeFileBytes = largeFileBytes;
+
+        var order = new List<ScanFolder>();
+        var parents = new List<int>();
+        var stack = new Stack<(ScanFolder Folder, int Parent)>();
+        stack.Push((root, -1));
+        while (stack.Count > 0)
+        {
+            (ScanFolder folder, int parent) = stack.Pop();
+            parents.Add(parent);
+            order.Add(folder);
+            int index = order.Count - 1;
+            List<ScanFolder>? children = folder.Subfolders;
+            for (int i = (children?.Count ?? 0) - 1; i >= 0; i--)
+            {
+                stack.Push((children![i], index));
+            }
+        }
+
+        int count = order.Count;
+        _names = new string[count];
+        _subtree = new int[count];
+        _attributes = new FileAttributes[count];
+        _flags = new byte[count];
+        _allocated = new long[count];
+        _logical = new long[count];
+        _newest = new long[count];
+        _files = new int[count];
+        _folders = new int[count];
+        for (int i = 0; i < count; i++)
+        {
+            ScanFolder folder = order[i];
+            _names[i] = folder.Name;
+            _subtree[i] = 1;
+            _attributes[i] = folder.Attributes;
+            _flags[i] = (byte)((folder.IsMeasured ? Measured : 0) | (folder.Incomplete ? Incomplete : 0) | (folder.TreeComplete ? TreeComplete : 0)
+                | folder.Git switch { GitEntry.Folder => GitFolder, GitEntry.File => GitFile, _ => 0 });
+            _allocated[i] = folder.TreeAllocatedAll;
+            _logical[i] = folder.TreeLogicalAll;
+            _newest[i] = folder.TreeNewestFileTicks;
+            _files[i] = folder.TreeFiles;
+            _folders[i] = folder.TreeFolders;
+            if (folder.ReparseLeaves is { Count: > 0 } leaves)
+            {
+                _reparseLeaves[i] = [.. leaves.Select(l => l.Name)];
+            }
+
+            if (folder.LargeFiles is { Count: > 0 } large)
+            {
+                _largeFiles[i] = [.. large];
+            }
+        }
+
+        for (int i = count - 1; i > 0; i--)
+        {
+            _subtree[parents[i]] += _subtree[i];
+        }
+    }
+
+    public string Root => _root;
+
+    public long LargeFileBytes { get; }
 
     public bool TryMeasure(string path, out DirectoryMeasurement measurement)
     {
         measurement = DirectoryMeasurement.Empty;
-        if (Find(path) is not { TreeComplete: true } folder)
+        if (Find(path) is not int folder || (_flags[folder] & TreeComplete) == 0)
         {
             return false;
         }
@@ -76,62 +161,63 @@ internal sealed class ScannedVolumeIndex(ScanFolder root, long largeFileBytes) :
         }
 
         measurement = new DirectoryMeasurement(
-            folder.TreeAllocatedAll,
-            folder.TreeLogicalAll,
-            folder.TreeFiles,
-            folder.TreeFolders,
-            folder.TreeNewestFileTicks == 0 ? null : new DateTimeOffset(folder.TreeNewestFileTicks, TimeSpan.Zero));
+            _allocated[folder],
+            _logical[folder],
+            _files[folder],
+            _folders[folder],
+            _newest[folder] == 0 ? null : new DateTimeOffset(_newest[folder], TimeSpan.Zero));
         return true;
     }
 
     public bool TryList(string path, out VolumeIndexListing listing)
     {
         listing = new VolumeIndexListing([], GitEntry.None);
-        if (Find(path) is not { IsMeasured: true, Incomplete: false } folder)
+        if (Find(path) is not int folder || (_flags[folder] & (Measured | Incomplete)) != Measured)
         {
             return false;
         }
 
-        var folders = new List<VolumeIndexFolder>((folder.Subfolders?.Count ?? 0) + (folder.ReparseLeaves?.Count ?? 0));
-        foreach (ScanFolder child in folder.Subfolders ?? [])
+        var folders = new List<VolumeIndexFolder>();
+        foreach (int child in Children(folder))
         {
-            folders.Add(new VolumeIndexFolder(child.Name, child.Attributes | FileAttributes.Directory));
+            folders.Add(new VolumeIndexFolder(_names[child], _attributes[child] | FileAttributes.Directory));
         }
 
-        foreach (ScanLeaf leaf in folder.ReparseLeaves ?? [])
+        foreach (string leaf in _reparseLeaves.GetValueOrDefault(folder) ?? [])
         {
-            folders.Add(new VolumeIndexFolder(leaf.Name, JunctionAttributes));
+            folders.Add(new VolumeIndexFolder(leaf, JunctionAttributes));
         }
 
-        listing = new VolumeIndexListing(folders, folder.Git);
+        GitEntry git = (_flags[folder] & GitFolder) != 0 ? GitEntry.Folder : (_flags[folder] & GitFile) != 0 ? GitEntry.File : GitEntry.None;
+        listing = new VolumeIndexListing(folders, git);
         return true;
     }
 
     public bool TryFindLargeFiles(string path, out IReadOnlyList<(string FullPath, FastDirEntry Entry)> files)
     {
         files = [];
-        if (Find(path) is not { TreeComplete: true } start || IsReparse(start))
+        if (Find(path) is not int start || (_flags[start] & TreeComplete) == 0 || IsReparse(start))
         {
             return false;
         }
 
         var found = new List<(string, FastDirEntry)>();
-        var stack = new Stack<ScanFolder>();
-        stack.Push(start);
+        var stack = new Stack<(int Folder, string Path)>();
+        stack.Push((start, System.IO.Path.GetFullPath(path).TrimEnd('\\', '/')));
         while (stack.Count > 0)
         {
-            ScanFolder folder = stack.Pop();
-            foreach (ScanLeaf file in folder.LargeFiles ?? [])
+            (int folder, string folderPath) = stack.Pop();
+            foreach (ScanLeaf file in _largeFiles.GetValueOrDefault(folder) ?? [])
             {
-                found.Add((System.IO.Path.Combine(folder.Path, file.Name), new FastDirEntry(
+                found.Add((System.IO.Path.Combine(folderPath, file.Name), new FastDirEntry(
                     file.Name, FileAttributes.Normal, file.Allocated, file.Logical, new DateTimeOffset(file.LastWriteTicks, TimeSpan.Zero))));
             }
 
-            foreach (ScanFolder child in folder.Subfolders ?? [])
+            foreach (int child in Children(folder))
             {
                 if (!IsReparse(child))
                 {
-                    stack.Push(child);
+                    stack.Push((child, System.IO.Path.Combine(folderPath, _names[child])));
                 }
             }
         }
@@ -140,10 +226,19 @@ internal sealed class ScannedVolumeIndex(ScanFolder root, long largeFileBytes) :
         return true;
     }
 
-    private static bool IsReparse(ScanFolder folder) => (folder.Attributes & FileAttributes.ReparsePoint) != 0;
+    private IEnumerable<int> Children(int folder)
+    {
+        int end = folder + _subtree[folder];
+        for (int child = folder + 1; child < end; child += _subtree[child])
+        {
+            yield return child;
+        }
+    }
+
+    private bool IsReparse(int folder) => (_attributes[folder] & FileAttributes.ReparsePoint) != 0;
 
     /// <summary>The walk's folder at <paramref name="path"/>, or null when the walk didn't reach it.</summary>
-    private ScanFolder? Find(string path)
+    private int? Find(string path)
     {
         string full;
         try
@@ -155,11 +250,11 @@ internal sealed class ScannedVolumeIndex(ScanFolder root, long largeFileBytes) :
             return null;
         }
 
-        string rootPath = root.Path.TrimEnd('\\', '/');
+        string rootPath = _root.TrimEnd('\\', '/');
         string trimmed = full.TrimEnd('\\', '/');
         if (trimmed.Equals(rootPath, StringComparison.OrdinalIgnoreCase))
         {
-            return root;
+            return 0;
         }
 
         if (!trimmed.StartsWith(rootPath + System.IO.Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
@@ -167,14 +262,25 @@ internal sealed class ScannedVolumeIndex(ScanFolder root, long largeFileBytes) :
             return null;
         }
 
-        ScanFolder? current = root;
+        int current = 0;
         foreach (string segment in trimmed[(rootPath.Length + 1)..].Split(System.IO.Path.DirectorySeparatorChar))
         {
-            current = current.Subfolders?.Find(f => f.Name.Equals(segment, StringComparison.OrdinalIgnoreCase));
-            if (current is null)
+            int? next = null;
+            foreach (int child in Children(current))
+            {
+                if (_names[child].Equals(segment, StringComparison.OrdinalIgnoreCase))
+                {
+                    next = child;
+                    break;
+                }
+            }
+
+            if (next is not int found)
             {
                 return null;
             }
+
+            current = found;
         }
 
         return current;
