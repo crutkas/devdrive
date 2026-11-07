@@ -21,7 +21,7 @@ public sealed class ReclaimOrderingTests
             volumeRoot,
             $"Recycle Bin on {volumeRoot.TrimEnd('\\')}",
             5_000_000,
-            ReclaimRisk.Safe,
+            ReclaimRisk.Check,
             "test",
             "test",
             supportsRecycleBin: false);

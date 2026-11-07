@@ -255,6 +255,14 @@ what changed as data. The dry run (`SafeFakeReclaimExecutor`) asks the same ques
   is being removed in the same run ("kept — the copy kept in its place, …, is being removed in this
   run too").
 
+## Reclaim: the Recycle Bin is never Safe
+
+A bin's files are already deleted, but emptying it is final, and it can hold what a run just moved there under a promise
+that it could be restored. So a bin's row (`RecycleBinReclaimProvider`) is Check, and Careful while it holds an item
+Reclaim recycled as Careful, naming it. The run records what it moves into each volume's bin and forgets a bin it empties
+(`RecycledByReclaim`, for the process's lifetime; after a restart a bin is Check), and an item with something at its
+original path again, such as one restored from the bin, drops out. Select safe never ticks a bin.
+
 ## Reclaim: AI models
 
 The **AI models** category (`DevDriveReclaim/Providers/Models`) lists models that local model

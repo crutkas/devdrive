@@ -22,7 +22,7 @@ public sealed class OverlapTests
     /// </summary>
     private static ReclaimCandidate Bin(string volumeRoot, long size) =>
         new("recycle-bin", volumeRoot, $"Recycle Bin on {volumeRoot.TrimEnd('\\')}", size,
-            ReclaimRisk.Safe, "reason", "recovery hint", supportsRecycleBin: false);
+            ReclaimRisk.Check, "reason", "recovery hint", supportsRecycleBin: false);
 
     [TestMethod]
     public void NestedCandidateIsNotCountedTwice()
