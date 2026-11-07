@@ -219,6 +219,7 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
         if (KeepIndex)
         {
             ParallelVolumeScanner.RollupIndex(scanner.Folders);
+            ParallelVolumeScanner.TrimForIndex(scanner.Folders);
             snapshot.AttachIndex(new ScannedVolumeIndex(root, IndexLargeFileBytes));
         }
 
