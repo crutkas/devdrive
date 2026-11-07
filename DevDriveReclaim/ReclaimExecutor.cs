@@ -57,6 +57,7 @@ public sealed class ReclaimExecutor : IReclaimExecutor
     private readonly Func<string, RecycleBinVolumeSettings?> _readBinSettings;
     private readonly IReclaimOwnerRemoval _owners;
     private readonly ReclaimRecheck _recheck;
+    private readonly RecycledByReclaim _recycled;
 
     public ReclaimExecutor()
         : this(RecycleBinPreflight.ReadSettings)
@@ -92,13 +93,31 @@ public sealed class ReclaimExecutor : IReclaimExecutor
         Func<string, RecycleBinVolumeSettings?> readBinSettings,
         IReclaimOwnerRemoval owners,
         Providers.IWorktreeInspector git)
+        : this(readBinSettings, owners, git, RecycledByReclaim.Shared)
+    {
+    }
+
+    /// <param name="readBinSettings">Where the Recycle Bin settings come from.</param>
+    /// <param name="owners">What removes a candidate that has an <see cref="ReclaimCandidate.Owner"/>.</param>
+    /// <param name="git">What asks git again about a row graded from git (<see cref="ReclaimRecheck"/>).</param>
+    /// <param name="recycled">
+    /// Where the run records what it moved to a Recycle Bin, and forgets a bin it empties, so the next scan grades a bin by what
+    /// it holds (<see cref="Providers.RecycleBinReclaimProvider"/>). Injectable so tests don't share one record.
+    /// </param>
+    public ReclaimExecutor(
+        Func<string, RecycleBinVolumeSettings?> readBinSettings,
+        IReclaimOwnerRemoval owners,
+        Providers.IWorktreeInspector git,
+        RecycledByReclaim recycled)
     {
         ArgumentNullException.ThrowIfNull(readBinSettings);
         ArgumentNullException.ThrowIfNull(owners);
         ArgumentNullException.ThrowIfNull(git);
+        ArgumentNullException.ThrowIfNull(recycled);
         _readBinSettings = readBinSettings;
         _owners = owners;
         _recheck = new ReclaimRecheck(git);
+        _recycled = recycled;
     }
 
     public Task<ReclaimOutcome> ExecuteAsync(
@@ -129,7 +148,7 @@ public sealed class ReclaimExecutor : IReclaimExecutor
         {
             try
             {
-                completion.SetResult(Run(selection, preflight, _owners, _recheck, progress, cancellationToken));
+                completion.SetResult(Run(selection, preflight, _owners, _recheck, _recycled, progress, cancellationToken));
             }
             catch (Exception exception)
             {
@@ -152,6 +171,7 @@ public sealed class ReclaimExecutor : IReclaimExecutor
         Func<ReclaimCandidate, string, RecycleBinCheck> preflight,
         IReclaimOwnerRemoval owners,
         ReclaimRecheck recheck,
+        RecycledByReclaim recycledByRun,
         IProgress<ReclaimExecutionProgress>? progress,
         CancellationToken cancellationToken)
     {
@@ -171,8 +191,8 @@ public sealed class ReclaimExecutor : IReclaimExecutor
         // The bin's candidate path IS the volume root, so ordering purely by descending length puts
         // it dead last — after every other item on that volume has been recycled INTO it. Emptying
         // then destroys, permanently and silently, the very items the confirmation promised were
-        // restorable. Both are Safe-graded and both are ticked by the automatic SelectSafe after
-        // every scan, so that was the default path, not an edge case.
+        // restorable. Select safe never ticks a bin (it's graded Check or Careful), but a bin can
+        // still be ticked along with the items going into it.
         //
         // Emptying first is also what the user asked for: "get rid of what is in the bin" and "put
         // these in the bin" are two requests, and doing them in that order honours both.
@@ -195,7 +215,18 @@ public sealed class ReclaimExecutor : IReclaimExecutor
                 continue;
             }
 
+            // Worked out while the path is still there: once recycled, it leads nowhere.
+            string volume = candidate.VolumeRoot;
             ReclaimItemOutcome outcome = Remove(candidate, selection, preflight, owners, recheck, cancellationToken);
+            if (outcome.Status == ReclaimItemStatus.Recycled)
+            {
+                recycledByRun.Recycled(volume, candidate);
+            }
+            else if (outcome.Status == ReclaimItemStatus.Emptied)
+            {
+                recycledByRun.Emptied(candidate.Path);
+            }
+
             outcomes.Add(outcome);
             rootOutcomes[candidate.Path] = outcome;
             cancelled |= outcome.Status == ReclaimItemStatus.Cancelled;
@@ -223,6 +254,12 @@ public sealed class ReclaimExecutor : IReclaimExecutor
                 rootOutcomes.TryGetValue(container, out ReclaimItemOutcome? found)
                     ? found
                     : null;
+
+            // What went into the bin inside a recycled container is in the bin too, with its own grade.
+            if (containerOutcome?.Status == ReclaimItemStatus.Recycled)
+            {
+                recycledByRun.Recycled(containerOutcome.Candidate.VolumeRoot, candidate);
+            }
 
             // Its container's fate, not the run's. Reading the run-wide flag meant a child whose
             // container was reached and genuinely failed got labelled Cancelled purely because some

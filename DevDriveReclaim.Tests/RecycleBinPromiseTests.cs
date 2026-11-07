@@ -101,7 +101,7 @@ public sealed class RecycleBinPromiseTests
     {
         ReclaimCandidate fits = Candidate(@"C:\src\a\obj", 10);
         ReclaimCandidate huge = Candidate(@"C:\src\b\node_modules", 5_000);
-        ReclaimCandidate bin = new("recycle-bin", @"C:\", "Recycle Bin on C:", 300, ReclaimRisk.Safe, "t", "t",
+        ReclaimCandidate bin = new("recycle-bin", @"C:\", "Recycle Bin on C:", 300, ReclaimRisk.Check, "t", "t",
             supportsRecycleBin: false);
 
         ReclaimPlan plan = ReclaimPlan.Create(

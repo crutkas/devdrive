@@ -129,7 +129,7 @@ public sealed class ReclaimRecycleTests
     /// developer's Recycle Bin. Failure is deliberately ignored: leaving a 4 KB test fixture in the
     /// bin is a nuisance, whereas failing a passing test over cleanup would be a lie about the code.
     /// </summary>
-    private static void PurgeFromRecycleBin(string name)
+    internal static void PurgeFromRecycleBin(string name)
     {
         try
         {
