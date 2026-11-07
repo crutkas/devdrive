@@ -430,21 +430,6 @@ internal sealed class ParallelVolumeScanner
         System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(exception).Throw();
 
     /// <summary>
-    /// Once the final snapshot is built, the index keeps the folders alive for the Reclaim scan that reads them: what only the
-    /// snapshot needed (each folder's biggest files, now its nodes) is let go, and the lists lose their spare room.
-    /// </summary>
-    internal static void TrimForIndex(IEnumerable<ScanFolder> folders)
-    {
-        foreach (ScanFolder folder in folders)
-        {
-            folder.Files = default;
-            folder.Subfolders?.TrimExcess();
-            folder.ReparseLeaves?.TrimExcess();
-            folder.LargeFiles?.TrimExcess();
-        }
-    }
-
-    /// <summary>
     /// Rolls the volume index's totals up to every ancestor, after the walk. A reparse folder is counted as a folder but not
     /// entered, and a folder beneath one doesn't make its ancestors incomplete: that's how DirectoryMeasurer and
     /// FastDirectoryWalker see the tree.
