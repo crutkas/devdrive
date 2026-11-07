@@ -83,6 +83,20 @@ internal static class ModelFiles
     }
 
     /// <summary>
+    /// Which file <paramref name="path"/> names (its volume and 128-bit file id, as <see cref="SameFile"/> compares) and how
+    /// many names it has, from one open; null when it can't be opened. A link is read as itself, not what it points to.
+    /// </summary>
+    public static (FileIdInfo Id, int Links)? Identity(string path)
+    {
+        using SafeFileHandle handle = OpenForAttributes(path);
+        return !handle.IsInvalid &&
+            GetFileInformationByHandleEx(handle, FileIdInformation, out FileIdInfo id, (uint)Marshal.SizeOf<FileIdInfo>()) &&
+            GetFileInformationByHandle(handle, out ByHandleFileInformation info)
+                ? (id, (int)info.NumberOfLinks)
+                : null;
+    }
+
+    /// <summary>
     /// Both paths name one file: the same volume and 128-bit file id (ReFS's 64-bit index isn't unique), whatever links, short
     /// names or case lead there. False when either can't be opened.
     /// </summary>
@@ -293,8 +307,9 @@ internal static class ModelFiles
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetFileInformationByHandle(SafeFileHandle file, out ByHandleFileInformation information);
 
+    /// <summary>A file's identity: the volume it's on and its 128-bit id there.</summary>
     [StructLayout(LayoutKind.Sequential)]
-    private readonly record struct FileIdInfo(ulong VolumeSerialNumber, ulong FileIdLow, ulong FileIdHigh);
+    internal readonly record struct FileIdInfo(ulong VolumeSerialNumber, ulong FileIdLow, ulong FileIdHigh);
 
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]

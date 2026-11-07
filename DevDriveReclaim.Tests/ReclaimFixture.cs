@@ -83,6 +83,30 @@ internal sealed class ReclaimFixture : IDisposable
         return path;
     }
 
+    /// <summary>
+    /// Gives <paramref name="target"/> a second name, <paramref name="relativePath"/>: a hard link, as a package store or a local
+    /// git clone makes. Needs no elevation.
+    /// </summary>
+    public string HardLink(string relativePath, string target)
+    {
+        string path = Path.Combine(Root, relativePath);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+
+        using var process = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = "cmd.exe",
+            Arguments = $"/c mklink /H \"{path}\" \"{target}\"",
+            CreateNoWindow = true,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        })!;
+
+        process.WaitForExit(10_000);
+
+        return path;
+    }
+
     public void Age(string path, TimeSpan age)
     {
         var when = DateTime.UtcNow - age;
