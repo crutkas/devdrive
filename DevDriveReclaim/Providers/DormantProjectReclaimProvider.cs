@@ -122,6 +122,19 @@ public sealed class DormantProjectReclaimProvider(IWorktreeInspector? inspector 
                 $"idle {age} · {state.ChangedFileCount:N0} uncommitted files");
         }
 
+        if (state.HasUnpushedCommits && !state.HasUpstream)
+        {
+            // No upstream is tracked apart from a count of commits ahead of one (GitWorktreeInspector): there is nothing to
+            // count against, so "0 unpushed commits" would read as a bug.
+            string branch = state.Branch ?? "its branch";
+            return (
+                ReclaimRisk.Careful,
+                $"Untouched for {age}, and {branch} has no remote tracking branch, so this folder may hold the only copy " +
+                    "of its commits. Deleting the folder deletes them.",
+                "Nothing until you push. Then a fresh clone brings it all back.",
+                $"idle {age} · {branch} has no upstream branch");
+        }
+
         if (state.HasUnpushedCommits)
         {
             return (

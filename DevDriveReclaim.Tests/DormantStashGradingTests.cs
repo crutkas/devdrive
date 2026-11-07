@@ -52,6 +52,21 @@ public sealed class DormantStashGradingTests
     }
 
     [TestMethod]
+    public void ARepositoryWithNoUpstreamSaysSoNotZeroUnpushedCommits()
+    {
+        using var fixture = new ReclaimFixture();
+        Dormant(fixture, "old-project");
+        var noUpstream = new WorktreeState("main", HasUncommittedChanges: false, ChangedFileCount: 0,
+            HasUnpushedCommits: true, UnpushedCommitCount: 0, IsMerged: false, HasUpstream: false);
+
+        ReclaimCandidate? found = ScanOne(new StashingInspector(noUpstream, 0), fixture);
+
+        Assert.IsNotNull(found);
+        Assert.AreEqual(ReclaimRisk.Careful, found.Risk);
+        StringAssert.Contains(found.Detail!, "main has no upstream branch");
+        Assert.IsFalse(found.Detail!.Contains("unpushed", StringComparison.Ordinal), found.Detail);
+    }
+    [TestMethod]
     public void AStashedDormantRepositoryIsNotOfferedAsFullyRecoverable()
     {
         using var fixture = new ReclaimFixture();
