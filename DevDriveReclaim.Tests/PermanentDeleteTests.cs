@@ -21,6 +21,28 @@ public sealed class PermanentDeleteTests
         File.SetAttributes(path, File.GetAttributes(path) | FileAttributes.ReadOnly);
 
     [TestMethod]
+    public void WhatsLeftKeepsEverythingButItsSize()
+    {
+        var evidence = new Providers.GitEvidence(new Providers.WorktreeState("main", HasUncommittedChanges: true, ChangedFileCount: 1, HasUnpushedCommits: false, UnpushedCommitCount: 0, IsMerged: false));
+        ReclaimCandidate scanned = new ReclaimCandidate(
+            "dormant-projects", @"C:\src\old", "old", 10 * Kb, ReclaimRisk.Careful, "idle", "clone it again",
+            lastUsedUtc: DateTimeOffset.UtcNow.AddDays(-400), itemCount: 30, detail: "idle 1 year", supportsRecycleBin: false)
+        {
+            GitEvidence = evidence,
+            KeptCopy = @"C:\src\kept",
+        };
+
+        ReclaimCandidate left = scanned.WithSize(2 * Kb, 1);
+
+        Assert.AreEqual(2 * Kb, left.SizeBytes);
+        Assert.AreEqual(1, left.ItemCount);
+        Assert.AreEqual(scanned, left.WithSize(scanned.SizeBytes, scanned.ItemCount), "nothing else changes");
+        Assert.AreSame(evidence, left.GitEvidence);
+        Assert.AreEqual(@"C:\src\kept", left.KeptCopy);
+        Assert.IsFalse(left.SupportsRecycleBin);
+    }
+
+    [TestMethod]
     public async Task ReadOnlyFilesAndFoldersGoWithTheRest()
     {
         using var fixture = new ReclaimFixture();
