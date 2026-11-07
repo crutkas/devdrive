@@ -183,6 +183,18 @@ public sealed record ReclaimCandidate
             : this;
 
     /// <summary>
+    /// The same candidate at another size: what's left of it, measured again after a permanent delete that stopped part-way
+    /// (<see cref="ReclaimItemStatus.PartlyRemoved"/>), so its row and every total show what's still there.
+    /// </summary>
+    public ReclaimCandidate WithSize(long sizeBytes, int itemCount) =>
+        new(CategoryId, Path, DisplayName, sizeBytes, Risk, Reason, RecoveryHint,
+            LastUsedUtc, itemCount, Detail, SupportsRecycleBin, Owner)
+        {
+            GitEvidence = GitEvidence,
+            KeptCopy = KeptCopy,
+        };
+
+    /// <summary>
     /// The root of the volume this path's bytes are on, e.g. <c>C:\</c>: where the path really leads through any junction or
     /// symbolic link on the way (<see cref="ReclaimVolume"/>), not the volume it's spelled on. Drives which Recycle Bin the plan
     /// and the run check an item against and the per-volume projection. Worked out once, on first use.

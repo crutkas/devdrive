@@ -220,6 +220,7 @@ agree with what Space will measure afterwards. Four rules keep them honest
   that still stops part-way, at a file another program holds, is `PartlyRemoved`: the row stays and
   says what couldn't be deleted and why, and the bytes that went, added up as they were deleted, count
   as freed.
+  A caller measures what's left and shows it with `ReclaimCandidate.WithSize`.
 
 ## Reclaim: build output is what git doesn't track
 
