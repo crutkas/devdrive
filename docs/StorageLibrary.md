@@ -191,8 +191,8 @@ still exposes them.
 ## Reclaim: removed is not freed
 
 The Reclaim room sits beside Space and reads the same volumes, so its numbers have to
-agree with what Space will measure afterwards. Two rules keep them honest
-(`DevDriveReclaim/ReclaimPlan.cs`, `RecycleBinPreflight.cs`, `ReclaimExecution.cs`):
+agree with what Space will measure afterwards. Three rules keep them honest
+(`DevDriveReclaim/ReclaimPlan.cs`, `RecycleBinPreflight.cs`, `ReclaimExecution.cs`, `ReclaimVolume.cs`):
 
 - **Recycling frees nothing yet.** `$Recycle.Bin` lives on the same volume, so an item
   moved there still occupies it. Outcomes split `BytesFreed` (deleted outright, or a bin
@@ -206,6 +206,43 @@ agree with what Space will measure afterwards. Two rules keep them honest
   At run time the executor re-reads the settings and **keeps** — rather than deletes — any
   item it promised to recycle that the bin now refuses, and asks the shell
   (`FOF_WANTNUKEWARNING`) to warn before any permanent delete nothing predicted.
+- **The volume is the one the bytes are on.** A source root can be a junction or symbolic link to
+  another volume, and the scan reaches everything under it by the link's path. A row's `VolumeRoot`
+  follows the path through every link to where it leads (`ReclaimVolume`, the resolution
+  `ReclaimPathGuard` acts on), so the bin the plan and the run check an item against, and the volume
+  whose bar moves, are the ones the item really leaves. A path that can't be opened is placed by its
+  nearest ancestor that can; one nothing resolves keeps its spelled root. Network paths are never
+  opened.
+
+## Reclaim: build output is what git doesn't track
+
+Build outputs are found by folder name (`bin`, `obj`, `build`, `out`, `dist`, `target`,
+`node_modules`, …), and a name is a guess: plenty of repositories commit a `build` folder of
+pipeline files or a `bin` of tools. So each repository's candidate folders are put to git once
+(`IWorktreeInspector.TrackedFolders`, one bounded `git ls-files` per repository). A folder git tracks
+any file in isn't offered as generated output; when git can't answer (missing, timed out, a
+repository it refuses), the folder is offered as Check, not Safe. An ignored folder with nothing
+committed in it is still Safe, and a `.git` that isn't a repository to git keeps the name's answer.
+
+## Reclaim: asked again before it goes
+
+A scan grades each row on what it found then, and a run can start hours later. A row whose grade
+rests on something that can change is asked about again just before it goes
+(`DevDriveReclaim/ReclaimRecheck.cs`), and **kept** when the answer is riskier now: the outcome is
+`Failed`, "kept — changed since the scan: …", nothing is freed, and `ReclaimItemOutcome.Change` says
+what changed as data. The dry run (`SafeFakeReclaimExecutor`) asks the same questions; they only read.
+
+- **Worktrees and dormant clones** carry what git said at the scan (`ReclaimCandidate.GitEvidence`).
+  The run asks the same `IWorktreeInspector` again and keeps the row when it has uncommitted changes
+  (or more of them), commits no remote has, no upstream, another branch or commit or a detached HEAD,
+  a branch no longer merged, a new local-only ignored file (a `.env`), more stashes (a dormant
+  clone), or when git can't answer. A row graded without git (an orphaned worktree folder) has
+  nothing to ask about.
+- **Duplicates** name the copy kept in their place (`ReclaimCandidate.KeptCopy`). Nothing under
+  `$Recycle.Bin` or `System Volume Information` is a copy, kept or offered; the engine doesn't offer a
+  row whose kept copy is inside another row of the scan (a build output, a dormant project, a
+  model); and the run keeps one whose kept copy is gone, isn't the same size any more, or is being
+  removed in the same run ("kept — the copy kept in its place, …, is being removed in this run too").
 
 ## Reclaim: AI models
 

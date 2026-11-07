@@ -31,6 +31,14 @@ namespace DevDriveReclaim.Providers;
 /// Risk is <see cref="ReclaimRisk.Check"/>, never Safe. The copies are provably byte-identical, but
 /// this provider cannot know whether some build expects a file at that exact path.
 /// </para>
+/// <para>
+/// <b>The kept copy has to be one that stays.</b> Nothing under <c>$Recycle.Bin</c> or
+/// <c>System Volume Information</c> is a copy, kept or offered: a source root can be a whole data
+/// drive, and keeping a recycled file (which the next emptying deletes) as the "original" while
+/// offering the live one loses both. Each row names its kept copy (<see cref="ReclaimCandidate.KeptCopy"/>);
+/// the engine drops a row whose kept copy is inside another row of the scan (a build output, a dormant
+/// project), and the run keeps a row whose kept copy is gone, changed or going in the same run.
+/// </para>
 /// </remarks>
 public sealed class DuplicateFileReclaimProvider : IReclaimProvider
 {
@@ -171,7 +179,10 @@ public sealed class DuplicateFileReclaimProvider : IReclaimProvider
                         // Every row in a group shares a file name, so the name alone cannot tell one
                         // copy from another. The folder is the only thing that distinguishes them,
                         // and the full path is only a tooltip away in the table.
-                        detail: $"{tails[i]} · one of {ordered.Count:N0} copies"));
+                        detail: $"{tails[i]} · one of {ordered.Count:N0} copies")
+                    {
+                        KeptCopy = kept,
+                    });
                 }
             }
 
@@ -209,7 +220,7 @@ public sealed class DuplicateFileReclaimProvider : IReclaimProvider
                     : FastDirectoryWalker.EnumerateFiles(root, cancellationToken);
             foreach ((string fullPath, FastDirEntry entry) in files)
             {
-                if (entry.ApparentBytes < floor)
+                if (entry.ApparentBytes < floor || InSystemFolder(fullPath))
                 {
                     continue;
                 }
@@ -230,6 +241,15 @@ public sealed class DuplicateFileReclaimProvider : IReclaimProvider
 
         return bySize;
     }
+
+    /// <summary>
+    /// Whether <paramref name="path"/> is inside a folder Windows keeps for itself on every volume: the Recycle Bin (whose
+    /// files go when it's emptied, so one can't be the copy that stays) or restore points. The repository walk skips both by
+    /// name for the same reason.
+    /// </summary>
+    private static bool InSystemFolder(string path) =>
+        path.Contains(@"\$Recycle.Bin\", StringComparison.OrdinalIgnoreCase) ||
+        path.Contains(@"\System Volume Information\", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Splits a set of candidates by a hash, dropping singletons and anything unreadable.

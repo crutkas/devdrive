@@ -360,6 +360,73 @@ public sealed class SafeFakeReclaimExecutorTests
         }
     }
 
+    /// <summary>
+    /// The fake asks git again about a row graded from git, as the real run does (Dev Config #341), so the UI suite sees the
+    /// "kept — changed since the scan" row a user would. Asking reads only.
+    /// </summary>
+    [TestMethod]
+    public async Task AWorktreeThatChangedSinceTheScanIsKept()
+    {
+        string path = Path.Combine(Path.GetTempPath(), "ddm-safe-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(path);
+        try
+        {
+            var clean = new DevDriveReclaim.Providers.WorktreeState("feature", false, 0, false, 0, IsMerged: true);
+            var git = new AnsweringInspector(clean with { HasUncommittedChanges = true, ChangedFileCount = 1 });
+            SafeFakeReclaimExecutor executor = new(TestBins.Recycles, new ReclaimRecheck(git));
+            ReclaimCandidate row = new("worktrees", path, "wt", 1_000_000, ReclaimRisk.Safe, "clean and merged", "git worktree add")
+            {
+                GitEvidence = new DevDriveReclaim.Providers.GitEvidence(clean),
+            };
+
+            ReclaimOutcome outcome = await executor.ExecuteAsync([row], null, default);
+
+            Assert.AreEqual(ReclaimItemStatus.Failed, outcome.Items.Single().Status);
+            Assert.AreEqual(ReclaimChange.UncommittedChanges, outcome.Items.Single().Change);
+            StringAssert.Contains(outcome.Items.Single().Message, "changed since the scan");
+            Assert.IsEmpty(executor.Removed);
+        }
+        finally
+        {
+            Directory.Delete(path, recursive: true);
+        }
+    }
+
+    private sealed class AnsweringInspector(DevDriveReclaim.Providers.WorktreeState state) : DevDriveReclaim.Providers.IWorktreeInspector
+    {
+        public DevDriveReclaim.Providers.WorktreeState Inspect(string worktreePath, CancellationToken cancellationToken) => state;
+    }
+
+    /// <summary>The fake keeps a duplicate whose kept copy goes in the same run, as the real run does (Dev Config #347).</summary>
+    [TestMethod]
+    public async Task ADuplicateWhoseKeptCopyGoesTooIsKept()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "ddm-safe-" + Guid.NewGuid().ToString("N"));
+        string bin = Path.Combine(root, "bin");
+        Directory.CreateDirectory(bin);
+        string kept = Path.Combine(bin, "model.onnx");
+        string asset = Path.Combine(root, "model.onnx");
+        File.WriteAllText(kept, "same");
+        File.WriteAllText(asset, "same");
+        try
+        {
+            SafeFakeReclaimExecutor executor = new(TestBins.Recycles);
+            ReclaimCandidate duplicate = new("duplicates", asset, "model.onnx", 1_000_000, ReclaimRisk.Check, "identical", "copy it back")
+            {
+                KeptCopy = kept,
+            };
+
+            ReclaimOutcome outcome = await executor.ExecuteAsync([Candidate(bin, "bin"), duplicate], null, default);
+
+            Assert.AreEqual(ReclaimChange.KeptCopyRemovedToo, outcome.Items.Single(i => i.Candidate.Path == asset).Change);
+            CollectionAssert.AreEqual(new[] { bin }, executor.Removed.ToArray());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     /// <summary>Something the confirmation named as permanent is reported as freed, not recycled.</summary>
     [TestMethod]
     public async Task AConsentedPermanentItemCountsAsFreed()

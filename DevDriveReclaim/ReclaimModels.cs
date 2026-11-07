@@ -153,6 +153,21 @@ public sealed record ReclaimCandidate
     public ReclaimOwner? Owner { get; }
 
     /// <summary>
+    /// What git said about this working tree when the scan graded it, for a row graded from git (a worktree, a dormant clone);
+    /// null otherwise. A grade read from git is only true until someone edits a file, so the run asks git again before it
+    /// removes the row and keeps it when the answer is riskier now (<see cref="ReclaimRecheck"/>).
+    /// </summary>
+    public Providers.GitEvidence? GitEvidence { get; init; }
+
+    /// <summary>
+    /// For a copy of a file kept elsewhere (a duplicate), the copy that stays when this one goes; null otherwise. Removing this
+    /// row is only safe while that copy is there, so a scan doesn't offer the row when the kept copy is inside another of its
+    /// rows, and a run keeps it when the kept copy is gone, changed, or being removed in the same run
+    /// (<see cref="ReclaimRecheck"/>).
+    /// </summary>
+    public string? KeptCopy { get; init; }
+
+    /// <summary>
     /// The same candidate, marked for permanent deletion. Only <see cref="ReclaimPlan.ConsentedSelection"/>
     /// should call this: it is the record that the confirmation named the item as permanent.
     /// </summary>
@@ -161,16 +176,38 @@ public sealed record ReclaimCandidate
             ? new ReclaimCandidate(
                 CategoryId, Path, DisplayName, SizeBytes, Risk, Reason, RecoveryHint,
                 LastUsedUtc, ItemCount, Detail, supportsRecycleBin: false, Owner)
+            {
+                GitEvidence = GitEvidence,
+                KeptCopy = KeptCopy,
+            }
             : this;
 
-    /// <summary>The volume root this path lives on, e.g. <c>C:\</c>. Drives the per-volume projection.</summary>
-    public string VolumeRoot =>
-        System.IO.Path.GetPathRoot(Path) ?? string.Empty;
+    /// <summary>
+    /// The root of the volume this path's bytes are on, e.g. <c>C:\</c>: where the path really leads through any junction or
+    /// symbolic link on the way (<see cref="ReclaimVolume"/>), not the volume it's spelled on. Drives which Recycle Bin the plan
+    /// and the run check an item against and the per-volume projection. Worked out once, on first use.
+    /// </summary>
+    public string VolumeRoot => _volume.Value ??= ReclaimVolume.RootOf(Path);
+
+    private readonly VolumeMemo _volume = new();
 
     /// <summary>Days since last activity, or null when the provider could not tell.</summary>
     public int? DaysSinceLastUse => LastUsedUtc is { } used
         ? Math.Max(0, (int)(DateTimeOffset.UtcNow - used).TotalDays)
         : null;
+
+    /// <summary>
+    /// Holds <see cref="VolumeRoot"/> once it's worked out. Every memo equals every other, so it never makes two candidates
+    /// with the same values unequal.
+    /// </summary>
+    private sealed class VolumeMemo
+    {
+        public string? Value;
+
+        public override bool Equals(object? obj) => obj is VolumeMemo;
+
+        public override int GetHashCode() => 0;
+    }
 }
 
 /// <summary>

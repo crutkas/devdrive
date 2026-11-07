@@ -85,6 +85,15 @@ public static class ReclaimOverlapResolver
     }
 
     /// <summary>
+    /// True when a candidate at <paramref name="containerPath"/> takes <paramref name="path"/> with it: it is that path or
+    /// contains it. A volume root contains nothing, as in <see cref="Roots"/>.
+    /// </summary>
+    public static bool Covers(string containerPath, string path) =>
+        !string.IsNullOrEmpty(containerPath) && !string.IsNullOrEmpty(path) && CanContain(containerPath) &&
+        (string.Equals(WithSeparator(containerPath), WithSeparator(path), StringComparison.OrdinalIgnoreCase) ||
+            Contains(containerPath, path));
+
+    /// <summary>
     /// True when a candidate at <paramref name="path"/> is allowed to absorb others.
     /// </summary>
     /// <remarks>

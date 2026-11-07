@@ -81,7 +81,11 @@ public sealed class WorktreeReclaimProvider(IWorktreeInspector? inspector = null
                         RecoveryHint(state, worktree.Name),
                         lastUsedUtc: measurement.NewestWriteUtc,
                         itemCount: measurement.FileCount,
-                        detail: detail);
+                        detail: detail)
+                    {
+                        // The run asks git again before removing it, and keeps it if this answer got riskier.
+                        GitEvidence = new GitEvidence(state),
+                    };
                 });
 
             var candidates = new List<ReclaimCandidate>(slots.Where(c => c is not null)!);
