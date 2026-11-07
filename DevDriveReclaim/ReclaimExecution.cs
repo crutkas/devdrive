@@ -26,13 +26,20 @@ public enum ReclaimItemStatus
 
     /// <summary>The run was cancelled before reaching this item.</summary>
     Cancelled,
+
+    /// <summary>
+    /// A permanent delete that stopped part-way: some of it is gone for good (<see cref="ReclaimItemOutcome.Bytes"/> is what
+    /// went, counted as it was deleted), and the rest is still there. Not reversible, and not done.
+    /// </summary>
+    PartlyRemoved,
 }
 
 /// <summary>The result for one candidate.</summary>
 /// <remarks>
 /// <paramref name="Bytes"/> is the size measured during the scan, not a re-measurement. There is
 /// nothing left to measure once the item is gone, and reading free space instead would credit this
-/// run with every other write the machine made while it ran.
+/// run with every other write the machine made while it ran. A <see cref="ReclaimItemStatus.PartlyRemoved"/>
+/// item is the exception: it isn't gone, so its bytes are what the delete removed, added up file by file.
 /// <para>
 /// Where those bytes went is the status's business, not the number's: <see cref="BytesFreed"/> and
 /// <see cref="BytesRecycled"/> split them. Recycling moves an item into <c>$Recycle.Bin</c> on the
@@ -53,8 +60,8 @@ public sealed record ReclaimItemOutcome(
         or ReclaimItemStatus.Absorbed
         or ReclaimItemStatus.AlreadyGone;
 
-    /// <summary>True when the user asked for something and did not get it.</summary>
-    public bool NeedsAttention => Status is ReclaimItemStatus.Refused or ReclaimItemStatus.Failed;
+    /// <summary>True when the user asked for something and did not get it, or got only part of it.</summary>
+    public bool NeedsAttention => Status is ReclaimItemStatus.Refused or ReclaimItemStatus.Failed or ReclaimItemStatus.PartlyRemoved;
 
     /// <summary>
     /// Why the run kept it when it changed since the scan, or its kept copy goes in the same run (<see cref="ReclaimRecheck"/>);
@@ -62,8 +69,10 @@ public sealed record ReclaimItemOutcome(
     /// </summary>
     public ReclaimChange Change { get; init; }
 
-    /// <summary>Bytes the volume got back now: deleted outright, or emptied from a bin.</summary>
-    public long BytesFreed => Status is ReclaimItemStatus.Deleted or ReclaimItemStatus.Emptied ? Bytes : 0;
+    /// <summary>Bytes the volume got back now: deleted outright (all of it, or the part that went), or emptied from a bin.</summary>
+    public long BytesFreed => Status is ReclaimItemStatus.Deleted or ReclaimItemStatus.Emptied or ReclaimItemStatus.PartlyRemoved
+        ? Bytes
+        : 0;
 
     /// <summary>Bytes moved into the Recycle Bin. Restorable, and still occupying the volume.</summary>
     public long BytesRecycled => Status is ReclaimItemStatus.Recycled ? Bytes : 0;

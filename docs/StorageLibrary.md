@@ -191,8 +191,9 @@ still exposes them.
 ## Reclaim: removed is not freed
 
 The Reclaim room sits beside Space and reads the same volumes, so its numbers have to
-agree with what Space will measure afterwards. Three rules keep them honest
-(`DevDriveReclaim/ReclaimPlan.cs`, `RecycleBinPreflight.cs`, `ReclaimExecution.cs`, `ReclaimVolume.cs`):
+agree with what Space will measure afterwards. Four rules keep them honest
+(`DevDriveReclaim/ReclaimPlan.cs`, `RecycleBinPreflight.cs`, `ReclaimExecution.cs`, `ReclaimVolume.cs`,
+`PermanentDelete.cs`):
 
 - **Recycling frees nothing yet.** `$Recycle.Bin` lives on the same volume, so an item
   moved there still occupies it. Outcomes split `BytesFreed` (deleted outright, or a bin
@@ -213,6 +214,12 @@ agree with what Space will measure afterwards. Three rules keep them honest
   whose bar moves, are the ones the item really leaves. A path that can't be opened is placed by its
   nearest ancestor that can; one nothing resolves keeps its spelled root. Network paths are never
   opened.
+- **A permanent delete goes whole, or says how far it got** (`PermanentDelete.cs`). Read-only files
+  and folders go with the rest (git writes every object file read-only, so a repository used to lose
+  its working files and keep its `.git`), and links are removed as links, never followed. A delete
+  that still stops part-way, at a file another program holds, is `PartlyRemoved`: the row stays and
+  says what couldn't be deleted and why, and the bytes that went, added up as they were deleted, count
+  as freed.
 
 ## Reclaim: build output is what git doesn't track
 
@@ -239,10 +246,13 @@ what changed as data. The dry run (`SafeFakeReclaimExecutor`) asks the same ques
   clone), or when git can't answer. A row graded without git (an orphaned worktree folder) has
   nothing to ask about.
 - **Duplicates** name the copy kept in their place (`ReclaimCandidate.KeptCopy`). Nothing under
-  `$Recycle.Bin` or `System Volume Information` is a copy, kept or offered; the engine doesn't offer a
-  row whose kept copy is inside another row of the scan (a build output, a dormant project, a
-  model); and the run keeps one whose kept copy is gone, isn't the same size any more, or is being
-  removed in the same run ("kept — the copy kept in its place, …, is being removed in this run too").
+  `$Recycle.Bin`, `System Volume Information` or a `.git` is a copy, kept or offered. Hard links of
+  one file (the same volume and file id) aren't copies of each other, and a file with another name
+  is never offered, since removing one name frees nothing; it can be the copy kept. The engine
+  doesn't offer a row whose kept copy is inside another row of the scan (a build output, a dormant
+  project, a model); and the run keeps one whose kept copy is gone, isn't the same size any more, or
+  is being removed in the same run ("kept — the copy kept in its place, …, is being removed in this
+  run too").
 
 ## Reclaim: AI models
 

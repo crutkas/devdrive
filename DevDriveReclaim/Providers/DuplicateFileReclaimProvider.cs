@@ -39,6 +39,13 @@ namespace DevDriveReclaim.Providers;
 /// the engine drops a row whose kept copy is inside another row of the scan (a build output, a dormant
 /// project), and the run keeps a row whose kept copy is gone, changed or going in the same run.
 /// </para>
+/// <para>
+/// <b>A copy is another file, not another name.</b> Hard links of one file (the same volume and file
+/// id) aren't copies of each other, and removing one name of a file that has another frees nothing,
+/// so such a file is never offered (it can be the copy kept: it stays whatever happens here). Nothing
+/// under <c>.git</c> is a copy either: a local clone hard-links its packs to the original's, and a
+/// repository's objects are git's to manage, not this table's.
+/// </para>
 /// </remarks>
 public sealed class DuplicateFileReclaimProvider : IReclaimProvider
 {
@@ -89,6 +96,7 @@ public sealed class DuplicateFileReclaimProvider : IReclaimProvider
             // IO-bound and every group is independent, so serialising it left the whole scan waiting
             // on one thread: it was 271 s of a 298 s scan on the machine this was measured against.
             var confirmed = new ConcurrentBag<(long Size, List<string> Identical)>();
+            var links = new ConcurrentDictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             int groupsDone = 0;
 
             try
@@ -103,7 +111,7 @@ public sealed class DuplicateFileReclaimProvider : IReclaimProvider
                     group =>
                     {
                         foreach (List<string> sameHead in
-                            Split(group.Value, p => TryHash(p, HeadProbeBytes), cancellationToken))
+                            Split(DistinctFiles(group.Value, links), p => TryHash(p, HeadProbeBytes), cancellationToken))
                         {
                             foreach (List<string> identical in
                                 Split(
@@ -151,10 +159,17 @@ public sealed class DuplicateFileReclaimProvider : IReclaimProvider
                 .OrderByDescending(x => x.Size)
                 .ThenBy(x => x.Identical[0], StringComparer.OrdinalIgnoreCase))
             {
-                // Keep the shortest path: it is the likeliest original rather than a fan-out copy.
+                // Keep the shortest path: it is the likeliest original rather than a fan-out copy. Unless a copy has another
+                // name (a hard link, as a package store makes): removing one name of that file frees nothing, so it's never
+                // offered, and it stays whatever a run does, which makes it the copy to keep.
                 List<string> ordered = [.. identical.OrderBy(p => p.Length).ThenBy(p => p)];
-                string kept = ordered[0];
-                List<string> offered = [.. ordered.Skip(1)];
+                string kept = ordered.FirstOrDefault(p => links.GetValueOrDefault(p) != 1) ?? ordered[0];
+                List<string> offered = [.. ordered.Where(p => p != kept && links.GetValueOrDefault(p) == 1)];
+                if (offered.Count == 0)
+                {
+                    continue;
+                }
+
                 List<string> tails = DistinctTails(offered);
 
                 for (int i = 0; i < offered.Count; i++)
@@ -220,7 +235,7 @@ public sealed class DuplicateFileReclaimProvider : IReclaimProvider
                     : FastDirectoryWalker.EnumerateFiles(root, cancellationToken);
             foreach ((string fullPath, FastDirEntry entry) in files)
             {
-                if (entry.ApparentBytes < floor || InSystemFolder(fullPath))
+                if (entry.ApparentBytes < floor || NeverACopy(fullPath))
                 {
                     continue;
                 }
@@ -243,13 +258,43 @@ public sealed class DuplicateFileReclaimProvider : IReclaimProvider
     }
 
     /// <summary>
-    /// Whether <paramref name="path"/> is inside a folder Windows keeps for itself on every volume: the Recycle Bin (whose
-    /// files go when it's emptied, so one can't be the copy that stays) or restore points. The repository walk skips both by
-    /// name for the same reason.
+    /// Whether <paramref name="path"/> is somewhere no copy is kept or offered from: a folder Windows keeps for itself on
+    /// every volume, the Recycle Bin (whose files go when it's emptied, so one can't be the copy that stays) or restore
+    /// points, which the repository walk skips by name for the same reason; or a repository's <c>.git</c>, whose objects
+    /// are git's (a local clone hard-links its packs to the original's, so removing one frees nothing and can break a clone).
     /// </summary>
-    private static bool InSystemFolder(string path) =>
+    private static bool NeverACopy(string path) =>
         path.Contains(@"\$Recycle.Bin\", StringComparison.OrdinalIgnoreCase) ||
-        path.Contains(@"\System Volume Information\", StringComparison.OrdinalIgnoreCase);
+        path.Contains(@"\System Volume Information\", StringComparison.OrdinalIgnoreCase) ||
+        path.Contains(@"\.git\", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// One name per file. Hard links of one file (the same volume and 128-bit file id, as
+    /// <see cref="Models.ModelFiles.SameFile"/> compares) aren't copies of each other, so the shortest name stands for the
+    /// file and it's read once. Records how many names each has in <paramref name="links"/>; 0 when that couldn't be told.
+    /// </summary>
+    private static List<string> DistinctFiles(List<string> paths, ConcurrentDictionary<string, int> links)
+    {
+        var seen = new HashSet<Models.ModelFiles.FileIdInfo>();
+        List<string> distinct = [];
+        foreach (string path in paths.OrderBy(p => p.Length).ThenBy(p => p, StringComparer.OrdinalIgnoreCase))
+        {
+            if (Models.ModelFiles.Identity(path) is not { } identity)
+            {
+                links[path] = 0;
+                distinct.Add(path);
+                continue;
+            }
+
+            links[path] = identity.Links;
+            if (seen.Add(identity.Id))
+            {
+                distinct.Add(path);
+            }
+        }
+
+        return distinct;
+    }
 
     /// <summary>
     /// Splits a set of candidates by a hash, dropping singletons and anything unreadable.

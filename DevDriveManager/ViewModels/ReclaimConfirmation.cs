@@ -93,6 +93,14 @@ internal static class ReclaimNarration
         string failed = outcome.FailedCount == 1 ? "1 item" : $"{outcome.FailedCount:N0} items";
         string binNote = recycled > 0 ? " " + RecycledSpaceNote : string.Empty;
 
+        // A delete that stopped part-way freed what went, and the item is still listed: "could not be removed" isn't true of
+        // it, and neither is "across 0 items" when only those freed anything.
+        int partly = outcome.Roots.Count(i => i.Status == ReclaimItemStatus.PartlyRemoved);
+        string notRemoved = partly == 0
+            ? "could not be removed"
+            : partly == outcome.FailedCount ? "was only partly removed" : "could not be removed, or only partly,";
+        string across = outcome.RemovedCount == 0 && partly > 0 ? string.Empty : $" across {items}";
+
         if (outcome.Cancelled)
         {
             // "Nothing else was touched" is only true of what was never reached. Items that were
@@ -101,7 +109,7 @@ internal static class ReclaimNarration
             // room's copy is written to avoid, and it contradicts the failure banner shown beside it.
             return outcome.FailedCount == 0
                 ? $"Stopped after {Gerund(freed, recycled)} across {items}. Nothing else was touched.{binNote}"
-                : $"Stopped after {Gerund(freed, recycled)} across {items}. {failed} could not be removed " +
+                : $"Stopped after {Gerund(freed, recycled)}{across}. {failed} {notRemoved} " +
                   $"and is still listed. Nothing after that was touched.{binNote}";
         }
 
@@ -112,7 +120,7 @@ internal static class ReclaimNarration
                 : $"{Past(freed, recycled)} across {items}.{binNote}";
         }
 
-        return $"{Past(freed, recycled)} across {items}. {failed} could not be removed and is still listed.{binNote}";
+        return $"{Past(freed, recycled)}{across}. {failed} {notRemoved} and is still listed.{binNote}";
     }
 
     /// <summary>The progress line while a run is removing things.</summary>
