@@ -59,15 +59,18 @@ public sealed class WorktreeReclaimProvider(IWorktreeInspector? inspector = null
                     progress?.Report(new ReclaimScanProgress(
                         ReclaimCategory.Id, $"Checking {worktree.Name}", Volatile.Read(ref done)));
 
-                    WorktreeState state = _inspector.Inspect(worktree.Path, cancellationToken);
+                    // Measured first: a worktree under the category's floor is dropped by the engine whatever git says, so git isn't
+                    // asked about it.
                     DirectoryMeasurement measurement =
                         context.Measure(worktree.Path, cancellationToken);
-                    Interlocked.Increment(ref done);
-
-                    if (measurement.AllocatedBytes <= 0)
+                    if (measurement.AllocatedBytes <= 0 || measurement.AllocatedBytes < context.MinimumCandidateBytes)
                     {
+                        Interlocked.Increment(ref done);
                         return;
                     }
+
+                    WorktreeState state = _inspector.Inspect(worktree.Path, cancellationToken);
+                    Interlocked.Increment(ref done);
 
                     (ReclaimRisk risk, string reason, string detail) = Grade(state, worktree.Name);
 

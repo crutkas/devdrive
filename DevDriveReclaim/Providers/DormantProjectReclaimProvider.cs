@@ -69,6 +69,12 @@ public sealed class DormantProjectReclaimProvider(IWorktreeInspector? inspector 
                     continue;
                 }
 
+                // A clone under the category's floor is dropped by the engine whatever git says, so git isn't asked about it.
+                if (measurement.AllocatedBytes < context.MinimumCandidateBytes)
+                {
+                    continue;
+                }
+
                 WorktreeState state = _inspector.Inspect(repository.Path, cancellationToken);
 
                 // Only asked for when it can change the answer. A repo with uncommitted or unpushed
