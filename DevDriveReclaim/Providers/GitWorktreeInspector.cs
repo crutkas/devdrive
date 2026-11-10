@@ -122,37 +122,10 @@ public sealed class GitWorktreeInspector : IWorktreeInspector
 
         try
         {
-            // A rev-parse that failed or timed out says nothing about HEAD. Read as "not detached",
-            // it would grade a detached worktree's commits on no branch as merely unpushed — Check
-            // instead of Careful, and differently from one scan to the next — so it is Unknown.
-            GitResult? head = _git(worktreePath, "rev-parse --abbrev-ref HEAD", cancellationToken);
-            string? branch = head is { ExitCode: 0 } ? head.Output.Trim() : null;
-            if (string.IsNullOrEmpty(branch))
-            {
-                return WorktreeState.Unknown;
-            }
-
-            // git reports a detached HEAD as the literal string "HEAD". That is not a branch name,
-            // and the difference decides whether deleting the folder loses anything: a worktree on a
-            // branch has its commits held by a ref shared with the parent repository, whereas a
-            // detached one is reachable only through this worktree's own HEAD, which goes away with
-            // it. Blanked so the messages fall back to the folder name rather than printing "HEAD".
-            bool detached = string.Equals(branch, "HEAD", StringComparison.Ordinal);
-            if (detached)
-            {
-                branch = null;
-            }
-
-            // The commit, so a run can tell that the tree moved since the scan even when every other answer reads the same.
-            // Not a reason for Unknown on its own: the branch above already proved git answers here.
-            GitResult? commit = _git(worktreePath, "rev-parse --verify --quiet HEAD", cancellationToken);
-            string? commitId = commit is { ExitCode: 0 } && commit.Output.Trim() is { Length: > 0 } id ? id : null;
-
-            // --ignored is the only way to see content git is deliberately silent about. It uses
-            // the traditional (collapsing) form, so a fully-ignored directory costs one line rather
-            // than one line per file — measured at ~180ms per worktree against plain status, which
-            // is affordable against a worktree pass already measured in tens of seconds.
-            GitResult? status = _git(worktreePath, "status --porcelain --ignored", cancellationToken);
+            // One status answers what four commands did (branch, commit, upstream and ahead count, and the entries): each git
+            // start costs ~50 ms, and a lived-in PC has a hundred worktrees and repos. --ignored keeps its traditional,
+            // collapsing form here too, so a fully-ignored directory costs one line rather than one line per file.
+            GitResult? status = _git(worktreePath, "status --porcelain=v2 --branch --ignored", cancellationToken);
             if (status is not { ExitCode: 0 })
             {
                 return WorktreeState.Unknown;
@@ -161,26 +134,47 @@ public sealed class GitWorktreeInspector : IWorktreeInspector
             string[] lines = status.Output
                 .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
-            string[] changed = lines.Where(static line => !line.StartsWith("!!", StringComparison.Ordinal)).ToArray();
+            string? Header(string key) => lines
+                .Where(line => line.StartsWith($"# {key} ", StringComparison.Ordinal))
+                .Select(line => line[(key.Length + 3)..])
+                .FirstOrDefault();
 
-            string[] localOnly = lines
-                .Where(static line => line.StartsWith("!!", StringComparison.Ordinal))
-                .Select(static line => Unquote(line[2..].Trim()))
-                .Where(LocalOnlyContent.IsIrreplaceable)
-                .ToArray();
-
-            // "@{u}" resolves the upstream branch. git exits with an error when there is none; a
-            // git that could not run or timed out is not that answer, and is Unknown like the rest.
-            // Output means commits exist locally that the remote has never seen.
-            GitResult? ahead = _git(worktreePath, "log --oneline @{u}..HEAD", cancellationToken);
-            if (ahead is null)
+            // A repository with no commit yet has no HEAD to grade: Unknown, as rev-parse's failure made it before. A status
+            // without the branch headers (a git too old for --branch in v2) says nothing about HEAD either.
+            string? branch = Header("branch.head");
+            string? oid = Header("branch.oid");
+            if (string.IsNullOrEmpty(branch) || oid is null or "(initial)")
             {
                 return WorktreeState.Unknown;
             }
 
-            bool hasUpstream = ahead.ExitCode == 0;
-            string[] unpushed = (hasUpstream ? ahead.Output : string.Empty)
-                .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            // A detached HEAD isn't a branch, and the difference decides whether deleting the folder loses anything: a worktree on
+            // a branch has its commits held by a ref shared with the parent repository, whereas a detached one is reachable only
+            // through this worktree's own HEAD, which goes away with it. Blanked so the messages fall back to the folder name.
+            bool detached = string.Equals(branch, "(detached)", StringComparison.Ordinal);
+            if (detached)
+            {
+                branch = null;
+            }
+
+            // The commit, so a run can tell that the tree moved since the scan even when every other answer reads the same.
+            string commitId = oid;
+
+            string[] changed = lines.Where(static line => !line.StartsWith('#') && !line.StartsWith('!')).ToArray();
+
+            string[] localOnly = lines
+                .Where(static line => line.StartsWith("! ", StringComparison.Ordinal))
+                .Select(static line => Unquote(line[2..].Trim()))
+                .Where(LocalOnlyContent.IsIrreplaceable)
+                .ToArray();
+
+            // branch.ab is there only when the upstream exists: none configured, or one whose remote branch is gone, is no remote
+            // copy of this branch (as "log @{u}..HEAD" failing was). "+N" is the commits the remote has never seen.
+            string? ab = Header("branch.ab");
+            bool hasUpstream = ab is not null;
+            int unpushed = hasUpstream && ab!.Split(' ')[0] is { Length: > 1 } plus && plus[0] == '+'
+                && int.TryParse(plus[1..], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int count)
+                ? count : 0;
 
             bool merged = branch is not null && IsMergedIntoDefault(worktreePath, branch, cancellationToken);
 
@@ -191,8 +185,8 @@ public sealed class GitWorktreeInspector : IWorktreeInspector
                 // No upstream at all is itself an unpushed state: there is no remote copy of this
                 // branch, so the distinction is tracked separately rather than reported as a commit
                 // count of zero — "0 unpushed commits, therefore careful" reads like a bug.
-                HasUnpushedCommits: !hasUpstream || unpushed.Length > 0,
-                UnpushedCommitCount: unpushed.Length,
+                HasUnpushedCommits: !hasUpstream || unpushed > 0,
+                UnpushedCommitCount: unpushed,
                 IsMerged: merged,
                 HasUpstream: hasUpstream,
                 LocalOnlyIgnoredFiles: localOnly,

@@ -206,6 +206,40 @@ public sealed class ReclaimSafetyTests
     private static ReclaimScanContext Context(ReclaimFixture fixture) =>
         new([@"C:\"], [fixture.Root], minimumCandidateBytes: 1);
 
+    /// <summary>Counts what git is asked, answering clean and pushed.</summary>
+    private sealed class CountingInspector : IWorktreeInspector
+    {
+        public System.Collections.Concurrent.ConcurrentBag<string> Asked { get; } = [];
+
+        public WorktreeState Inspect(string worktreePath, CancellationToken cancellationToken)
+        {
+            Asked.Add(Path.GetFileName(worktreePath));
+            return new WorktreeState("main", false, 0, false, 0, true);
+        }
+    }
+
+    /// <summary>
+    /// A tree under the category's floor is dropped by the engine whatever git says, so the providers (worktrees here)
+    /// measure first and don't ask git about it. What's over the floor is asked as before.
+    /// </summary>
+    [TestMethod]
+    public void GitIsNotAskedAboutATreeUnderTheFloor()
+    {
+        using var fixture = new ReclaimFixture();
+        fixture.Worktree("small", @"C:\repo\.git");
+        fixture.File(@"small\a.bin", 1L * 1024 * 1024);
+        fixture.Worktree("large", @"C:\repo\.git");
+        fixture.File(@"large\a.bin", 8L * 1024 * 1024);
+        var context = new ReclaimScanContext([@"C:\"], [fixture.Root], minimumCandidateBytes: 4L * 1024 * 1024);
+        var git = new CountingInspector();
+
+        IReadOnlyList<ReclaimCandidate> found = new WorktreeReclaimProvider(git)
+            .ScanAsync(context, null, CancellationToken.None).GetAwaiter().GetResult();
+
+        CollectionAssert.AreEquivalent(new[] { "large" }, git.Asked.ToArray());
+        Assert.HasCount(1, found);
+    }
+
     private static ReclaimCandidate Candidate(string name, long size, ReclaimRisk risk) =>
         new("cat", $@"C:\test\{name}", name, size, risk, "reason", "recovery");
 }

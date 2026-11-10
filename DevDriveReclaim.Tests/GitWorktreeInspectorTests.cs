@@ -450,18 +450,19 @@ public sealed class GitWorktreeInspectorTests
             "deleting the worktree folder must not lose the stash it created");
     }
     /// <summary>
-    /// What a fake git answers for a worktree on <paramref name="head"/> with nothing changed and no
-    /// upstream, except for the command <paramref name="failing"/>, which answers <paramref name="failure"/>.
+    /// What a fake git answers for a worktree on <paramref name="head"/> ("HEAD" for detached) with nothing changed and no
+    /// upstream (or the status <paramref name="status"/> gives), except for the command <paramref name="failing"/>, which
+    /// answers <paramref name="failure"/>.
     /// </summary>
-    private static GitWorktreeInspector FakeGit(string head, string failing, GitResult? failure) =>
+    private static GitWorktreeInspector FakeGit(string head, string failing, GitResult? failure, string? status = null) =>
         new((_, arguments, _) => arguments.StartsWith(failing, StringComparison.Ordinal) ? failure
-            : arguments.StartsWith("rev-parse", StringComparison.Ordinal) ? new GitResult(0, head + "\n")
-            : arguments.StartsWith("log", StringComparison.Ordinal) ? new GitResult(128, string.Empty)
+            : arguments.StartsWith("status", StringComparison.Ordinal) ? new GitResult(0, status
+                ?? $"# branch.oid 0123456789abcdef0123456789abcdef01234567\n# branch.head {(head == "HEAD" ? "(detached)" : head)}\n")
             : new GitResult(0, string.Empty));
 
     /// <summary>
     /// A detached worktree whose HEAD could not be read was taken for one on a branch: its commits on
-    /// no branch graded Check (no upstream) on one scan and Careful on the next. A rev-parse that
+    /// no branch graded Check (no upstream) on one scan and Careful on the next. A status that
     /// timed out or failed now says nothing, which is Unknown, and Unknown grades Careful.
     /// </summary>
     [TestMethod]
@@ -473,11 +474,58 @@ public sealed class GitWorktreeInspectorTests
         string folder = fixture.Dir("bisect");
         GitResult? failure = exitCode is { } code ? new GitResult(code, string.Empty) : null;
 
-        WorktreeState state = FakeGit("HEAD", "rev-parse", failure).Inspect(folder, CancellationToken.None);
+        WorktreeState state = FakeGit("HEAD", "status", failure).Inspect(folder, CancellationToken.None);
 
         Assert.IsTrue(state.HasUncommittedChanges, "Unknown is the Careful-grading sentinel");
         Assert.IsNull(state.Branch);
         Assert.AreEqual(ReclaimRisk.Careful, WorktreeReclaimProvider.GradeForTest(state, "bisect").Risk);
+    }
+
+    /// <summary>A repository with no commit yet has no HEAD to grade, as rev-parse's failure said before: Unknown.</summary>
+    [TestMethod]
+    public void ARepositoryWithNoCommitIsUnknown()
+    {
+        using var fixture = new ReclaimFixture();
+        string folder = fixture.Dir("new");
+
+        WorktreeState state = FakeGit("main", "none", null, "# branch.oid (initial)\n# branch.head main\n? notes.txt\n")
+            .Inspect(folder, CancellationToken.None);
+
+        Assert.IsTrue(state.IsUnknown);
+    }
+
+    /// <summary>The one status says the upstream and how far ahead the branch is, and what's changed and ignored.</summary>
+    [TestMethod]
+    public void OneStatusGivesTheUpstreamTheCommitsAheadAndTheEntries()
+    {
+        using var fixture = new ReclaimFixture();
+        string folder = fixture.Dir("feature");
+        const string status = "# branch.oid 0123456789abcdef0123456789abcdef01234567\n# branch.head feature\n"
+            + "# branch.upstream origin/feature\n# branch.ab +3 -1\n1 .M N... 100644 100644 100644 abc abc a.txt\n? new.txt\n! .env\n! bin/\n";
+
+        WorktreeState state = FakeGit("feature", "none", null, status).Inspect(folder, CancellationToken.None);
+
+        Assert.AreEqual("feature", state.Branch);
+        Assert.AreEqual("0123456789abcdef0123456789abcdef01234567", state.Head);
+        Assert.IsTrue(state.HasUpstream);
+        Assert.AreEqual(3, state.UnpushedCommitCount);
+        Assert.IsTrue(state.HasUnpushedCommits);
+        Assert.AreEqual(2, state.ChangedFileCount);
+        CollectionAssert.AreEqual(new[] { ".env" }, state.LocalOnlyIgnoredFiles.ToArray());
+    }
+
+    /// <summary>An upstream whose remote branch is gone has no branch.ab: no remote copy of the branch, as before.</summary>
+    [TestMethod]
+    public void AnUpstreamThatIsGoneIsNoUpstream()
+    {
+        using var fixture = new ReclaimFixture();
+        string folder = fixture.Dir("feature");
+        const string status = "# branch.oid 0123456789abcdef0123456789abcdef01234567\n# branch.head feature\n# branch.upstream origin/feature\n";
+
+        WorktreeState state = FakeGit("feature", "none", null, status).Inspect(folder, CancellationToken.None);
+
+        Assert.IsFalse(state.HasUpstream);
+        Assert.IsTrue(state.HasUnpushedCommits);
     }
 
     [TestMethod]
@@ -509,7 +557,7 @@ public sealed class GitWorktreeInspectorTests
         Assert.IsFalse(answered.HasUpstream);
         Assert.IsFalse(answered.HasUncommittedChanges);
 
-        WorktreeState timedOut = FakeGit("feature", "log", null).Inspect(folder, CancellationToken.None);
+        WorktreeState timedOut = FakeGit("feature", "status", null).Inspect(folder, CancellationToken.None);
         Assert.IsTrue(timedOut.HasUncommittedChanges, "Unknown is the Careful-grading sentinel");
         Assert.AreEqual(ReclaimRisk.Careful, WorktreeReclaimProvider.GradeForTest(timedOut, "feature").Risk);
     }
