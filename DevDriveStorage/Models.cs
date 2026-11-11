@@ -186,6 +186,23 @@ public sealed record StorageNode
     /// </summary>
     public bool IsMeasured { get; init; } = true;
 
+    /// <summary>
+    /// The scanner's roll-up of a folder's smallest items (<see cref="RollupPath"/>): one node standing for many items, not a
+    /// folder on disk.
+    /// </summary>
+    public bool IsRollup =>
+        Kind == StorageNodeKind.Folder &&
+        !_pathIsFolder &&
+        _path.EndsWith(RollupSuffix, StringComparison.Ordinal) &&
+        _path.Contains(RollupMarker, StringComparison.Ordinal);
+
+    private const string RollupMarker = "\\\u2026 (";
+    private const string RollupSuffix = " more items)";
+
+    /// <summary>The path of the node that rolls up <paramref name="items"/> of <paramref name="folderPath"/>'s smallest items.</summary>
+    public static string RollupPath(string folderPath, int items) =>
+        $"{folderPath.TrimEnd('\\')}{RollupMarker}{items}{RollupSuffix}";
+
     public string SizeDisplay => IsMeasured ? ByteSizeFormatter.Format(SizeBytes) : "—";
 
     public string LogicalDisplay => IsMeasured && LogicalBytes is long logical

@@ -28,7 +28,7 @@ public enum TreemapCellKind
 /// that owns them, because the cell itself has no path of its own.
 /// </param>
 /// <param name="Rank">Position among its siblings by size, largest first.</param>
-/// <param name="FoldedCount">For an overflow cell, how many siblings it stands for.</param>
+/// <param name="FoldedCount">For an overflow cell, how many items it stands for.</param>
 /// <param name="HeaderHeight">Height of the title strip; greater than zero only for containers.</param>
 public sealed record NestedTreemapCell(
     Guid Id,
@@ -97,6 +97,14 @@ public sealed record NestedTreemapOptions
 
     /// <summary>Unaccounted bytes below this share of their folder are rounding, not a block.</summary>
     public double MinimumUnlistedShare { get; init; } = 0.005;
+
+    /// <summary>
+    /// One remainder block per folder: the scanner's roll-up of its smallest items (<see cref="StorageNode.IsRollup"/>), the
+    /// children past <see cref="ItemsPerContainer"/> and the bytes it doesn't list fold into one
+    /// <see cref="TreemapCellKind.Overflow"/> cell named "Other", whose <see cref="NestedTreemapCell.FoldedCount"/> is every item
+    /// in it. Off, each is its own block.
+    /// </summary>
+    public bool OneRemainder { get; init; }
 }
 
 /// <summary>
@@ -245,6 +253,19 @@ public static class NestedTreemapLayout
             .ThenBy(child => child.Id)
             .ToList();
 
+        long rolledBytes = 0;
+        int rolledItems = 0;
+        if (options.OneRemainder)
+        {
+            foreach (StorageNode rollup in sized.Where(child => child.IsRollup))
+            {
+                rolledBytes += rollup.SizeBytes;
+                rolledItems += rollup.ItemCount;
+            }
+
+            sized.RemoveAll(child => child.IsRollup);
+        }
+
         int keep = Math.Min(sized.Count, Math.Max(1, options.ItemsPerContainer));
         var entries = new List<Entry>(keep + 2);
         long listed = 0;
@@ -268,6 +289,19 @@ public static class NestedTreemapLayout
         }
 
         int foldedCount = sized.Count - keep;
+        long remainder = folder.IsMeasured ? folder.SizeBytes - listed - folded - rolledBytes : 0;
+        if (options.OneRemainder)
+        {
+            long other = folded + rolledBytes + Math.Max(0, remainder);
+            int items = foldedCount + rolledItems;
+            if (other > 0 && (items > 0 || remainder >= folder.SizeBytes * options.MinimumUnlistedShare))
+            {
+                entries.Add(new Entry(Derive(folder.Id, OverflowSalt), TreemapCellKind.Overflow, folder, "Other", other, items));
+            }
+
+            return entries;
+        }
+
         if (foldedCount > 0 && folded > 0)
         {
             entries.Add(new Entry(
@@ -279,7 +313,6 @@ public static class NestedTreemapLayout
                 foldedCount));
         }
 
-        long remainder = folder.IsMeasured ? folder.SizeBytes - listed - folded : 0;
         if (remainder > 0 && remainder >= folder.SizeBytes * options.MinimumUnlistedShare)
         {
             entries.Add(new Entry(

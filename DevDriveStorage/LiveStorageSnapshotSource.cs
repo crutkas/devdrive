@@ -428,7 +428,7 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
             }
 
             int rolled = rolledRows + untracked;
-            string aggregatePath = $"{folder.Path.TrimEnd('\\')}\\\u2026 ({rolled} more items)";
+            string aggregatePath = StorageNode.RollupPath(folder.Path, rolled);
             if (seenPaths.Add(aggregatePath))
             {
                 nodes.Add(new StorageNode(
