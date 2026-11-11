@@ -460,6 +460,7 @@ public sealed class LiveStorageSnapshotSourceTests
         Assert.IsTrue(
             children.Any(c => c.Name.Contains("more items", StringComparison.OrdinalIgnoreCase)),
             "an aggregate node should absorb the rolled-up children");
+        Assert.AreEqual(1, children.Count(c => c.IsRollup), "the aggregate is marked as the folder's roll-up, and only it");
 
         // The honest total is preserved even though only four rows are emitted.
         Assert.AreEqual(10, snapshot.Root.ItemCount);

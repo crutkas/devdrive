@@ -117,6 +117,36 @@ public sealed class NestedTreemapLayoutTests
     }
 
     [TestMethod]
+    public void OneRemainderFoldsTheRollupTheOverflowAndTheUnlistedBytesIntoOther()
+    {
+        var tree = new Tree();
+        for (int index = 1; index <= 30; index++)
+        {
+            tree.File(tree.Root, $"file{index:D2}.bin", index * 1000);
+        }
+
+        // The roll-up is bigger than any file, so without the option it would be a block of its own.
+        Guid rollup = tree.Rollup(tree.Root, items: 500, bytes: 90_000);
+        StorageSnapshot snapshot = tree.Build(rootBytes: 465_000 + 90_000 + 5_000);
+        IReadOnlyList<NestedTreemapCell> cells = NestedTreemapLayout.Calculate(
+            snapshot, tree.Root, 2000, 2000, NestedTreemapOptions.Default with { OneRemainder = true });
+
+        Assert.IsTrue(snapshot.Find(rollup)!.IsRollup);
+        Assert.IsFalse(snapshot.Root.IsRollup);
+        Assert.IsFalse(cells.Any(cell => cell.Id == rollup));
+        Assert.IsFalse(cells.Any(cell => cell.Kind == TreemapCellKind.Unlisted));
+        NestedTreemapCell other = cells.Single(cell => cell.Kind == TreemapCellKind.Overflow);
+        Assert.AreEqual("Other", other.Name);
+        Assert.AreEqual(6 + 500, other.FoldedCount, "the six smallest files and the roll-up's items");
+        Assert.AreEqual(21_000 + 90_000 + 5_000, other.SizeBytes, "the six smallest files, the roll-up and the unlisted bytes");
+        Assert.AreSame(snapshot.Root, other.Target);
+        Assert.HasCount(StorageExplorerViewModel.TreemapItemLimit + 1, cells);
+
+        IReadOnlyList<NestedTreemapCell> apart = NestedTreemapLayout.Calculate(snapshot, tree.Root, 2000, 2000);
+        Assert.IsTrue(apart.Any(cell => cell.Id == rollup), "off by default: the roll-up is a block of its own");
+    }
+
+    [TestMethod]
     public void UnaccountedBytesBecomeAFilesBlockWhileScanning()
     {
         var tree = new Tree();
@@ -346,6 +376,16 @@ public sealed class NestedTreemapLayoutTests
                 IsMeasured = measured,
             };
             _nodes.Add(node);
+            return id;
+        }
+
+        /// <summary>The scanner's roll-up of <paramref name="items"/> of a folder's smallest items.</summary>
+        public Guid Rollup(Guid parent, int items, long bytes)
+        {
+            Guid id = NextId();
+            string path = StorageNode.RollupPath(_paths[parent], items);
+            _paths[id] = path;
+            _nodes.Add(StorageTestBuilder.Node(id, parent, $"\u2026 and {items:N0} more items", path, StorageNodeKind.Folder, bytes, items));
             return id;
         }
 
