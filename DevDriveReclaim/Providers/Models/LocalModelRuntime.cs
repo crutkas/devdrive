@@ -305,12 +305,22 @@ public sealed class LocalModelRuntime : ILocalModelRuntime
         };
 
         // The machine's and the user's Path too, so a tool installed after this app started is found.
-        IEnumerable<string> onPath = new[] { EnvironmentVariableTarget.Process, EnvironmentVariableTarget.User, EnvironmentVariableTarget.Machine }
-            .SelectMany(t => (Environment.GetEnvironmentVariable("PATH", t) ?? string.Empty).Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-            .Select(folder => Path.Combine(Environment.ExpandEnvironmentVariables(folder.Trim('"')), exe));
+        IEnumerable<string> onPath = SearchFolders(new[] { EnvironmentVariableTarget.Process, EnvironmentVariableTarget.User, EnvironmentVariableTarget.Machine }
+            .Select(t => Environment.GetEnvironmentVariable("PATH", t)))
+            .Select(folder => Path.Combine(folder, exe));
 
         return onPath.Concat(known).FirstOrDefault(File.Exists);
     }
+
+    /// <summary>
+    /// The folders of PATH values in order, each once (this process's PATH holds the user's and the machine's), without those on
+    /// another computer (<see cref="DevDriveCore.Platform.PathProbe.IsNetworkFolder"/>).
+    /// </summary>
+    internal static IEnumerable<string> SearchFolders(IEnumerable<string?> paths) =>
+        paths.SelectMany(path => (path ?? string.Empty).Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            .Select(folder => Environment.ExpandEnvironmentVariables(folder.Trim('"')))
+            .Where(folder => !DevDriveCore.Platform.PathProbe.IsNetworkFolder(folder))
+            .Distinct(StringComparer.OrdinalIgnoreCase);
 
     public (int ExitCode, string Output) Run(
         string executable,
