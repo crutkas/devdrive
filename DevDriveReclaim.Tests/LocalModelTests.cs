@@ -374,6 +374,18 @@ public sealed class LocalModelTests
     }
 
     [TestMethod]
+    public void ToolsAreLookedForInEachPathFolderOnce()
+    {
+        string windows = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+        string[] folders = [.. LocalModelRuntime.SearchFolders([
+            @"C:\tools\bin;\\192.0.2.10\tools\bin;""%SystemRoot%\ollama""",
+            @"c:\TOOLS\bin;\\?\UNC\192.0.2.11\share\bin;;\\no-such-host\x",
+            null])];
+
+        CollectionAssert.AreEqual(new[] { @"C:\tools\bin", @"\\192.0.2.10\tools\bin", Path.Combine(windows, "ollama"), @"\\?\UNC\192.0.2.11\share\bin", @"\\no-such-host\x" }, folders);
+    }
+
+    [TestMethod]
     public async Task AHardLinkedModelFileIsSharedNotFreed()
     {
         using var fixture = new ReclaimFixture();
