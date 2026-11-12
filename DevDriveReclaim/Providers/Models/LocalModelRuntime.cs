@@ -309,17 +309,16 @@ public sealed class LocalModelRuntime : ILocalModelRuntime
             .Select(t => Environment.GetEnvironmentVariable("PATH", t)))
             .Select(folder => Path.Combine(folder, exe));
 
-        return onPath.Concat(known).FirstOrDefault(File.Exists);
+        return onPath.Concat(known).FirstOrDefault(DevDriveCore.Platform.PathProbe.FileExists);
     }
 
     /// <summary>
-    /// The folders of PATH values in order, each once (this process's PATH holds the user's and the machine's), without those on
-    /// another computer (<see cref="DevDriveCore.Platform.PathProbe.IsNetworkFolder"/>).
+    /// The folders of PATH values in order, each once (this process's PATH holds the user's and the machine's). A folder on another
+    /// computer is checked within a bound (<see cref="DevDriveCore.Platform.PathProbe.FileExists"/>).
     /// </summary>
     internal static IEnumerable<string> SearchFolders(IEnumerable<string?> paths) =>
         paths.SelectMany(path => (path ?? string.Empty).Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
             .Select(folder => Environment.ExpandEnvironmentVariables(folder.Trim('"')))
-            .Where(folder => !DevDriveCore.Platform.PathProbe.IsNetworkFolder(folder))
             .Distinct(StringComparer.OrdinalIgnoreCase);
 
     public (int ExitCode, string Output) Run(
