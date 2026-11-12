@@ -1,3 +1,4 @@
+using DevDriveCore.Platform;
 using DevDriveStorage.Live;
 
 namespace DevDriveReclaim.Providers;
@@ -33,7 +34,7 @@ public sealed class WorktreeReclaimProvider(IWorktreeInspector? inspector = null
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        return Task.Run<IReadOnlyList<ReclaimCandidate>>(() =>
+        return BackgroundWork.Run<IReadOnlyList<ReclaimCandidate>>(() =>
         {
             DiscoveredRepository[] worktrees =
             [
@@ -45,7 +46,7 @@ public sealed class WorktreeReclaimProvider(IWorktreeInspector? inspector = null
             // and the disk, so running several at once is nearly free.
             var slots = new ReclaimCandidate?[worktrees.Length];
             int done = 0;
-            Parallel.For(
+            BackgroundWork.For(
                 0,
                 worktrees.Length,
                 new ParallelOptions

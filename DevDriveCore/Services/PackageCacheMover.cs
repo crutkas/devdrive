@@ -78,7 +78,7 @@ public sealed class PackageCacheMover : IPackageCacheMover
         ArgumentException.ThrowIfNullOrWhiteSpace(plan.EnvironmentVariable);
 
         CacheMoveOptions effectiveOptions = options ?? CacheMoveOptions.Default;
-        return Task.Run(() => MoveCore(plan, progress, effectiveOptions, cancellationToken), cancellationToken);
+        return BackgroundWork.Run(() => MoveCore(plan, progress, effectiveOptions, cancellationToken), cancellationToken);
     }
 
     /// <summary>
@@ -120,7 +120,7 @@ public sealed class PackageCacheMover : IPackageCacheMover
     public Task RevertAsync(ReversibilityEntry entry, bool moveFilesBack = false, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(entry);
-        return Task.Run(() => RevertCore(entry, moveFilesBack), cancellationToken);
+        return BackgroundWork.Run(() => RevertCore(entry, moveFilesBack), cancellationToken);
     }
 
     private PackageCacheMoveReceipt MoveCore(

@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using DevDriveCore.Platform;
 
 namespace DevDriveReclaim;
 
@@ -144,7 +145,7 @@ public sealed class ReclaimExecutor : IReclaimExecutor
         Func<ReclaimCandidate, string, RecycleBinCheck> preflight =
             (candidate, volume) => RecycleBinPreflight.Evaluate(candidate.SizeBytes, read(volume));
 
-        var thread = new Thread(() =>
+        var thread = BackgroundWork.Thread(() =>
         {
             try
             {
@@ -154,11 +155,7 @@ public sealed class ReclaimExecutor : IReclaimExecutor
             {
                 completion.SetException(exception);
             }
-        })
-        {
-            IsBackground = true,
-            Name = "Reclaim",
-        };
+        }, "Reclaim");
 
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();

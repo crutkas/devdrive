@@ -2,6 +2,7 @@ using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using DevDriveCore.Platform;
 using DevDriveStorage.Live;
 
 namespace DevDriveStorage;
@@ -90,7 +91,7 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
         }
 
         // The whole scan is blocking I/O; keep it off the calling (UI) thread.
-        return Task.Run(() => Scan(request, rootPath, progress, cancellationToken), cancellationToken);
+        return BackgroundWork.Run(() => Scan(request, rootPath, progress, cancellationToken), cancellationToken);
     }
 
     /// <summary>
@@ -343,7 +344,7 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
         while (level.Count > 0)
         {
             var emitted = new (List<StorageNode> Nodes, List<ScanFolder> Expand)[level.Count];
-            Parallel.For(
+            BackgroundWork.For(
                 0,
                 level.Count,
                 () => (Candidates: new List<Row>(), Seen: new HashSet<string>(StringComparer.OrdinalIgnoreCase)),

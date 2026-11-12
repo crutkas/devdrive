@@ -17,7 +17,7 @@ public sealed class FileSystemProbe : IFileSystemProbe
 
     /// <inheritdoc />
     public Task<ulong> GetDirectorySizeAsync(string path, TimeSpan timeBudget, CancellationToken cancellationToken = default) =>
-        Task.Run(() => ComputeSize(path, timeBudget, cancellationToken), cancellationToken);
+        BackgroundWork.Run(() => ComputeSize(path, timeBudget, cancellationToken), cancellationToken);
 
     private static ulong ComputeSize(string path, TimeSpan timeBudget, CancellationToken ct)
     {

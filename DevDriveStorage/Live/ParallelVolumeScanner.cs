@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
+using DevDriveCore.Platform;
 using Microsoft.Win32.SafeHandles;
 
 namespace DevDriveStorage.Live;
@@ -375,11 +376,7 @@ internal sealed class ParallelVolumeScanner
         var threads = new Thread[_workerCount];
         for (int i = 0; i < threads.Length; i++)
         {
-            threads[i] = new Thread(Worker, 256 * 1024)
-            {
-                IsBackground = true,
-                Name = $"DevDrive scan {i}",
-            };
+            threads[i] = BackgroundWork.Thread(Worker, $"DevDrive scan {i}", 256 * 1024);
             threads[i].Start();
         }
 

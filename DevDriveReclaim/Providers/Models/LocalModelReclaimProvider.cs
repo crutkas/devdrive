@@ -1,4 +1,5 @@
 using DevDriveCore;
+using DevDriveCore.Platform;
 
 namespace DevDriveReclaim.Providers.Models;
 
@@ -58,7 +59,7 @@ public sealed class LocalModelReclaimProvider : IReclaimProvider
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        return Task.Run<IReadOnlyList<ReclaimCandidate>>(() =>
+        return BackgroundWork.Run<IReadOnlyList<ReclaimCandidate>>(() =>
         {
             LocalModelLocations where = _locations();
             List<FoundModel> found = [];

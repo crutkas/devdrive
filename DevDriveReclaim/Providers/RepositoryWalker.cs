@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.IO.Enumeration;
+using DevDriveCore.Platform;
 
 namespace DevDriveReclaim.Providers;
 
@@ -133,7 +134,7 @@ public static class RepositoryWalker
         }
 
         int workers = Math.Clamp(options.Parallelism, 1, 64);
-        Parallel.For(
+        BackgroundWork.For(
             0,
             workers,
             new ParallelOptions { MaxDegreeOfParallelism = workers, CancellationToken = cancellationToken },

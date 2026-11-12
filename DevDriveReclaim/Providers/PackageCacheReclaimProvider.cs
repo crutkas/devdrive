@@ -1,3 +1,4 @@
+using DevDriveCore.Platform;
 using DevDriveCore.Services;
 using DevDriveStorage.Live;
 
@@ -40,7 +41,7 @@ public sealed class PackageCacheReclaimProvider : IReclaimProvider
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        return Task.Run<IReadOnlyList<ReclaimCandidate>>(() =>
+        return BackgroundWork.Run<IReadOnlyList<ReclaimCandidate>>(() =>
         {
             var candidates = new List<ReclaimCandidate>();
 
