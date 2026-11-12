@@ -12,7 +12,8 @@ here knows that WinUI exists.
 | `DevDriveStorage` | Models, snapshot source contract, live and mock sources, explorer state, treemap geometry, collection reconciliation |
 | `DevDriveStorage.Tests` | MSTest unit suite |
 
-`DevDriveStorage` references only .NET and `CommunityToolkit.Mvvm`. It must not
+`DevDriveStorage` references only .NET, `CommunityToolkit.Mvvm` and
+`DevDriveCore` (for `BackgroundWork`). It must not
 reference `Microsoft.UI.Xaml` or any UI type. A `Brush`, a `Visibility` or a
 `DispatcherQueue` appearing in that project is a review failure.
 
@@ -144,7 +145,9 @@ third of scan time at any tree size without a machine-specific threshold.
 
 `LiveStorageSnapshotSource` drives `Live/ParallelVolumeScanner`:
 
-- **One worker per logical core** pulls folders off a shared queue. Each folder
+- **One worker per logical core** pulls folders off a shared queue. Workers run
+  below normal priority (`BackgroundWork`), so the app's window gets a CPU first.
+  Each folder
   is opened once (`CreateFileW` with `FILE_LIST_DIRECTORY | SYNCHRONIZE` and
   backup semantics) and listed with `NtQueryDirectoryFile` into a 256 KB
   per-thread buffer, using `FileIdFullDirectoryInformation` and falling back to

@@ -1,3 +1,4 @@
+using DevDriveCore.Platform;
 using DevDriveStorage.Live;
 
 namespace DevDriveReclaim.Providers;
@@ -61,7 +62,7 @@ public sealed class BuildOutputReclaimProvider(IWorktreeInspector? inspector = n
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        return Task.Run<IReadOnlyList<ReclaimCandidate>>(() =>
+        return BackgroundWork.Run<IReadOnlyList<ReclaimCandidate>>(() =>
         {
             IReadOnlyList<DiscoveredRepository> repositories =
                 context.Repositories(cancellationToken);

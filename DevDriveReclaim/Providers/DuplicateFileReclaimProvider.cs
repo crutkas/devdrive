@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
+using DevDriveCore.Platform;
 using DevDriveStorage.Live;
 
 namespace DevDriveReclaim.Providers;
@@ -78,7 +79,7 @@ public sealed class DuplicateFileReclaimProvider : IReclaimProvider
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        return Task.Run<IReadOnlyList<ReclaimCandidate>>(() =>
+        return BackgroundWork.Run<IReadOnlyList<ReclaimCandidate>>(() =>
         {
             progress?.Report(new ReclaimScanProgress(ReclaimCategory.Id, "Indexing large files", 0));
 
@@ -101,7 +102,7 @@ public sealed class DuplicateFileReclaimProvider : IReclaimProvider
 
             try
             {
-                Parallel.ForEach(
+                BackgroundWork.ForEach(
                     groups,
                     new ParallelOptions
                     {
@@ -140,7 +141,7 @@ public sealed class DuplicateFileReclaimProvider : IReclaimProvider
                 cancellationToken.IsCancellationRequested &&
                 aggregate.InnerExceptions.Any(e => e is OperationCanceledException))
             {
-                // Parallel.ForEach wraps the cancellation its own options requested. Every caller
+                // The parallel loop wraps the cancellation its own options requested. Every caller
                 // above expects the bare OperationCanceledException that the rest of the scan throws.
                 //
                 // Any, not All. A mixed batch — one partition observing the cancel while another

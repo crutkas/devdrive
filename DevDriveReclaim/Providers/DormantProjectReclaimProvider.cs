@@ -1,3 +1,4 @@
+using DevDriveCore.Platform;
 using DevDriveStorage.Live;
 
 namespace DevDriveReclaim.Providers;
@@ -41,7 +42,7 @@ public sealed class DormantProjectReclaimProvider(IWorktreeInspector? inspector 
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        return Task.Run<IReadOnlyList<ReclaimCandidate>>(() =>
+        return BackgroundWork.Run<IReadOnlyList<ReclaimCandidate>>(() =>
         {
             var candidates = new List<ReclaimCandidate>();
 
