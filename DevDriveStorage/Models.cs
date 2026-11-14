@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Collections.Immutable;
 
 namespace DevDriveStorage;
@@ -631,7 +632,106 @@ public sealed class StorageSnapshot
         return result;
     }
 
+    /// <summary>
+    /// The <paramref name="limit"/> biggest files under <paramref name="scopeId"/>, keeping only those
+    /// whose path contains <paramref name="search"/> when one is given. One pass over the subtree's
+    /// table entries into a bounded min-heap, so only the files it returns are ever made, instead of
+    /// a node per file to keep a thousand of them.
+    /// </summary>
+    internal StorageNode[] LargestFiles(Guid scopeId, int limit, string? search)
+    {
+        int scope = _table.IndexOf(scopeId);
+        if (scope < 0 || limit <= 0)
+        {
+            return [];
+        }
+
+        var heap = new PriorityQueue<int, long>(limit + 1);
+        var pending = new Stack<(int Folder, string? Path)>();
+        pending.Push((scope, search is null ? null : _table.PathOf(scope)));
+        char[] buffer = search is null ? [] : ArrayPool<char>.Shared.Rent(512);
+        try
+        {
+            while (pending.Count > 0)
+            {
+                (int folder, string? folderPath) = pending.Pop();
+
+                // The folder's path and a separator, once; each file's name is written after it.
+                int prefix = 0;
+                if (folderPath is not null)
+                {
+                    prefix = folderPath.Length + (NodeTable.IsSeparator(folderPath[^1]) ? 0 : 1);
+                    Fit(ref buffer, prefix, keep: 0);
+                    folderPath.CopyTo(buffer);
+                    if (prefix > folderPath.Length)
+                    {
+                        buffer[folderPath.Length] = '\\';
+                    }
+                }
+
+                for (int position = _table.FirstChild(folder), end = _table.ChildEnd(folder); position < end; position++)
+                {
+                    int child = _table.ChildAt(position);
+                    long size = _table[child].SizeBytes;
+                    bool isFolder = _table[child].IsFolder;
+                    if (search is not null)
+                    {
+                        string? own = _table.OwnPathOf(child);
+                        int length = 0;
+                        if (own is null)
+                        {
+                            Fit(ref buffer, prefix + _table.NameLength(child), keep: prefix);
+                            length = prefix + _table.WriteName(child, buffer.AsSpan(prefix));
+                        }
+
+                        if (isFolder)
+                        {
+                            pending.Push((child, own ?? new string(buffer, 0, length)));
+                            continue;
+                        }
+
+                        // A path ends with its name, so a name that matches is a path that matches.
+                        bool matches = own is null
+                            ? buffer.AsSpan(0, length).Contains(search, StringComparison.OrdinalIgnoreCase)
+                            : _table.NameOf(child).Contains(search, StringComparison.OrdinalIgnoreCase) ||
+                                own.Contains(search, StringComparison.OrdinalIgnoreCase);
+                        if (!matches)
+                        {
+                            continue;
+                        }
+                    }
+                    else if (isFolder)
+                    {
+                        pending.Push((child, null));
+                        continue;
+                    }
+
+                    if (heap.Count < limit)
+                    {
+                        heap.Enqueue(child, size);
+                    }
+                    else if (heap.TryPeek(out _, out long smallest) && size > smallest)
+                    {
+                        heap.DequeueEnqueue(child, size);
+                    }
+                }
+            }
+        }
+        finally
+        {
+            if (buffer.Length > 0)
+            {
+                ArrayPool<char>.Shared.Return(buffer);
+            }
+        }
+
+        return [.. heap.UnorderedItems.Select(item => NodeAt(item.Element))];
+    }
+
     internal StorageNode NodeAt(int index) => index == _table.RootIndex ? _root : CreateView(index, null);
+
+    /// <summary>A child of a folder whose path the caller already has.</summary>
+    internal StorageNode ChildAt(int index, string parentPath) => CreateView(index, parentPath);
 
     private static NodeTable TableOf(
         int schemaVersion,
@@ -664,6 +764,19 @@ public sealed class StorageSnapshot
 
         ArgumentException.ThrowIfNullOrWhiteSpace(scenarioId);
         ArgumentException.ThrowIfNullOrWhiteSpace(snapshotId);
+    }
+
+    private static void Fit(ref char[] buffer, int length, int keep)
+    {
+        if (buffer.Length >= length)
+        {
+            return;
+        }
+
+        char[] larger = ArrayPool<char>.Shared.Rent(Math.Max(length, buffer.Length * 2));
+        buffer.AsSpan(0, keep).CopyTo(larger);
+        ArrayPool<char>.Shared.Return(buffer);
+        buffer = larger;
     }
 
     /// <param name="parentPath">The parent's path, when the caller has it; siblings made with one instance share it.</param>

@@ -1233,21 +1233,26 @@ public sealed class StorageExplorerViewModel : ObservableObject
             return;
         }
 
-        IEnumerable<StorageNode> query = Mode == ExplorerMode.Folders
-            ? Snapshot.ChildrenOf(CurrentScope.Id)
-            : Snapshot.DescendantsOf(CurrentScope.Id)
-                .Where(node => node.Kind == StorageNodeKind.File);
-
-        if (!string.IsNullOrWhiteSpace(SearchText))
+        string? search = string.IsNullOrWhiteSpace(SearchText) ? null : SearchText;
+        StorageNode[] matches;
+        if (Mode == ExplorerMode.LargestFiles)
         {
-            query = query.Where(node =>
-                node.Name.Contains(SearchText, StringComparison.OrdinalIgnoreCase) ||
-                node.PhysicalPath.Contains(SearchText, StringComparison.OrdinalIgnoreCase));
+            // Read straight off the snapshot's table: a volume's files are millions of nodes, and
+            // making each one to keep a thousand is the cost this avoids.
+            matches = Snapshot.LargestFiles(CurrentScope.Id, LargestFilesLimit, search);
         }
+        else
+        {
+            IEnumerable<StorageNode> query = Snapshot.ChildrenOf(CurrentScope.Id);
+            if (search is not null)
+            {
+                query = query.Where(node =>
+                    node.Name.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+                    node.PhysicalPath.Contains(search, StringComparison.OrdinalIgnoreCase));
+            }
 
-        StorageNode[] matches = Mode == ExplorerMode.LargestFiles
-            ? Largest(query, LargestFilesLimit)
-            : query.ToArray();
+            matches = query.ToArray();
+        }
 
         // Colour identity follows size rank, not the active sort, so re-sorting the
         // table never reshuffles the colours that tie rows to treemap rectangles.
@@ -1278,28 +1283,6 @@ public sealed class StorageExplorerViewModel : ObservableObject
 
     private static StorageRowViewModel CreateRow(StorageNode node, long scopeBytes, int sizeRank) =>
         new(node, scopeBytes, sizeRank);
-
-    /// <summary>
-    /// The <paramref name="limit"/> biggest nodes, via a bounded min-heap: one pass over the
-    /// candidates and O(limit) memory, instead of sorting a million files to keep a thousand.
-    /// </summary>
-    private static StorageNode[] Largest(IEnumerable<StorageNode> nodes, int limit)
-    {
-        var heap = new PriorityQueue<StorageNode, long>(limit + 1);
-        foreach (StorageNode node in nodes)
-        {
-            if (heap.Count < limit)
-            {
-                heap.Enqueue(node, node.SizeBytes);
-            }
-            else if (heap.TryPeek(out _, out long smallest) && node.SizeBytes > smallest)
-            {
-                heap.DequeueEnqueue(node, node.SizeBytes);
-            }
-        }
-
-        return [.. heap.UnorderedItems.Select(item => item.Element)];
-    }
 
     private void UpdateTreeColors()
     {

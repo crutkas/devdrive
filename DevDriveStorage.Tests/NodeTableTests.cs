@@ -137,6 +137,51 @@ public sealed class NodeTableTests
     }
 
     [TestMethod]
+    public void LargestFilesKeepsWhatTheNodesThemselvesWouldSelect()
+    {
+        Guid root = StorageTestBuilder.RootId;
+        Guid src = Guid.NewGuid();
+        Guid app = Guid.NewGuid();
+        StorageSnapshot snapshot = StorageTestBuilder.Snapshot(nodes:
+        [
+            StorageTestBuilder.Node(root, null, "Mock drive (M:)", @"M:\", StorageNodeKind.Folder, 0, 9),
+            StorageTestBuilder.Node(src, root, "src", @"M:\src", StorageNodeKind.Folder, 0, 6),
+            StorageTestBuilder.Node(app, src, "app", @"M:\src\app", StorageNodeKind.Folder, 0, 3),
+            StorageTestBuilder.Node(Guid.NewGuid(), app, "main.bin", @"M:\src\app\main.bin", StorageNodeKind.File, 70),
+            StorageTestBuilder.Node(Guid.NewGuid(), app, "Ärger.log", @"M:\src\app\Ärger.log", StorageNodeKind.File, 60),
+            StorageTestBuilder.Node(Guid.NewGuid(), app, "tiny.bin", @"M:\src\app\tiny.bin", StorageNodeKind.File, 10),
+            StorageTestBuilder.Node(Guid.NewGuid(), src, "lib.bin", @"M:\src\lib.bin", StorageNodeKind.File, 50),
+            StorageTestBuilder.Node(Guid.NewGuid(), src, "notes.txt", @"M:\src\notes.txt", StorageNodeKind.File, 40),
+            StorageTestBuilder.Node(Guid.NewGuid(), root, "readme.md", @"M:\readme.md", StorageNodeKind.File, 30),
+            StorageTestBuilder.Node(Guid.NewGuid(), root, "stray.bin", @"M:\other\stray.bin", StorageNodeKind.File, 20),
+        ]);
+
+        foreach (string? search in new[] { null, "bin", "SRC", @"app\m", "ärger", "other", "nothing" })
+        {
+            foreach (int limit in new[] { 1, 3, 100 })
+            {
+                Guid[] expected =
+                [
+                    .. snapshot.DescendantsOf(root)
+                        .Where(node => node.Kind == StorageNodeKind.File)
+                        .Where(node => search is null ||
+                            node.Name.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+                            node.PhysicalPath.Contains(search, StringComparison.OrdinalIgnoreCase))
+                        .OrderByDescending(node => node.SizeBytes)
+                        .Take(limit)
+                        .Select(node => node.Id)
+                        .Order(),
+                ];
+
+                CollectionAssert.AreEqual(
+                    expected,
+                    snapshot.LargestFiles(root, limit, search).Select(node => node.Id).Order().ToArray(),
+                    $"search '{search}', limit {limit}");
+            }
+        }
+    }
+
+    [TestMethod]
     public void SiblingsThatShareANameAreRejectedInALargeTableToo()
     {
         // Large enough that the table orders its sibling groups in parallel.
