@@ -135,12 +135,12 @@ public static class NestedTreemapLayout
         var cells = new List<NestedTreemapCell>();
         var childCounts = new Dictionary<Guid, int>();
         var pending = new Queue<Frame>();
-        pending.Enqueue(new Frame(scope, null, null, 0, 0, 0, width, height));
+        pending.Enqueue(new Frame(scope, snapshot.Table.IndexOf(scopeId), null, null, 0, 0, 0, width, height));
 
         while (pending.Count > 0 && cells.Count < options.MaxCells)
         {
             Frame frame = pending.Dequeue();
-            List<Entry> entries = EntriesOf(snapshot, frame.Folder, options, unlistedName);
+            List<Entry> entries = EntriesOf(snapshot, frame.Folder, frame.Index, options, unlistedName);
             if (entries.Count == 0)
             {
                 continue;
@@ -183,7 +183,7 @@ public static class NestedTreemapLayout
                     frame.Depth < options.MaxDepth &&
                     cellWidth >= options.MinimumContainerWidth &&
                     cellHeight >= header + options.Padding + options.MinimumContentHeight &&
-                    HasSizedChildren(snapshot, entry.Target);
+                    HasSizedChildren(snapshot.Table, entry.Index);
                 Guid branch = frame.BranchId ?? entry.Id;
                 cells.Add(new NestedTreemapCell(
                     entry.Id,
@@ -211,6 +211,7 @@ public static class NestedTreemapLayout
                 {
                     pending.Enqueue(new Frame(
                         entry.Target,
+                        entry.Index,
                         entry.Id,
                         branch,
                         frame.Depth + 1,
@@ -241,39 +242,60 @@ public static class NestedTreemapLayout
     /// <summary>The ID of the cell that stands for bytes a folder reports but does not list.</summary>
     public static Guid UnlistedIdOf(Guid folderId) => Derive(folderId, UnlistedSalt);
 
+    /// <summary>
+    /// The cells a folder opens into. Works on the snapshot's table, so a folder of a thousand
+    /// children makes nodes only for the few it draws.
+    /// </summary>
     private static List<Entry> EntriesOf(
         StorageSnapshot snapshot,
         StorageNode folder,
+        int folderIndex,
         NestedTreemapOptions options,
         string unlistedName)
     {
-        List<StorageNode> sized = snapshot.ChildrenOf(folder.Id)
-            .Where(child => child.SizeBytes > 0)
-            .OrderByDescending(child => child.SizeBytes)
-            .ThenBy(child => child.Id)
-            .ToList();
+        NodeTable table = snapshot.Table;
+        var sized = new List<int>();
+        for (int position = table.FirstChild(folderIndex), end = table.ChildEnd(folderIndex); position < end; position++)
+        {
+            int child = table.ChildAt(position);
+            if (table[child].SizeBytes > 0)
+            {
+                sized.Add(child);
+            }
+        }
+
+        sized.Sort((left, right) =>
+        {
+            int bySize = table[right].SizeBytes.CompareTo(table[left].SizeBytes);
+            return bySize != 0 ? bySize : table[left].Id.CompareTo(table[right].Id);
+        });
 
         long rolledBytes = 0;
         int rolledItems = 0;
         if (options.OneRemainder)
         {
-            foreach (StorageNode rollup in sized.Where(child => child.IsRollup))
+            foreach (int rollup in sized)
             {
-                rolledBytes += rollup.SizeBytes;
-                rolledItems += rollup.ItemCount;
+                if (table[rollup].Has(NodeFlags.Rollup))
+                {
+                    rolledBytes += table[rollup].SizeBytes;
+                    rolledItems += table[rollup].ItemCount;
+                }
             }
 
-            sized.RemoveAll(child => child.IsRollup);
+            sized.RemoveAll(child => table[child].Has(NodeFlags.Rollup));
         }
 
         int keep = Math.Min(sized.Count, Math.Max(1, options.ItemsPerContainer));
         var entries = new List<Entry>(keep + 2);
+        string? folderPath = keep > 0 ? folder.PhysicalPath : null;
         long listed = 0;
         for (int index = 0; index < keep; index++)
         {
-            StorageNode child = sized[index];
+            StorageNode child = snapshot.ChildAt(sized[index], folderPath!);
             entries.Add(new Entry(
                 child.Id,
+                sized[index],
                 child.Kind == StorageNodeKind.Folder ? TreemapCellKind.Folder : TreemapCellKind.File,
                 child,
                 child.Name,
@@ -285,7 +307,7 @@ public static class NestedTreemapLayout
         long folded = 0;
         for (int index = keep; index < sized.Count; index++)
         {
-            folded += sized[index].SizeBytes;
+            folded += table[sized[index]].SizeBytes;
         }
 
         int foldedCount = sized.Count - keep;
@@ -296,7 +318,7 @@ public static class NestedTreemapLayout
             int items = foldedCount + rolledItems;
             if (other > 0 && (items > 0 || remainder >= folder.SizeBytes * options.MinimumUnlistedShare))
             {
-                entries.Add(new Entry(Derive(folder.Id, OverflowSalt), TreemapCellKind.Overflow, folder, "Other", other, items));
+                entries.Add(new Entry(Derive(folder.Id, OverflowSalt), -1, TreemapCellKind.Overflow, folder, "Other", other, items));
             }
 
             return entries;
@@ -306,6 +328,7 @@ public static class NestedTreemapLayout
         {
             entries.Add(new Entry(
                 Derive(folder.Id, OverflowSalt),
+                -1,
                 TreemapCellKind.Overflow,
                 folder,
                 $"+{foldedCount:N0} more",
@@ -317,6 +340,7 @@ public static class NestedTreemapLayout
         {
             entries.Add(new Entry(
                 Derive(folder.Id, UnlistedSalt),
+                -1,
                 TreemapCellKind.Unlisted,
                 folder,
                 unlistedName,
@@ -327,11 +351,11 @@ public static class NestedTreemapLayout
         return entries;
     }
 
-    private static bool HasSizedChildren(StorageSnapshot snapshot, StorageNode folder)
+    private static bool HasSizedChildren(NodeTable table, int folderIndex)
     {
-        foreach (StorageNode child in snapshot.ChildrenOf(folder.Id))
+        for (int position = table.FirstChild(folderIndex), end = table.ChildEnd(folderIndex); position < end; position++)
         {
-            if (child.SizeBytes > 0)
+            if (table[table.ChildAt(position)].SizeBytes > 0)
             {
                 return true;
             }
@@ -354,8 +378,10 @@ public static class NestedTreemapLayout
         return new Guid(bytes);
     }
 
+    /// <param name="Index">The node's index in the snapshot's table, or -1 for a synthetic cell.</param>
     private readonly record struct Entry(
         Guid Id,
+        int Index,
         TreemapCellKind Kind,
         StorageNode Target,
         string Name,
@@ -364,6 +390,7 @@ public static class NestedTreemapLayout
 
     private readonly record struct Frame(
         StorageNode Folder,
+        int Index,
         Guid? ParentCellId,
         Guid? BranchId,
         int Depth,

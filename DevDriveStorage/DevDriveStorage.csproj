@@ -21,4 +21,8 @@
   <ItemGroup>
     <EmbeddedResource Include="Scenarios\*.json" />
   </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="DevDriveStorage.Tests" />
+  </ItemGroup>
 </Project>
