@@ -1,4 +1,3 @@
-using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
@@ -156,7 +155,7 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
         query.Stop();
 
         ParallelVolumeScanner.Rollup(scanner.Folders);
-        ImmutableArray<StorageNode> nodes = Emit(root, correlateProviders: true, foldersOnly: false);
+        NodeTable nodes = Emit(root, correlateProviders: true, foldersOnly: false);
 
         long covered = root.Allocated;
         long totalBytes = Math.Max(referenceTotalBytes ?? covered, covered);
@@ -203,7 +202,6 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
             StorageSnapshot.CurrentSchemaVersion,
             request.ScenarioId,
             $"live-{Guid.NewGuid():N}",
-            root.StableId,
             DateTimeOffset.UtcNow,
             partial ? SnapshotCompletion.Partial : SnapshotCompletion.Complete,
             new ScanCoverage(
@@ -284,7 +282,7 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
         long? referenceTotalBytes)
     {
         ScanFolder root = scanner.Root!;
-        ImmutableArray<StorageNode> nodes = Emit(root, correlateProviders: false, foldersOnly: true);
+        NodeTable nodes = Emit(root, correlateProviders: false, foldersOnly: true);
         long covered = root.Allocated;
         (string[] denied, string[] excluded) = Classify(scanner.DeniedPaths);
 
@@ -292,7 +290,6 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
             StorageSnapshot.CurrentSchemaVersion,
             request.ScenarioId,
             $"live-partial-{root.StableId:N}",
-            root.StableId,
             DateTimeOffset.UtcNow,
             SnapshotCompletion.Partial,
             new ScanCoverage(
@@ -318,7 +315,7 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
     }
 
     /// <summary>
-    /// Freezes the tree into immutable nodes.
+    /// Freezes the tree into a sealed node table.
     /// <para>
     /// <paramref name="correlateProviders"/> is false for streamed partials: provider correlation is
     /// per-node string matching whose answer is decoration on a result that is about to be replaced.
@@ -331,19 +328,20 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
     /// wait for the finished scan.
     /// </para>
     /// </summary>
-    private ImmutableArray<StorageNode> Emit(ScanFolder root, bool correlateProviders, bool foldersOnly)
+    private NodeTable Emit(ScanFolder root, bool correlateProviders, bool foldersOnly)
     {
         // Level by level: every folder on a level builds its own child rows independently (hashing
-        // ids, joining paths and correlating providers is the per-node cost), then the kept
-        // subfolders form the next level. Paths only collide between siblings — a case-sensitive
-        // directory holding "a" and "A" — so de-duplication is per folder.
-        var nodes = ImmutableArray.CreateBuilder<StorageNode>();
-        nodes.Add(FolderNode(root, null, correlateProviders));
+        // ids, joining paths and correlating providers is the per-node cost), then the rows go into
+        // the table in order and the kept subfolders form the next level. Paths only collide between
+        // siblings — a case-sensitive directory holding "a" and "A" — so de-duplication is per folder.
+        var table = new NodeTable();
+        Append(table, FolderRow(root, null, correlateProviders), parent: -1);
 
         List<ScanFolder> level = [root];
+        List<int> levelIndices = [0];
         while (level.Count > 0)
         {
-            var emitted = new (List<StorageNode> Nodes, List<ScanFolder> Expand)[level.Count];
+            var emitted = new (List<NodeRow> Rows, List<ScanFolder> Expand)[level.Count];
             BackgroundWork.For(
                 0,
                 level.Count,
@@ -355,29 +353,62 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
                 },
                 static _ => { });
 
-            var next = new List<ScanFolder>();
-            foreach ((List<StorageNode> children, List<ScanFolder> expand) in emitted)
+            int total = table.Count;
+            foreach (var (rows, _) in emitted)
             {
-                nodes.AddRange(children);
-                next.AddRange(expand);
+                total += rows.Count;
+            }
+
+            table.Reserve(total);
+            var next = new List<ScanFolder>();
+            var nextIndices = new List<int>();
+            for (int i = 0; i < emitted.Length; i++)
+            {
+                int parent = levelIndices[i];
+                foreach (NodeRow row in emitted[i].Rows)
+                {
+                    int index = Append(table, row, parent);
+                    if (row.Expands)
+                    {
+                        nextIndices.Add(index);
+                    }
+                }
+
+                next.AddRange(emitted[i].Expand);
+                emitted[i] = default;
             }
 
             level = next;
+            levelIndices = nextIndices;
         }
 
-        return nodes.ToImmutable();
+        table.Seal(rootIndex: 0);
+        return table;
     }
 
-    private (List<StorageNode> Nodes, List<ScanFolder> Expand) EmitChildren(
+    private static int Append(NodeTable table, in NodeRow row, int parent) =>
+        table.Add(
+            row.Id,
+            parent,
+            row.Name,
+            row.Kind,
+            row.SizeBytes,
+            row.ItemCount,
+            row.ModifiedTicks,
+            row.IsMeasured,
+            row.LogicalBytes,
+            row.Provider,
+            row.OwnPath);
+
+    private (List<NodeRow> Rows, List<ScanFolder> Expand) EmitChildren(
         ScanFolder folder,
         bool correlateProviders,
         bool foldersOnly,
         List<Row> candidates,
         HashSet<string> seenPaths)
     {
-        var nodes = new List<StorageNode>();
+        var rows = new List<NodeRow>();
         var expand = new List<ScanFolder>();
-        Guid folderId = folder.StableId;
         CollectCandidates(folder, foldersOnly, candidates);
         seenPaths.Clear();
         TopFileList files = folder.Files;
@@ -398,7 +429,7 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
             {
                 if (seenPaths.Add(child.Path))
                 {
-                    nodes.Add(FolderNode(child, folderId, correlateProviders));
+                    rows.Add(FolderRow(child, folder.Path, correlateProviders));
                     expand.Add(child);
                 }
 
@@ -408,7 +439,7 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
             string path = Path.Combine(folder.Path, row.Leaf.Name);
             if (seenPaths.Add(path))
             {
-                nodes.Add(LeafNode(row.Leaf, folder.Path, path, folderId, correlateProviders));
+                rows.Add(LeafRow(row.Leaf, path, correlateProviders));
             }
         }
 
@@ -432,21 +463,22 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
             string aggregatePath = StorageNode.RollupPath(folder.Path, rolled);
             if (seenPaths.Add(aggregatePath))
             {
-                nodes.Add(new StorageNode(
+                rows.Add(new NodeRow(
                     StableId(aggregatePath),
-                    folderId,
                     $"\u2026 and {rolled:N0} more items",
                     aggregatePath,
                     StorageNodeKind.Folder,
                     allocated,
                     itemCount,
-                    ToTime(newest == 0 ? folder.NewestTicks : newest),
-                    null,
-                    logical > allocated ? logical : null));
+                    ToTime(newest == 0 ? folder.NewestTicks : newest).UtcTicks,
+                    IsMeasured: true,
+                    logical > allocated ? logical : null,
+                    Provider: null,
+                    Expands: false));
             }
         }
 
-        return (nodes, expand);
+        return (rows, expand);
     }
 
     private static void CollectCandidates(ScanFolder folder, bool foldersOnly, List<Row> candidates)
@@ -484,33 +516,27 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
         }
     }
 
-    private static StorageNode FolderNode(ScanFolder folder, Guid? parentId, bool correlateProviders)
+    /// <param name="parentPath">The parent folder's path, or <see langword="null"/> for the root.</param>
+    private static NodeRow FolderRow(ScanFolder folder, string? parentPath, bool correlateProviders)
     {
         DateTimeOffset modified = ToTime(folder.NewestTicks);
-        return new StorageNode(
+        return new NodeRow(
             folder.StableId,
-            parentId,
             folder.Name,
-            folder.Path,
+            parentPath is not null && NodeTable.IsJoined(folder.Path, parentPath, folder.Name) ? null : folder.Path,
             StorageNodeKind.Folder,
             folder.Allocated,
             folder.ItemCount,
-            modified,
+            modified.UtcTicks,
+            folder.RolledMeasured,
+            folder.Logical > folder.Allocated ? folder.Logical : null,
             correlateProviders
                 ? LiveProviderCorrelator.Correlate(folder.Name, folder.Path, StorageNodeKind.Folder, modified)
                 : null,
-            folder.Logical > folder.Allocated ? folder.Logical : null)
-        {
-            IsMeasured = folder.RolledMeasured,
-        };
+            Expands: true);
     }
 
-    private static StorageNode LeafNode(
-        ScanLeaf leaf,
-        string folderPath,
-        string path,
-        Guid parentId,
-        bool correlateProviders)
+    private static NodeRow LeafRow(ScanLeaf leaf, string path, bool correlateProviders)
     {
         // AllocationSize normally rounds *up* past the apparent length (cluster slack), so
         // allocated >= apparent is the common, uninteresting case and must stay hidden. Only
@@ -523,11 +549,21 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
             correlateProviders ? LiveProviderCorrelator.Correlate(leaf.Name, path, kind, modified) : null;
         long? logical = leaf.Logical > leaf.Allocated ? leaf.Logical : null;
 
-        // Files are nine in ten nodes, so a file keeps its folder's shared path instead of its own
-        // copy; `path` is only built here for the id and the provider match, then let go.
-        return string.IsNullOrWhiteSpace(leaf.Name)
-            ? new StorageNode(StableId(path), parentId, path, path, kind, leaf.Allocated, 0, modified, provider, logical)
-            : StorageNode.InFolder(StableId(path), parentId, leaf.Name, folderPath, kind, leaf.Allocated, modified, provider, logical);
+        // A named file keeps no path of its own: the table rebuilds it from its folder's. `path` is
+        // only built here for the id and the provider match, then let go.
+        bool named = !string.IsNullOrWhiteSpace(leaf.Name);
+        return new NodeRow(
+            StableId(path),
+            named ? leaf.Name : path,
+            named ? null : path,
+            kind,
+            leaf.Allocated,
+            0,
+            modified.UtcTicks,
+            IsMeasured: true,
+            logical,
+            provider,
+            Expands: false);
     }
 
     private static DateTimeOffset ToTime(long ticks) =>
@@ -610,6 +646,22 @@ public sealed class LiveStorageSnapshotSource : IStorageSnapshotSource
         string name = new DirectoryInfo(fullRoot).Name;
         return string.IsNullOrWhiteSpace(name) ? fullRoot : name;
     }
+
+    /// <summary>One node on its way into the table, built off the emitting thread.</summary>
+    /// <param name="OwnPath">The node's path when it is not its parent's path joined with its name.</param>
+    /// <param name="Expands">A walked folder whose children form the next level.</param>
+    private readonly record struct NodeRow(
+        Guid Id,
+        string Name,
+        string? OwnPath,
+        StorageNodeKind Kind,
+        long SizeBytes,
+        int ItemCount,
+        long ModifiedTicks,
+        bool IsMeasured,
+        long? LogicalBytes,
+        StorageProviderContext? Provider,
+        bool Expands);
 
     /// <summary>A candidate child row: either a walked folder or a leaf from a folder's lists.</summary>
     private readonly record struct Row(ScanFolder? Folder, ScanLeaf Leaf)

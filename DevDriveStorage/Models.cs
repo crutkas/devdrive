@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Collections.Immutable;
 
 namespace DevDriveStorage;
@@ -36,12 +37,16 @@ public sealed record StorageProviderContext(
     };
 }
 
+/// <summary>
+/// One file or folder. A <see cref="StorageSnapshot"/> does not hold these: it keeps its nodes in a
+/// table and makes a node when a caller asks for one, so two reads of the same node are equal but
+/// need not be the same instance.
+/// </summary>
 public sealed record StorageNode
 {
-    // A scan holds over a million nodes, so per-node bytes are the snapshot's footprint. Paths are
-    // the biggest of them: a file's full path is its folder's path plus its name, and storing it
-    // whole cost more memory than every other node field together. A file made by InFolder keeps a
-    // reference to its folder's path string (one shared instance per folder) and joins on read.
+    // A node's full path is usually its folder's path plus its name. A node made by InFolder keeps a
+    // reference to its folder's path string, one instance shared by all its siblings, and joins on
+    // read rather than carrying a copy.
     private readonly string _path;
     private readonly bool _pathIsFolder;
     private readonly long _modifiedUtcTicks;
@@ -131,6 +136,28 @@ public sealed record StorageNode
             modifiedAtUtc.UtcTicks, provider, logicalBytes);
     }
 
+    /// <summary>
+    /// One node of a snapshot, made when a caller asks for it. <paramref name="pathIsFolder"/> says
+    /// <paramref name="path"/> is the parent's path, shared by every sibling made with it.
+    /// </summary>
+    internal static StorageNode View(
+        Guid id,
+        Guid? parentId,
+        string name,
+        string path,
+        bool pathIsFolder,
+        StorageNodeKind kind,
+        long sizeBytes,
+        int itemCount,
+        long modifiedUtcTicks,
+        StorageProviderContext? provider,
+        long? logicalBytes,
+        bool isMeasured) =>
+        new(id, parentId, name, path, pathIsFolder, kind, sizeBytes, itemCount, modifiedUtcTicks, provider, logicalBytes)
+        {
+            IsMeasured = isMeasured,
+        };
+
     public Guid Id { get; init; }
 
     public Guid? ParentId { get; init; }
@@ -190,11 +217,7 @@ public sealed record StorageNode
     /// The scanner's roll-up of a folder's smallest items (<see cref="RollupPath"/>): one node standing for many items, not a
     /// folder on disk.
     /// </summary>
-    public bool IsRollup =>
-        Kind == StorageNodeKind.Folder &&
-        !_pathIsFolder &&
-        _path.EndsWith(RollupSuffix, StringComparison.Ordinal) &&
-        _path.Contains(RollupMarker, StringComparison.Ordinal);
+    public bool IsRollup => Kind == StorageNodeKind.Folder && !_pathIsFolder && IsRollupPath(_path);
 
     private const string RollupMarker = "\\\u2026 (";
     private const string RollupSuffix = " more items)";
@@ -202,6 +225,10 @@ public sealed record StorageNode
     /// <summary>The path of the node that rolls up <paramref name="items"/> of <paramref name="folderPath"/>'s smallest items.</summary>
     public static string RollupPath(string folderPath, int items) =>
         $"{folderPath.TrimEnd('\\')}{RollupMarker}{items}{RollupSuffix}";
+
+    internal static bool IsRollupPath(string path) =>
+        path.EndsWith(RollupSuffix, StringComparison.Ordinal) &&
+        path.Contains(RollupMarker, StringComparison.Ordinal);
 
     public string SizeDisplay => IsMeasured ? ByteSizeFormatter.Format(SizeBytes) : "—";
 
@@ -228,6 +255,32 @@ public sealed record StorageNode
         ?? (Kind == StorageNodeKind.Folder ? "Physical folder" : "Physical file");
 
     public string ModifiedDisplay => ModifiedAtUtc.ToString("MMM d · HH:mm");
+
+    /// <summary>
+    /// Equal when every fact the node states is equal. A path held whole and one held as the
+    /// parent's path plus the name are equal when they spell the same path, so a node a snapshot
+    /// hands out equals the node it was built from.
+    /// </summary>
+    public bool Equals(StorageNode? other) =>
+        other is not null &&
+        (ReferenceEquals(this, other) ||
+            (Id == other.Id &&
+            ParentId == other.ParentId &&
+            Kind == other.Kind &&
+            SizeBytes == other.SizeBytes &&
+            ItemCount == other.ItemCount &&
+            _modifiedUtcTicks == other._modifiedUtcTicks &&
+            IsMeasured == other.IsMeasured &&
+            string.Equals(Name, other.Name, StringComparison.Ordinal) &&
+            EqualityComparer<RareMetadata?>.Default.Equals(_rare, other._rare) &&
+            SamePath(other)));
+
+    public override int GetHashCode() =>
+        HashCode.Combine(Id, ParentId, Name, Kind, SizeBytes, ItemCount, _modifiedUtcTicks, IsMeasured);
+
+    private bool SamePath(StorageNode other) =>
+        (_pathIsFolder == other._pathIsFolder && string.Equals(_path, other._path, StringComparison.Ordinal)) ||
+        string.Equals(PhysicalPath, other.PhysicalPath, StringComparison.Ordinal);
 
     private sealed record RareMetadata(long? LogicalBytes, StorageProviderContext? Provider)
     {
@@ -386,12 +439,20 @@ public sealed record ScanStatistics(
     }
 }
 
+/// <summary>
+/// One scan's tree of nodes. The nodes live in a table of a few large arrays rather than an object
+/// each (see <see cref="NodeTable"/>), so a snapshot of millions of nodes is cheap to keep alive and
+/// cheap for a full garbage collection to step over. A <see cref="StorageNode"/> is made when a
+/// caller asks for one: a node read twice is equal both times, and a later scan of the same path
+/// gives it the same id.
+/// </summary>
 public sealed class StorageSnapshot
 {
     public const int CurrentSchemaVersion = 1;
 
-    private readonly Dictionary<Guid, StorageNode> _nodesById;
-    private readonly Dictionary<Guid, StorageNode[]> _childrenByParent;
+    private readonly NodeTable _table;
+    private readonly StorageNode _root;
+    private ParentPath? _lastParent;
     private IVolumeIndex? _index;
 
     /// <summary>
@@ -411,120 +472,43 @@ public sealed class StorageSnapshot
         SnapshotCompletion completion,
         ScanCoverage coverage,
         ImmutableArray<StorageNode> nodes)
+        : this(
+            schemaVersion,
+            scenarioId,
+            snapshotId,
+            capturedAtUtc,
+            completion,
+            coverage,
+            TableOf(schemaVersion, scenarioId, snapshotId, rootId, nodes))
     {
-        if (schemaVersion != CurrentSchemaVersion)
-        {
-            throw new StorageSnapshotValidationException(
-                $"Unsupported schema version {schemaVersion}; expected {CurrentSchemaVersion}.");
-        }
+    }
 
-        ArgumentException.ThrowIfNullOrWhiteSpace(scenarioId);
-        ArgumentException.ThrowIfNullOrWhiteSpace(snapshotId);
-        if (rootId == Guid.Empty)
+    /// <summary>A snapshot over a table its source has filled and sealed.</summary>
+    internal StorageSnapshot(
+        int schemaVersion,
+        string scenarioId,
+        string snapshotId,
+        DateTimeOffset capturedAtUtc,
+        SnapshotCompletion completion,
+        ScanCoverage coverage,
+        NodeTable table)
+    {
+        ValidateHeader(schemaVersion, scenarioId, snapshotId);
+        if (table.RootIndex < 0)
         {
-            throw new StorageSnapshotValidationException("A root ID is required.");
-        }
-
-        if (nodes.IsDefaultOrEmpty)
-        {
-            throw new StorageSnapshotValidationException("A snapshot must contain a root node.");
-        }
-
-        // A plain dictionary, sized up front: an immutable dictionary builds an AVL tree, which on a
-        // million-node volume was most of the cost of constructing the snapshot. Nothing mutates it.
-        var builder = new Dictionary<Guid, StorageNode>(nodes.Length);
-        foreach (StorageNode node in nodes)
-        {
-            if (!builder.TryAdd(node.Id, node))
-            {
-                throw new StorageSnapshotValidationException($"Duplicate node ID: {node.Id}.");
-            }
-        }
-
-        if (!builder.TryGetValue(rootId, out StorageNode? root) ||
-            root.ParentId is not null ||
-            root.Kind != StorageNodeKind.Folder)
-        {
-            throw new StorageSnapshotValidationException(
-                "The root must be a folder with no parent.");
-        }
-
-        foreach (StorageNode node in nodes.Where(node => node.Id != rootId))
-        {
-            if (node.ParentId is null ||
-                !builder.TryGetValue(node.ParentId.Value, out StorageNode? parent) ||
-                parent.Kind != StorageNodeKind.Folder)
-            {
-                throw new StorageSnapshotValidationException(
-                    $"Node '{node.PhysicalPath}' must have an existing folder parent.");
-            }
+            throw new ArgumentException("The node table has not been sealed.", nameof(table));
         }
 
         SchemaVersion = schemaVersion;
         ScenarioId = scenarioId;
         SnapshotId = snapshotId;
-        RootId = rootId;
         CapturedAtUtc = capturedAtUtc;
         Completion = completion;
         Coverage = coverage ?? throw new ArgumentNullException(nameof(coverage));
-        Nodes = nodes;
-        _nodesById = builder;
-        _childrenByParent = BuildChildIndex(nodes);
-    }
-
-    /// <summary>
-    /// Groups children under their parent once, in the display order <see cref="ChildrenOf"/>
-    /// promises. Without this every child lookup is a full scan of <see cref="Nodes"/>, which is
-    /// invisible on a small snapshot and quadratic on a real volume with a million nodes.
-    /// Two siblings with the same name would be the same path, so that is rejected here: checking
-    /// names per folder costs nothing, where checking whole paths built every path in the volume.
-    /// </summary>
-    private static Dictionary<Guid, StorageNode[]> BuildChildIndex(ImmutableArray<StorageNode> nodes)
-    {
-        var grouped = new Dictionary<Guid, List<StorageNode>>();
-        foreach (StorageNode node in nodes)
-        {
-            if (node.ParentId is not Guid parentId)
-            {
-                continue;
-            }
-
-            if (!grouped.TryGetValue(parentId, out List<StorageNode>? siblings))
-            {
-                siblings = [];
-                grouped[parentId] = siblings;
-            }
-
-            siblings.Add(node);
-        }
-
-        var index = new Dictionary<Guid, StorageNode[]>(grouped.Count);
-        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach ((Guid parentId, List<StorageNode> siblings) in grouped)
-        {
-            names.Clear();
-            foreach (StorageNode sibling in siblings)
-            {
-                if (!names.Add(sibling.Name))
-                {
-                    throw new StorageSnapshotValidationException(
-                        $"Duplicate physical path: {sibling.PhysicalPath}.");
-                }
-            }
-
-            siblings.Sort(static (left, right) =>
-            {
-                int byKind = (right.Kind == StorageNodeKind.Folder).CompareTo(
-                    left.Kind == StorageNodeKind.Folder);
-                return byKind != 0
-                    ? byKind
-                    : string.Compare(left.Name, right.Name, StringComparison.OrdinalIgnoreCase);
-            });
-
-            index[parentId] = [.. siblings];
-        }
-
-        return index;
+        _table = table;
+        RootId = table[table.RootIndex].Id;
+        _root = CreateView(table.RootIndex, null);
+        Nodes = new StorageNodeList(this, null);
     }
 
     public int SchemaVersion { get; }
@@ -541,53 +525,302 @@ public sealed class StorageSnapshot
 
     public ScanCoverage Coverage { get; }
 
-    public ImmutableArray<StorageNode> Nodes { get; }
+    /// <summary>
+    /// Every node, in the order the snapshot was built. Each is made as it is read; keep the ones
+    /// you need rather than materialising the whole list.
+    /// </summary>
+    public StorageNodeList Nodes { get; }
 
-    public StorageNode Root => _nodesById[RootId];
+    /// <summary>The root, which unlike other nodes is the same instance on every read.</summary>
+    public StorageNode Root => _root;
 
-    public StorageNode? Find(Guid id) => _nodesById.GetValueOrDefault(id);
+    internal NodeTable Table => _table;
 
-    public IReadOnlyList<StorageNode> ChildrenOf(Guid parentId) =>
-        _childrenByParent.GetValueOrDefault(parentId, []);
+    public StorageNode? Find(Guid id)
+    {
+        int index = _table.IndexOf(id);
+        return index < 0 ? null : NodeAt(index);
+    }
+
+    /// <summary>The direct children of <paramref name="parentId"/>: folders first, then by name.</summary>
+    public IReadOnlyList<StorageNode> ChildrenOf(Guid parentId)
+    {
+        int parent = _table.IndexOf(parentId);
+        if (parent < 0)
+        {
+            return [];
+        }
+
+        int first = _table.FirstChild(parent);
+        int end = _table.ChildEnd(parent);
+        if (first == end)
+        {
+            return [];
+        }
+
+        string parentPath = ParentPathOf(parent);
+        var children = new StorageNode[end - first];
+        for (int position = first; position < end; position++)
+        {
+            children[position - first] = CreateView(_table.ChildAt(position), parentPath);
+        }
+
+        return children;
+    }
 
     /// <summary>
     /// Walks the subtree under <paramref name="parentId"/>. Descending from the parent costs the
     /// size of the subtree; testing every node's ancestry instead costs the whole snapshot times
-    /// its depth, which on a real volume never finishes.
+    /// its depth, which on a real volume never finishes. The nodes are made as the list is read.
     /// </summary>
     public IReadOnlyList<StorageNode> DescendantsOf(Guid parentId)
     {
-        var result = new List<StorageNode>();
-        var pending = new Stack<Guid>();
-        pending.Push(parentId);
+        int parent = _table.IndexOf(parentId);
+        if (parent < 0)
+        {
+            return [];
+        }
 
+        // A folder's item count is the size of its subtree as the scan counted it, so the list is
+        // usually allocated once rather than grown by copying.
+        var result = new List<int>(Math.Min(_table.Count, _table[parent].ItemCount));
+        var pending = new Stack<int>();
+        pending.Push(parent);
         while (pending.Count > 0)
         {
-            foreach (StorageNode child in ChildrenOf(pending.Pop()))
+            int folder = pending.Pop();
+            for (int position = _table.FirstChild(folder), end = _table.ChildEnd(folder); position < end; position++)
             {
+                int child = _table.ChildAt(position);
                 result.Add(child);
-                if (child.Kind == StorageNodeKind.Folder)
+                if (_table[child].IsFolder)
                 {
-                    pending.Push(child.Id);
+                    pending.Push(child);
                 }
+            }
+        }
+
+        return new StorageNodeList(this, result);
+    }
+
+    public IReadOnlyList<StorageNode> AncestorsAndSelf(Guid id)
+    {
+        int index = _table.IndexOf(id);
+        if (index < 0)
+        {
+            return [];
+        }
+
+        var chain = new List<int>();
+        for (int current = index; current >= 0 && chain.Count <= _table.Count; current = _table[current].Parent)
+        {
+            chain.Add(current);
+        }
+
+        var result = new StorageNode[chain.Count];
+        string? parentPath = null;
+        for (int slot = 0; slot < result.Length; slot++)
+        {
+            int node = chain[chain.Count - 1 - slot];
+            result[slot] = node == _table.RootIndex ? _root : CreateView(node, parentPath);
+            if (slot < result.Length - 1)
+            {
+                parentPath = parentPath is null ? _table.PathOf(node) : _table.ChildPath(node, parentPath);
             }
         }
 
         return result;
     }
 
-    public IReadOnlyList<StorageNode> AncestorsAndSelf(Guid id)
+    /// <summary>
+    /// The <paramref name="limit"/> biggest files under <paramref name="scopeId"/>, keeping only those
+    /// whose path contains <paramref name="search"/> when one is given. One pass over the subtree's
+    /// table entries into a bounded min-heap, so only the files it returns are ever made, instead of
+    /// a node per file to keep a thousand of them.
+    /// </summary>
+    internal StorageNode[] LargestFiles(Guid scopeId, int limit, string? search)
     {
-        var result = new List<StorageNode>();
-        StorageNode? current = Find(id);
-        while (current is not null)
+        int scope = _table.IndexOf(scopeId);
+        if (scope < 0 || limit <= 0)
         {
-            result.Add(current);
-            current = current.ParentId is Guid parentId ? Find(parentId) : null;
+            return [];
         }
 
-        result.Reverse();
-        return result;
+        var heap = new PriorityQueue<int, long>(limit + 1);
+        var pending = new Stack<(int Folder, string? Path)>();
+        pending.Push((scope, search is null ? null : _table.PathOf(scope)));
+        char[] buffer = search is null ? [] : ArrayPool<char>.Shared.Rent(512);
+        try
+        {
+            while (pending.Count > 0)
+            {
+                (int folder, string? folderPath) = pending.Pop();
+
+                // The folder's path and a separator, once; each file's name is written after it.
+                int prefix = 0;
+                if (folderPath is not null)
+                {
+                    prefix = folderPath.Length + (NodeTable.IsSeparator(folderPath[^1]) ? 0 : 1);
+                    Fit(ref buffer, prefix, keep: 0);
+                    folderPath.CopyTo(buffer);
+                    if (prefix > folderPath.Length)
+                    {
+                        buffer[folderPath.Length] = '\\';
+                    }
+                }
+
+                for (int position = _table.FirstChild(folder), end = _table.ChildEnd(folder); position < end; position++)
+                {
+                    int child = _table.ChildAt(position);
+                    long size = _table[child].SizeBytes;
+                    bool isFolder = _table[child].IsFolder;
+                    if (search is not null)
+                    {
+                        string? own = _table.OwnPathOf(child);
+                        int length = 0;
+                        if (own is null)
+                        {
+                            Fit(ref buffer, prefix + _table.NameLength(child), keep: prefix);
+                            length = prefix + _table.WriteName(child, buffer.AsSpan(prefix));
+                        }
+
+                        if (isFolder)
+                        {
+                            pending.Push((child, own ?? new string(buffer, 0, length)));
+                            continue;
+                        }
+
+                        // A path ends with its name, so a name that matches is a path that matches.
+                        bool matches = own is null
+                            ? buffer.AsSpan(0, length).Contains(search, StringComparison.OrdinalIgnoreCase)
+                            : _table.NameOf(child).Contains(search, StringComparison.OrdinalIgnoreCase) ||
+                                own.Contains(search, StringComparison.OrdinalIgnoreCase);
+                        if (!matches)
+                        {
+                            continue;
+                        }
+                    }
+                    else if (isFolder)
+                    {
+                        pending.Push((child, null));
+                        continue;
+                    }
+
+                    if (heap.Count < limit)
+                    {
+                        heap.Enqueue(child, size);
+                    }
+                    else if (heap.TryPeek(out _, out long smallest) && size > smallest)
+                    {
+                        heap.DequeueEnqueue(child, size);
+                    }
+                }
+            }
+        }
+        finally
+        {
+            if (buffer.Length > 0)
+            {
+                ArrayPool<char>.Shared.Return(buffer);
+            }
+        }
+
+        return [.. heap.UnorderedItems.Select(item => NodeAt(item.Element))];
+    }
+
+    internal StorageNode NodeAt(int index) => index == _table.RootIndex ? _root : CreateView(index, null);
+
+    /// <summary>A child of a folder whose path the caller already has.</summary>
+    internal StorageNode ChildAt(int index, string parentPath) => CreateView(index, parentPath);
+
+    private static NodeTable TableOf(
+        int schemaVersion,
+        string scenarioId,
+        string snapshotId,
+        Guid rootId,
+        ImmutableArray<StorageNode> nodes)
+    {
+        ValidateHeader(schemaVersion, scenarioId, snapshotId);
+        if (rootId == Guid.Empty)
+        {
+            throw new StorageSnapshotValidationException("A root ID is required.");
+        }
+
+        if (nodes.IsDefaultOrEmpty)
+        {
+            throw new StorageSnapshotValidationException("A snapshot must contain a root node.");
+        }
+
+        return NodeTable.FromNodes(nodes, rootId);
+    }
+
+    private static void ValidateHeader(int schemaVersion, string scenarioId, string snapshotId)
+    {
+        if (schemaVersion != CurrentSchemaVersion)
+        {
+            throw new StorageSnapshotValidationException(
+                $"Unsupported schema version {schemaVersion}; expected {CurrentSchemaVersion}.");
+        }
+
+        ArgumentException.ThrowIfNullOrWhiteSpace(scenarioId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(snapshotId);
+    }
+
+    private static void Fit(ref char[] buffer, int length, int keep)
+    {
+        if (buffer.Length >= length)
+        {
+            return;
+        }
+
+        char[] larger = ArrayPool<char>.Shared.Rent(Math.Max(length, buffer.Length * 2));
+        buffer.AsSpan(0, keep).CopyTo(larger);
+        ArrayPool<char>.Shared.Return(buffer);
+        buffer = larger;
+    }
+
+    /// <param name="parentPath">The parent's path, when the caller has it; siblings made with one instance share it.</param>
+    private StorageNode CreateView(int index, string? parentPath)
+    {
+        ref readonly NodeRecord record = ref _table[index];
+        string? ownPath = _table.OwnPathOf(index);
+        return StorageNode.View(
+            record.Id,
+            record.Parent >= 0 ? _table[record.Parent].Id : null,
+            _table.NameOf(index),
+            ownPath ?? parentPath ?? ParentPathOf(record.Parent),
+            pathIsFolder: ownPath is null,
+            record.IsFolder ? StorageNodeKind.Folder : StorageNodeKind.File,
+            record.SizeBytes,
+            record.ItemCount,
+            record.ModifiedTicks,
+            _table.ProviderOf(index),
+            _table.LogicalOf(index),
+            record.Has(NodeFlags.Measured));
+    }
+
+    /// <summary>
+    /// A parent's path, remembering the last one: nodes are usually read a sibling run at a time, so
+    /// the run shares one path instead of each rebuilding it.
+    /// </summary>
+    private string ParentPathOf(int parent)
+    {
+        ParentPath? last = Volatile.Read(ref _lastParent);
+        if (last is not null && last.Index == parent)
+        {
+            return last.Path;
+        }
+
+        string path = _table.PathOf(parent);
+        Volatile.Write(ref _lastParent, new ParentPath(parent, path));
+        return path;
+    }
+
+    private sealed class ParentPath(int index, string path)
+    {
+        public int Index { get; } = index;
+
+        public string Path { get; } = path;
     }
 }
 
